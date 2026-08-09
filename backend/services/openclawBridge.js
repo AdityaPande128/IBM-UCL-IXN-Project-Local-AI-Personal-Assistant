@@ -79,7 +79,8 @@ async function executeSkill(decision, originalText, options = {}) {
         action: 'skill',
         skill: result.skill,
         skillVersion: result.version,
-        skillDurationMs: result.durationMs
+        skillDurationMs: result.durationMs,
+        ...(result.artifacts ? { artifacts: result.artifacts } : {})
     };
 }
 
@@ -227,6 +228,7 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
                 response: execution.response,
                 action: 'reused_existing_skill',
                 skill: result.skill,
+                ...(execution.artifacts ? { artifacts: execution.artifacts } : {}),
                 generation: { status: 'duplicate', attempts: result.attempts }
             };
         }
@@ -254,6 +256,7 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
         response: `I didn't have a skill for that, so I built one (${result.skill}) and verified it against ${result.testsPassed} test case(s).\n\n${execution.response}`,
         action: 'generated_and_executed',
         skill: result.skill,
+        ...(execution.artifacts ? { artifacts: execution.artifacts } : {}),
         generation: {
             status: 'registered',
             attempts: result.attempts,

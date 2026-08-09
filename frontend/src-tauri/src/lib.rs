@@ -30,6 +30,22 @@ fn socket_token(path: Option<String>) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+#[tauri::command]
+fn ensure_screen_access() -> bool {
+    unsafe {
+        if CGPreflightScreenCaptureAccess() {
+            return true;
+        }
+        CGRequestScreenCaptureAccess()
+    }
+}
+
 #[derive(Clone, Deserialize)]
 struct ServiceSpec {
     name: String,
@@ -195,7 +211,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Supervisor::default())
-        .invoke_handler(tauri::generate_handler![socket_token, start_services])
+        .invoke_handler(tauri::generate_handler![socket_token, start_services, ensure_screen_access])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {

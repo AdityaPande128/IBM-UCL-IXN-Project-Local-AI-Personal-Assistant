@@ -387,3 +387,22 @@ test('a browser that is not installed is refused', async () => {
     assert.match(refused.error, /not installed/);
     client.ws.close();
 });
+
+test('artifacts ride the intent result to the client', async () => {
+    intentQueue.reset();
+    const realExecute = openclawBridge.executeIntent;
+    openclawBridge.executeIntent = async () => ({
+        status: 'success', response: 'On your Desktop.', action: 'skill',
+        artifacts: { files: [{ path: '/tmp/x.png', name: 'x.png', bytes: 5 }] }
+    });
+    try {
+        const client = await authed();
+        client.send({ type: 'intent', text: 'take a screenshot' });
+        const result = await client.next(m => m.type === 'intent_result');
+        assert.strictEqual(result.status, 'success');
+        assert.strictEqual(result.artifacts.files[0].name, 'x.png');
+        client.ws.close();
+    } finally {
+        openclawBridge.executeIntent = realExecute;
+    }
+});
