@@ -106,6 +106,14 @@ RULES
    results: work from them. Clicking back to the inbox, the home page or the
    main list throws the search away and puts you where you started, which is the
    one move guaranteed to make no progress.
+3e. A site's search box finds the things the site sells or shows — artworks in a
+   collection, products in a shop, messages in a mailbox. The practicalities of
+   the PLACE itself — opening hours, closing time, ticket prices, the address,
+   how to get there — are not in that catalogue. They live behind the navigation
+   link that names visiting: "Visit", "Plan your visit", "Opening times",
+   "Admission", "Contact". When the goal asks when or where a place opens,
+   closes, costs or is, follow that link; the search box is the wrong door for
+   this one question.
 4. Fields marked as password, payment, otp or identity CANNOT be filled. Do not
    try. If the goal needs one, use give_up and say the user must do it.
 5. Never click a control that spends money, deletes something, sends a message
@@ -385,8 +393,64 @@ async function act(surface, decision, observation, context, options) {
             ? verdict.advisory.slice('mandated: '.length)
             : null;
 
-        const pressed = await surface.click(found.handle);
+        let pressed = await surface.click(found.handle);
         if (!pressed.ok) {
+            // Sites carry twin controls — a desktop nav link and its mobile
+            // duplicate — and the inert twin reads identically in the elements
+            // list, so the model cannot tell them apart and retries the dead
+            // one until the budget is gone. A same-named sibling that accepts
+            // the click is the one the user can see; try it once.
+            const sibling = (source.elements || []).find(el =>
+                el.ref !== decision.ref
+                && String(el.name || '').trim() === String(name).trim()
+                && !holdsText(el));
+            if (sibling) {
+                const twin = await surface.resolve(sibling.ref, anchorFor(sibling, source));
+                const twinVerdict = twin.handle && webPolicy.checkClick({
+                    element: twin.element || sibling, label: userLabel,
+                    destination: where, home: context.home, mandate
+                });
+                if (twinVerdict && twinVerdict.allowed) {
+                    pressed = await surface.click(twin.handle);
+                    if (pressed.ok) {
+                        return {
+                            ok: true,
+                            detail: `clicked "${name}" — the page carries two controls with that `
+                                + 'name and only the second accepts a click',
+                            mandated,
+                            anchor: anchorFor(twin.element || sibling, twin.observation || source),
+                            before: found.observation
+                        };
+                    }
+                }
+            }
+            // A link that will not take a click still says where it goes. Going
+            // there directly is what the click was for, and the navigation
+            // policy vets the address exactly as if the model had asked for it.
+            const href = element && element.href;
+            if (href && element.role === 'link') {
+                const verdict = webPolicy.checkNavigation({
+                    url: href,
+                    label: contextLabel,
+                    from: safeHost(source.url),
+                    allowPrivate: options.allowPrivate,
+                    grantedOnly: options.grantedOnly
+                });
+                if (verdict.allowed) {
+                    const landed = await surface.navigate(verdict.url);
+                    const arrival = checkArrival(landed.url, options);
+                    if (!arrival) {
+                        return {
+                            ok: true,
+                            detail: `followed "${name}" to ${landed.url} — the control itself `
+                                + 'would not take a click',
+                            anchor: { url: verdict.url },
+                            before: found.observation
+                        };
+                    }
+                }
+            }
+
             return { ok: false, stale: true, before: found.observation,
                 detail: `"${name}" is on the page but will not accept a click — `
                     + 'it is covered, moving, or not really active. Take a different route.' };

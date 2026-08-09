@@ -1,10 +1,12 @@
 const browser = require('./browser');
 const perception = require('./pagePerception');
+const consentBanners = require('./consentBanners');
 
 const TIER = 2;
 
 let page = null;
 let mode = browser.MODE.EPHEMERAL;
+let consentCheckedFor = null;
 
 async function ready() {
     return true;
@@ -24,6 +26,15 @@ const MAX_SELECTOR_LABEL = 60;
 const SELECTS = new Set(['checkbox', 'radio']);
 
 async function observe() {
+    if (page && page.url() !== consentCheckedFor) {
+        consentCheckedFor = page.url();
+        const banner = await consentBanners.dismiss(page).catch(() => ({ dismissed: false }));
+        if (banner.dismissed) {
+            console.log(`[DomSurface] Declined a consent banner ("${banner.label}").`);
+            await browser.settle(page);
+        }
+    }
+
     const seen = await perception.observe(page);
     if (!seen || !Array.isArray(seen.elements)) return seen;
 

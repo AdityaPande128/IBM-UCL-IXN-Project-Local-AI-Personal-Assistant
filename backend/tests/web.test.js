@@ -6,6 +6,7 @@ const fs = require('fs');
 
 const fixture = require('./webFixture');
 const browser = require('../services/browser');
+const consentBanners = require('../services/consentBanners');
 const perception = require('../services/pagePerception');
 const chromeSurface = require('../services/chromeSurface');
 const webPolicy = require('../security/webPolicy');
@@ -641,6 +642,128 @@ test('perception describes a page as named controls, and drops the furniture', a
         assert.strictEqual(observation.label.origins.includes(ORIGIN.WEB), true);
         assert.strictEqual(labels.isInstructionSafe(observation.label), false,
             'nothing read off a page is ever eligible to be an instruction');
+    } finally {
+        await browser.close();
+        await site.close();
+    }
+});
+
+test('a click that fails on an inert twin control lands on its sibling', async () => {
+    const observation = {
+        url: 'https://example.org/',
+        elements: [
+            { ref: 'e1', role: 'link', name: 'Opening hours' },
+            { ref: 'e2', role: 'link', name: 'Opening hours' },
+            { ref: 'e3', role: 'link', name: 'Contact' }
+        ]
+    };
+    const clicks = [];
+    const stub = {
+        resolve: async (ref) => ({
+            handle: ref,
+            element: observation.elements.find(el => el.ref === ref),
+            observation
+        }),
+        click: async (handle) => {
+            clicks.push(handle);
+            return handle === 'e1' ? { ok: false, why: 'intercepted' } : { ok: true };
+        }
+    };
+    const context = {
+        goal: 'find the opening hours',
+        userLabel: labels.label(ORIGIN.USER, SENSITIVITY.PERSONAL),
+        contextLabel: labels.label(ORIGIN.USER, SENSITIVITY.PERSONAL),
+        mandate: new Set()
+    };
+
+    const outcome = await webAgent.act(stub, { action: 'click', ref: 'e1' },
+        observation, context, {});
+    assert.strictEqual(outcome.ok, true, outcome.detail);
+    assert.deepStrictEqual(clicks, ['e1', 'e2'], 'the same-named sibling is tried once');
+    assert.match(outcome.detail, /two controls/);
+});
+
+test('an unclickable link with a destination is followed, not fought', async () => {
+    const observation = {
+        url: 'https://example.org/',
+        elements: [{ ref: 'e1', role: 'link', name: "WHAT'S ON",
+                     href: 'https://example.org/whats-on' }]
+    };
+    const stub = {
+        resolve: async (ref) => ({
+            handle: ref,
+            element: observation.elements.find(el => el.ref === ref),
+            observation
+        }),
+        click: async () => ({ ok: false, why: 'intercepted' }),
+        navigate: async (url) => ({ url, title: "What's on" })
+    };
+    const context = {
+        goal: 'what is on this month',
+        userLabel: labels.label(ORIGIN.USER, SENSITIVITY.PERSONAL),
+        contextLabel: labels.label(ORIGIN.USER, SENSITIVITY.PERSONAL),
+        mandate: new Set()
+    };
+
+    const outcome = await webAgent.act(stub, { action: 'click', ref: 'e1' },
+        observation, context, {});
+    assert.strictEqual(outcome.ok, true, outcome.detail);
+    assert.match(outcome.detail, /followed "WHAT'S ON"/);
+});
+
+test('a cookie banner with a decline option is declined, never accepted', async () => {
+    const site = await fixture.start();
+    try {
+        const page = await browser.current();
+        await page.setContent(`
+            <main><a href="/hours" id="covered">Opening hours</a></main>
+            <div class="cookie-notice" style="position:fixed;inset:0;background:rgba(0,0,0,.5)">
+              <p>We value your privacy. We use cookies to improve your visit.</p>
+              <button onclick="document.querySelector('.cookie-notice').remove()">Accept all</button>
+              <button onclick="document.querySelector('.cookie-notice').remove()">Reject all</button>
+            </div>`);
+
+        const outcome = await consentBanners.dismiss(page);
+        assert.strictEqual(outcome.dismissed, true);
+        assert.match(outcome.label, /reject/i, 'the decline control is the one pressed');
+        assert.strictEqual(await page.locator('.cookie-notice').count(), 0,
+            'the banner is gone and the page beneath is reachable');
+    } finally {
+        await browser.close();
+        await site.close();
+    }
+});
+
+test('a banner offering only acceptance is left alone', async () => {
+    const site = await fixture.start();
+    try {
+        const page = await browser.current();
+        await page.setContent(`
+            <div class="cookie-notice" style="position:fixed;bottom:0">
+              <p>This site uses cookies.</p>
+              <button>Accept all cookies</button>
+            </div>`);
+        const outcome = await consentBanners.dismiss(page);
+        assert.strictEqual(outcome.dismissed, false,
+            'accepting everything is never done on the user\'s behalf');
+    } finally {
+        await browser.close();
+        await site.close();
+    }
+});
+
+test('a dialog that is not about cookies is not touched', async () => {
+    const site = await fixture.start();
+    try {
+        const page = await browser.current();
+        await page.setContent(`
+            <div role="dialog" style="position:fixed;top:0">
+              <p>Join our newsletter for weekly offers.</p>
+              <button>Reject</button>
+            </div>`);
+        const outcome = await consentBanners.dismiss(page);
+        assert.strictEqual(outcome.dismissed, false,
+            'only consent surfaces are dismissed mechanically');
     } finally {
         await browser.close();
         await site.close();
