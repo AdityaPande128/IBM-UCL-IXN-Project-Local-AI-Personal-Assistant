@@ -1,26 +1,41 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AbilitiesData, DiagnosticsResult } from "../hooks/useWebSocket";
+import type {
+  AbilitiesData,
+  DiagnosticsResult,
+  SettingsResult,
+  SettingsUpdate,
+} from "../hooks/useWebSocket";
 
 interface AbilitiesViewProps {
   abilities: AbilitiesData | null;
   diagnostics: DiagnosticsResult | null;
+  settingsResult: SettingsResult | null;
   onRefresh: () => void;
   onRemoveSkill: (name: string) => void;
   onSaveDiagnostics: () => void;
+  onUpdateSettings: (update: SettingsUpdate) => void;
 }
+
+const POLICIES = ["pinned", "resident", "transient"];
 
 const DOOR_ACK_KEY = "jarvis-openclaw-door-acknowledged";
 
 export function AbilitiesView({
   abilities,
   diagnostics,
+  settingsResult,
   onRefresh,
   onRemoveSkill,
   onSaveDiagnostics,
+  onUpdateSettings,
 }: AbilitiesViewProps) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [doorOpen, setDoorOpen] = useState(false);
+  const [tierEdits, setTierEdits] = useState<
+    Record<string, { model?: string; policy?: string }>
+  >({});
+  const [browserEdit, setBrowserEdit] = useState<string | null>(null);
 
   useEffect(() => {
     onRefresh();
@@ -166,16 +181,119 @@ export function AbilitiesView({
 
       <section className="abilities-section">
         <h2>Models</h2>
+        {abilities.budget.budget_gb !== null && (
+          <div className="diag-note">
+            {abilities.budget.budget_gb} GB is budgeted for models
+            {abilities.budget.voice_reserve_gb !== null &&
+              `, with ${abilities.budget.voice_reserve_gb} GB reserved for voice`}
+            . Changes apply after a quick restart of the assistant's core.
+          </div>
+        )}
         <div className="build-list">
-          {abilities.tiers.map((tier) => (
-            <div key={tier.tier} className="build-row">
-              <span className="tier-name">{tier.tier}</span>
-              <span className="build-request">{tier.model}</span>
-              <span className="build-meta">{tier.policy}</span>
-            </div>
-          ))}
+          {abilities.tiers.map((tier) => {
+            const edit = tierEdits[tier.tier] ?? {};
+            const model = edit.model ?? tier.model;
+            const measured = abilities.budget.measured_gb[model];
+            return (
+              <div key={tier.tier} className="build-row">
+                <span className="tier-name">{tier.tier}</span>
+                <input
+                  className="settings-input"
+                  value={model}
+                  onChange={(e) =>
+                    setTierEdits((prev) => ({
+                      ...prev,
+                      [tier.tier]: { ...prev[tier.tier], model: e.target.value },
+                    }))
+                  }
+                />
+                <select
+                  className="settings-select"
+                  value={edit.policy ?? tier.policy}
+                  onChange={(e) =>
+                    setTierEdits((prev) => ({
+                      ...prev,
+                      [tier.tier]: { ...prev[tier.tier], policy: e.target.value },
+                    }))
+                  }
+                >
+                  {POLICIES.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                <span className="build-meta">
+                  {measured !== undefined ? `${measured.toFixed(1)} GB` : "unmeasured"}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </section>
+
+      <section className="abilities-section">
+        <h2>Linked browser</h2>
+        <div className="diag-note">
+          Web tasks that need your signed-in sessions drive this browser on your
+          desktop, visibly.
+        </div>
+        <select
+          className="settings-select"
+          value={browserEdit ?? abilities.browser.current}
+          onChange={(e) => setBrowserEdit(e.target.value)}
+        >
+          {abilities.browser.installed.map((name) => (
+            <option key={name} value={name}>
+              {name}
+            </option>
+          ))}
+        </select>
+      </section>
+
+      {(() => {
+        const changedTiers: SettingsUpdate["tiers"] = {};
+        for (const tier of abilities.tiers) {
+          const edit = tierEdits[tier.tier];
+          if (!edit) continue;
+          const changed: { model?: string; policy?: string } = {};
+          if (edit.model !== undefined && edit.model !== tier.model) changed.model = edit.model;
+          if (edit.policy !== undefined && edit.policy !== tier.policy) changed.policy = edit.policy;
+          if (Object.keys(changed).length) changedTiers[tier.tier] = changed;
+        }
+        const browserChanged =
+          browserEdit !== null && browserEdit !== abilities.browser.current;
+        const dirty = Object.keys(changedTiers).length > 0 || browserChanged;
+        if (!dirty && !settingsResult) return null;
+        return (
+          <section className="abilities-section">
+            <div className="diag-row">
+              {dirty && (
+                <button
+                  className="diag-button"
+                  disabled={settingsResult?.status === "applying"}
+                  onClick={() =>
+                    onUpdateSettings({
+                      ...(Object.keys(changedTiers).length ? { tiers: changedTiers } : {}),
+                      ...(browserChanged ? { desktop_browser: browserEdit! } : {}),
+                    })
+                  }
+                >
+                  {settingsResult?.status === "applying"
+                    ? "Applying…"
+                    : "Apply and restart the core"}
+                </button>
+              )}
+              {settingsResult?.status === "applied" && (
+                <span className="diag-path">Applied — the core is restarting…</span>
+              )}
+              {settingsResult?.status === "invalid" && (
+                <span className="diag-error">{settingsResult.error}</span>
+              )}
+            </div>
+          </section>
+        );
+      })()}
 
       <section className="abilities-section">
         <h2>Diagnostics</h2>
