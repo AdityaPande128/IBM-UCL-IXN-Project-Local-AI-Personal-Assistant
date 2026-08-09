@@ -16,7 +16,9 @@ verifySandboxInitialized();
 
 const config = configReader.readConfig();
 const PORT = process.env.PORT || config.ports.backend;
-const SOCKET_TOKEN = socketAuth.issue(config.security && config.security.socket_token_path);
+const SOCKET_TOKEN = socketAuth.issue(
+    process.env.JARVIS_SOCKET_TOKEN_PATH
+    || (config.security && config.security.socket_token_path));
 const AUTH_GRACE_MS = 5000;
 
 function syncOpenClawConfig() {
@@ -202,3 +204,5 @@ async function boot() {
 }
 
 boot();
+
+module.exports = { server };
