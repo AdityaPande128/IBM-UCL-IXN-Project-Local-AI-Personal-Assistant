@@ -522,6 +522,242 @@ body {
   word-break: break-word;
 }
 
+.abilities {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.abilities::-webkit-scrollbar {
+  width: 4px;
+}
+
+.abilities::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.abilities-section {
+  margin-bottom: 28px;
+}
+
+.abilities-section h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 10px;
+}
+
+.abilities-empty {
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.ability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.ability-card {
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ability-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ability-name {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.ability-chip {
+  font-size: 10px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 2px 8px;
+  color: var(--text-3);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.ability-chip--generated {
+  color: var(--teal);
+  background: rgba(79, 209, 197, 0.09);
+}
+
+.ability-chip--ok {
+  color: var(--green);
+  background: rgba(74, 222, 128, 0.09);
+}
+
+.ability-chip--bad {
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.09);
+}
+
+.ability-desc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.ability-caps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.ability-cap {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.ability-cap--net {
+  color: var(--amber);
+  border-color: rgba(245, 185, 90, 0.3);
+}
+
+.ability-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ability-remove,
+.ability-cancel {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.ability-remove:hover {
+  border-color: rgba(248, 113, 113, 0.4);
+  color: var(--red);
+}
+
+.ability-remove--armed {
+  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+.ability-rejected {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ability-rejected-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.build-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.build-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.build-request {
+  color: var(--text);
+  min-width: 0;
+}
+
+.build-meta {
+  color: var(--text-3);
+  margin-left: auto;
+  text-align: right;
+}
+
+.tier-name {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--teal);
+  min-width: 60px;
+}
+
+.door-button {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--amber);
+  background: rgba(245, 185, 90, 0.07);
+  border: 1px solid rgba(245, 185, 90, 0.3);
+  border-radius: 10px;
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.door-button:hover {
+  background: rgba(245, 185, 90, 0.12);
+}
+
+.door-card {
+  background: var(--elevated);
+  border: 1px solid rgba(245, 185, 90, 0.28);
+  border-radius: 16px;
+  padding: 18px;
+  max-width: 560px;
+  animation: rise 0.25s ease-out;
+}
+
+.door-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--amber);
+  margin-bottom: 8px;
+}
+
+.door-text {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-2);
+  margin-bottom: 14px;
+}
+
 .app-footer {
   padding: 12px 24px 20px;
 }
