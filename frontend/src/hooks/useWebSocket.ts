@@ -36,6 +36,12 @@ export interface AbilitySkill {
   capabilities: { exec?: boolean; network?: boolean; filesystem?: string[] };
 }
 
+export interface DiagnosticsResult {
+  status: "saving" | "saved" | "error";
+  path?: string;
+  error?: string;
+}
+
 export interface AbilitiesData {
   skills: AbilitySkill[];
   rejected: { skill: string; errors: string[] }[];
@@ -53,12 +59,14 @@ interface UseWebSocketReturn {
   activities: ActivityEvent[];
   proposal: Proposal | null;
   abilities: AbilitiesData | null;
+  diagnostics: DiagnosticsResult | null;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
   sendDecision: (id: string, decision: "yes" | "no") => void;
   sendAbort: () => void;
   requestAbilities: () => void;
   removeSkill: (name: string) => void;
+  saveDiagnostics: () => void;
 }
 
 import { config } from "../config";
@@ -114,6 +122,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [activeIntents, setActiveIntents] = useState<string[]>([]);
   const [abilities, setAbilities] = useState<AbilitiesData | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -201,6 +210,10 @@ export function useWebSocket(): UseWebSocketReturn {
         if (msg.type === "abilities_result") {
           const { type: _ignored, ...data } = msg;
           setAbilities(data as AbilitiesData);
+          return;
+        }
+        if (msg.type === "diagnostics_result") {
+          setDiagnostics({ status: msg.status, path: msg.path, error: msg.error });
           return;
         }
         if (msg.type === "skill_remove_result") {
@@ -295,6 +308,13 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const saveDiagnostics = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setDiagnostics({ status: "saving" });
+      wsRef.current.send(JSON.stringify({ type: "diagnostics" }));
+    }
+  }, []);
+
   return {
     connected,
     openclawConnected,
@@ -303,11 +323,13 @@ export function useWebSocket(): UseWebSocketReturn {
     activities,
     proposal,
     abilities,
+    diagnostics,
     sendBinary,
     sendIntent,
     sendDecision,
     sendAbort,
     requestAbilities,
     removeSkill,
+    saveDiagnostics,
   };
 }

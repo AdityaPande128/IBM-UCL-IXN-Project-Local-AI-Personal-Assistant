@@ -10,6 +10,10 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-wire-'));
 process.env.PORT = '18099';
 process.env.JARVIS_SOCKET_TOKEN_PATH = path.join(scratch, 'socket-token');
 process.env.INFERENCE_URL = 'http://127.0.0.1:18098';
+process.env.JARVIS_LOGS_DIR = path.join(scratch, 'logs');
+process.env.JARVIS_DIAGNOSTICS_DIR = path.join(scratch, 'diagnostics');
+fs.mkdirSync(process.env.JARVIS_LOGS_DIR, { recursive: true });
+fs.writeFileSync(path.join(process.env.JARVIS_LOGS_DIR, 'backend.log'), 'boot ok\n');
 
 const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
@@ -312,4 +316,22 @@ test('a generated skill can be removed and vanishes from the registry', async ()
         fs.rmSync(dir, { recursive: true, force: true });
         skillRegistry.reload();
     }
+});
+
+test('a diagnostics bundle collects logs, config and recent runs — never the token', async () => {
+    const { execFileSync } = require('child_process');
+    const client = await authed();
+    client.send({ type: 'diagnostics' });
+    const result = await client.next(m => m.type === 'diagnostics_result');
+    assert.strictEqual(result.status, 'saved');
+    assert.ok(fs.existsSync(result.path));
+    assert.ok(result.path.startsWith(process.env.JARVIS_DIAGNOSTICS_DIR));
+
+    const listing = execFileSync('unzip', ['-l', result.path]).toString();
+    assert.match(listing, /system\.txt/);
+    assert.match(listing, /config\.json/);
+    assert.match(listing, /recent-plans\.json/);
+    assert.match(listing, /logs\/backend\.log/);
+    assert.strictEqual(listing.includes('socket-token'), false);
+    client.ws.close();
 });

@@ -36,6 +36,8 @@ struct ServiceSpec {
     argv: Vec<String>,
     cwd: String,
     port: u16,
+    #[serde(default)]
+    log_max_bytes: Option<u64>,
 }
 
 #[derive(Default)]
@@ -49,6 +51,16 @@ fn logs_dir() -> PathBuf {
     let dir = home().join(".jarvis").join("logs");
     let _ = fs::create_dir_all(&dir);
     dir
+}
+
+fn rotate_log(path: &PathBuf, max_bytes: u64) {
+    if let Ok(meta) = fs::metadata(path) {
+        if meta.len() > max_bytes {
+            let mut rolled = path.clone().into_os_string();
+            rolled.push(".1");
+            let _ = fs::rename(path, rolled);
+        }
+    }
 }
 
 fn project_root() -> PathBuf {
@@ -100,6 +112,7 @@ fn supervise(
         };
 
         let log_path = logs_dir().join(format!("{}.log", spec.name));
+        rotate_log(&log_path, spec.log_max_bytes.unwrap_or(5 * 1024 * 1024));
         let spawned = fs::OpenOptions::new()
             .create(true)
             .append(true)
