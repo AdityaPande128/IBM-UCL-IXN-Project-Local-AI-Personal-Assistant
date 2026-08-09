@@ -1,0 +1,31 @@
+---
+name: jarvis-browse
+description: "Browse the web or the user's signed-in mail by stating a goal. This tool does the browsing itself — searching, clicking, reading, writing — and returns the answer or a report of what it did. Use it for every mail and web task instead of the browser tool."
+---
+
+# jarvis-browse
+
+State the whole task as one goal and run it with `exec`:
+
+```bash
+node %RUNNER% --goal "find out whether sandhya replied to my last email"
+```
+
+Optionally say where to start:
+
+```bash
+node %RUNNER% --goal "what time does the British Library close today" --url "https://www.bl.uk"
+```
+
+The output is the answer, grounded in the pages it actually read. Quote it —
+the dates, addresses and wording in it come from the real pages.
+
+## Rules
+
+- Pass the user's own words in the goal when the task is saying something to
+  someone — their words are what authorises sending.
+- One call per task. The tool follows links, searches and fills forms itself;
+  do not break the task into page-level steps.
+- If it reports a refusal (a sign-in page, a password field, something outside
+  what the user asked), relay that and stop. Do not work around it with any
+  other tool.

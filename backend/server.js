@@ -14,6 +14,7 @@ const skillRegistry = require('./services/skillRegistry');
 const skillPins = require('./services/skillPins');
 const procedureStore = require('./services/procedureStore');
 const generationLog = require('./services/generationLog');
+const webAgent = require('./services/webAgent');
 const diagnostics = require('./services/diagnostics');
 const settings = require('./services/settings');
 const configReader = require('./utils/configReader');
@@ -144,6 +145,28 @@ wss.on('connection', (ws) => {
 
                 broadcast({ type: 'state_sync', skill: result.skill || null,
                             status: result.status }, ws);
+                return;
+            }
+
+            // The browser lane alone, without Jarvis's router or planner: another
+            // agent (the evaluation runs OpenClaw this way) brings its own loop
+            // and borrows only the execution surface. Same token, same queue,
+            // same web policy — only the planning brain is the caller's.
+            if (parsed.type === 'browse' && parsed.goal) {
+                const job = intentQueue.submit(() =>
+                    withActivity(ws, () =>
+                        webAgent.browse(String(parsed.goal),
+                            parsed.url ? { url: String(parsed.url) } : {})));
+                ws.send(JSON.stringify({ type: 'browse_accepted', id: job.id }));
+
+                const result = await job.result;
+                ws.send(JSON.stringify({
+                    type: 'browse_result', id: job.id,
+                    status: result.status,
+                    answer: result.answer ?? null,
+                    url: result.url ?? null,
+                    ...(result.reason ? { reason: result.reason } : {})
+                }));
                 return;
             }
 

@@ -409,6 +409,62 @@ test('the mail provider is editable and unknown providers are refused', async ()
     client.ws.close();
 });
 
+test('another agent can borrow the browser lane over the wire', async () => {
+    intentQueue.reset();
+    const webAgent = require('../services/webAgent');
+    const realBrowse = webAgent.browse;
+    webAgent.browse = async (goal, options) => ({
+        status: 'success', answer: `went after: ${goal}`,
+        url: options.url || 'https://example.org', passages: []
+    });
+    try {
+        const client = await authed();
+        client.send({ type: 'browse', goal: 'find the opening hours', url: 'https://www.bl.uk' });
+        const accepted = await client.next(m => m.type === 'browse_accepted');
+        assert.ok(accepted.id);
+        const result = await client.next(m => m.type === 'browse_result');
+        assert.strictEqual(result.status, 'success');
+        assert.match(result.answer, /opening hours/);
+        assert.strictEqual(result.url, 'https://www.bl.uk');
+        client.ws.close();
+    } finally {
+        webAgent.browse = realBrowse;
+    }
+});
+
+test('a browse that stops carries its reason back over the wire', async () => {
+    intentQueue.reset();
+    const webAgent = require('../services/webAgent');
+    const realBrowse = webAgent.browse;
+    webAgent.browse = async () => ({
+        status: 'refused', reason: 'stopped at a password field'
+    });
+    try {
+        const client = await authed();
+        client.send({ type: 'browse', goal: 'log into my bank' });
+        const result = await client.next(m => m.type === 'browse_result');
+        assert.strictEqual(result.status, 'refused');
+        assert.match(result.reason, /password field/);
+        assert.strictEqual(result.answer, null);
+        client.ws.close();
+    } finally {
+        webAgent.browse = realBrowse;
+    }
+});
+
+test('the jarvis-browse installer stamps this checkout\'s runner path', () => {
+    const { execFileSync } = require('child_process');
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-skills-'));
+    try {
+        execFileSync('node', [path.join(__dirname, '..', 'eval', 'openclaw', 'install.js'), target]);
+        const written = fs.readFileSync(path.join(target, 'jarvis-browse', 'SKILL.md'), 'utf8');
+        assert.ok(written.includes(path.join('eval', 'openclaw', 'jarvis-browse', 'run.js')));
+        assert.strictEqual(written.includes('%RUNNER%'), false);
+    } finally {
+        fs.rmSync(target, { recursive: true, force: true });
+    }
+});
+
 test('artifacts ride the intent result to the client', async () => {
     intentQueue.reset();
     const realExecute = openclawBridge.executeIntent;
