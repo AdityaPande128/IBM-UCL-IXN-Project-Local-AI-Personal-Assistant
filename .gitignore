@@ -10,4 +10,6 @@ backend/native/jarvis-ax
 backend/data/skill-pins.json
 backend/eval/skillgen/results/
 .claude/
-docs/*.pdf
+docs/
+
+backend/eval/skillgen/results/
