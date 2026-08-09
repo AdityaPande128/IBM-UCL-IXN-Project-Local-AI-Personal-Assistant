@@ -95,5 +95,21 @@
     "timeout_ms": 10000,
     "corpus_min_score": 0.56,
     "corpus_margin": 0.06
+  },
+  "services": {
+    "backend": {
+      "argv": [
+        "node",
+        "server.js"
+      ],
+      "cwd": "backend"
+    },
+    "inference": {
+      "argv": [
+        "python3",
+        "server.py"
+      ],
+      "cwd": "backend/inference"
+    }
   }
 }

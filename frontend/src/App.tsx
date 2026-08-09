@@ -5,6 +5,7 @@ import { ApprovalCard } from "./components/ApprovalCard";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
+import { useServices, serviceBanner } from "./hooks/useServices";
 import "./index.css";
 
 function App() {
@@ -21,6 +22,8 @@ function App() {
     sendAbort,
   } = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
+  const services = useServices();
+  const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
 
   const handleStart = async () => {
@@ -60,6 +63,8 @@ function App() {
           )}
         </div>
       </header>
+
+      {banner && <div className="service-banner">{banner}</div>}
 
       <div className="app-body">
         <main className="app-main">
