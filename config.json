@@ -98,8 +98,8 @@
     "procedure_top_k": 2,
     "procedure_min_score": 0.5,
     "timeout_ms": 10000,
-    "corpus_min_score": 0.56,
-    "corpus_margin": 0.06
+    "corpus_min_score": 0.62,
+    "corpus_margin": 0.05
   },
   "services": {
     "backend": {
