@@ -693,6 +693,26 @@ async def chat_completions(req: dict):
         return {"error": str(e)}
 
 
+MIN_SPEECH_SECONDS = 0.3
+MIN_SPEECH_PEAK = 0.02
+NO_SPEECH_THRESHOLD = 0.6
+
+
+def _wav_stats(path):
+    """Duration and peak amplitude of a 16-bit PCM wav; peak is None if unparseable."""
+    import wave
+    with wave.open(path, "rb") as w:
+        frames = w.getnframes()
+        rate = w.getframerate() or 16000
+        width = w.getsampwidth()
+        data = w.readframes(frames)
+    duration = frames / float(rate)
+    if width != 2 or frames == 0:
+        return duration, None
+    samples = np.abs(np.frombuffer(data, dtype=np.int16).astype(np.float32)) / 32768.0
+    return duration, float(samples.max()) if samples.size else 0.0
+
+
 @app.post("/stt")
 async def speech_to_text(audio: UploadFile = File(...)):
     if not stt_loaded:
@@ -707,11 +727,36 @@ async def speech_to_text(audio: UploadFile = File(...)):
         tmp_path = tmp.name
 
     def _transcribe():
-        return mlx_whisper.transcribe(tmp_path, path_or_hf_repo=STT_MODEL, language="en")
+        return mlx_whisper.transcribe(
+            tmp_path, path_or_hf_repo=STT_MODEL, language="en",
+            condition_on_previous_text=False)
 
     try:
+        try:
+            duration, peak = _wav_stats(tmp_path)
+        except Exception:
+            duration, peak = None, None
+
+        if duration is not None and duration < MIN_SPEECH_SECONDS:
+            print(f"[STT] Rejected capture: {duration:.2f}s is too short to be speech.")
+            return {"text": ""}
+        if peak is not None and peak < MIN_SPEECH_PEAK:
+            print(f"[STT] Rejected capture: peak {peak:.4f} is silence.")
+            return {"text": ""}
+
         result = await _run_fast(_transcribe)
-        transcript = result.get("text", "").strip()
+
+        segments = result.get("segments") or []
+        if segments:
+            kept = [s for s in segments
+                    if s.get("no_speech_prob", 0.0) <= NO_SPEECH_THRESHOLD]
+            dropped = len(segments) - len(kept)
+            if dropped:
+                print(f"[STT] Dropped {dropped} segment(s) whisper marked as non-speech.")
+            transcript = " ".join(s.get("text", "").strip() for s in kept).strip()
+        else:
+            transcript = result.get("text", "").strip()
+
         print(f"[STT] Transcribed: \"{transcript}\"")
         return {"text": transcript}
     finally:
