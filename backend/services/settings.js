@@ -2,6 +2,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const configReader = require('../utils/configReader');
+const mailProvider = require('./mailProvider');
 
 const POLICIES = ['pinned', 'resident', 'transient'];
 const KNOWN_BROWSERS = ['Google Chrome', 'Brave Browser', 'Microsoft Edge', 'Chromium'];
@@ -20,6 +21,11 @@ function describe(config) {
     const models = config.models || {};
     return {
         browser: { current, installed: installedBrowsers(current) },
+        mail: {
+            current: mailProvider.current(config).name,
+            available: Object.entries(mailProvider.PROVIDERS)
+                .map(([name, spec]) => ({ name, label: spec.label }))
+        },
         budget: {
             budget_gb: models.budget_gb ?? null,
             voice_reserve_gb: models.voice_reserve_gb ?? null,
@@ -102,6 +108,10 @@ function validate(config, update) {
         }
     }
 
+    if (update.mail_provider !== undefined && !mailProvider.PROVIDERS[update.mail_provider]) {
+        return `"${update.mail_provider}" is not a supported mail provider.`;
+    }
+
     return null;
 }
 
@@ -119,6 +129,10 @@ function apply(update) {
     if (update.desktop_browser !== undefined) {
         if (!config.web) config.web = {};
         config.web.desktop_browser = update.desktop_browser;
+    }
+    if (update.mail_provider !== undefined) {
+        if (!config.mail) config.mail = {};
+        config.mail.provider = update.mail_provider;
     }
 
     fs.writeFileSync(configReader.configPath(), JSON.stringify(config, null, 2) + '\n');

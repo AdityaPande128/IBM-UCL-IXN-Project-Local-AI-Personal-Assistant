@@ -5,6 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const capabilityGraph = require('../services/capabilityGraph');
+const mailProvider = require('../services/mailProvider');
 const planner = require('../services/planner');
 const planExecutor = require('../services/planExecutor');
 const traceStore = require('../services/traceStore');
@@ -733,4 +734,22 @@ test('a trace summary reports shape rather than content', () => {
     assert.strictEqual(
         traceStore.summarise('x'.repeat(traceStore.MAX_SUMMARY_CHARS + 50)).length,
         traceStore.MAX_SUMMARY_CHARS + 1);
+});
+
+test('the mail provider maps names to mailbox addresses with a safe default', () => {
+    assert.strictEqual(mailProvider.current({}).url, 'https://mail.google.com');
+    assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook' } }).url,
+        'https://outlook.live.com/mail');
+    assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook-work' } }).url,
+        'https://outlook.office.com/mail');
+    assert.strictEqual(mailProvider.current({ mail: { provider: 'compuserve' } }).name, 'gmail');
+});
+
+test('the plan prompt steers mail at the configured provider, not a hardcoded one', () => {
+    const prompt = planner.buildPlanPrompt([]);
+    const configured = mailProvider.current(
+        JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH
+            || path.join(__dirname, '..', '..', 'config.json'), 'utf8'))).url;
+    assert.ok(prompt.includes(configured), 'the configured mailbox address must appear');
+    assert.ok(!prompt.includes('${MAIL_URL}'), 'the template token must be substituted');
 });

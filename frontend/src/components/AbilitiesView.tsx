@@ -36,6 +36,7 @@ export function AbilitiesView({
     Record<string, { model?: string; policy?: string }>
   >({});
   const [browserEdit, setBrowserEdit] = useState<string | null>(null);
+  const [mailEdit, setMailEdit] = useState<string | null>(null);
 
   useEffect(() => {
     onRefresh();
@@ -251,6 +252,25 @@ export function AbilitiesView({
         </select>
       </section>
 
+      <section className="abilities-section">
+        <h2>Mail provider</h2>
+        <div className="diag-note">
+          Mail tasks start at this mailbox. The linked browser must be signed in
+          to it.
+        </div>
+        <select
+          className="settings-select"
+          value={mailEdit ?? abilities.mail.current}
+          onChange={(e) => setMailEdit(e.target.value)}
+        >
+          {abilities.mail.available.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.label}
+            </option>
+          ))}
+        </select>
+      </section>
+
       {(() => {
         const changedTiers: SettingsUpdate["tiers"] = {};
         for (const tier of abilities.tiers) {
@@ -263,7 +283,9 @@ export function AbilitiesView({
         }
         const browserChanged =
           browserEdit !== null && browserEdit !== abilities.browser.current;
-        const dirty = Object.keys(changedTiers).length > 0 || browserChanged;
+        const mailChanged = mailEdit !== null && mailEdit !== abilities.mail.current;
+        const dirty =
+          Object.keys(changedTiers).length > 0 || browserChanged || mailChanged;
         if (!dirty && !settingsResult) return null;
         return (
           <section className="abilities-section">
@@ -276,6 +298,7 @@ export function AbilitiesView({
                     onUpdateSettings({
                       ...(Object.keys(changedTiers).length ? { tiers: changedTiers } : {}),
                       ...(browserChanged ? { desktop_browser: browserEdit! } : {}),
+                      ...(mailChanged ? { mail_provider: mailEdit! } : {}),
                     })
                   }
                 >

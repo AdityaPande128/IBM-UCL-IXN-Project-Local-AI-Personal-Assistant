@@ -56,6 +56,7 @@ export interface AbilitiesData {
   tiers: { tier: string; model: string; policy: string }[];
   openclaw: { connected: boolean; dashboard: string };
   browser: { current: string; installed: string[] };
+  mail: { current: string; available: { name: string; label: string }[] };
   budget: {
     budget_gb: number | null;
     voice_reserve_gb: number | null;
@@ -66,6 +67,7 @@ export interface AbilitiesData {
 export interface SettingsUpdate {
   tiers?: Record<string, { model?: string; policy?: string }>;
   desktop_browser?: string;
+  mail_provider?: string;
 }
 
 export interface SettingsResult {

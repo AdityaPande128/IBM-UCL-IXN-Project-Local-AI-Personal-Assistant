@@ -195,7 +195,8 @@ wss.on('connection', (ws) => {
             if (parsed.type === 'settings_update') {
                 const result = settings.apply({
                     tiers: parsed.tiers,
-                    desktop_browser: parsed.desktop_browser
+                    desktop_browser: parsed.desktop_browser,
+                    mail_provider: parsed.mail_provider
                 });
                 if (result.status === 'applied') {
                     activityBus.publish('daemon', 'settings_applied', {});

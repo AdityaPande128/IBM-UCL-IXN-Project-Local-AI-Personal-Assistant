@@ -388,6 +388,26 @@ test('a browser that is not installed is refused', async () => {
     client.ws.close();
 });
 
+test('the mail provider is editable and unknown providers are refused', async () => {
+    const client = await authed();
+    client.send({ type: 'abilities' });
+    const abilities = await client.next(m => m.type === 'abilities_result');
+    assert.strictEqual(abilities.mail.current, 'gmail');
+    assert.ok(abilities.mail.available.some(p => p.name === 'outlook'));
+
+    client.send({ type: 'settings_update', mail_provider: 'hotmail' });
+    const refused = await client.next(m => m.type === 'settings_update_result');
+    assert.strictEqual(refused.status, 'invalid');
+    assert.match(refused.error, /not a supported mail provider/);
+
+    client.send({ type: 'settings_update', mail_provider: 'outlook' });
+    const applied = await client.next(m => m.type === 'settings_update_result');
+    assert.strictEqual(applied.status, 'applied');
+    const written = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
+    assert.strictEqual(written.mail.provider, 'outlook');
+    client.ws.close();
+});
+
 test('artifacts ride the intent result to the client', async () => {
     intentQueue.reset();
     const realExecute = openclawBridge.executeIntent;
