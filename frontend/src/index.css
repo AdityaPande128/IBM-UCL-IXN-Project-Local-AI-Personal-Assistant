@@ -147,6 +147,15 @@ body {
   background: rgba(79, 209, 197, 0.08);
 }
 
+.service-banner {
+  padding: 8px 20px;
+  font-size: 12.5px;
+  color: var(--amber);
+  background: rgba(245, 185, 90, 0.08);
+  border-bottom: 1px solid rgba(245, 185, 90, 0.2);
+  animation: rise 0.25s ease-out;
+}
+
 .app-body {
   flex: 1;
   display: flex;

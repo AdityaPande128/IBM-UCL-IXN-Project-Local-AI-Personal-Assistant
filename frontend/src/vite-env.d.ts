@@ -11,4 +11,5 @@ declare const __JARVIS_CONFIG__: {
     enforce_capabilities?: string;
     socket_token_path?: string;
   };
+  services?: Record<string, { argv: string[]; cwd: string }>;
 };
