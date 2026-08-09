@@ -9,4 +9,4 @@ target/
 backend/native/jarvis-ax
 backend/data/skill-pins.json
 .claude/
-docs/*.pdf
+docs/

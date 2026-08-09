@@ -1,0 +1,100 @@
+{
+  "ran_at": "2026-08-09T17:12:54.656Z",
+  "entries": 10,
+  "proposed": 10,
+  "installed": 7,
+  "correct": 7,
+  "damaged": 0,
+  "results": [
+    {
+      "id": "reverse-lines",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 28,
+      "failure": null
+    },
+    {
+      "id": "tabs-to-spaces",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 24,
+      "failure": null
+    },
+    {
+      "id": "number-lines",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 2,
+      "seconds": 51,
+      "failure": null
+    },
+    {
+      "id": "merge-txt",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 3,
+      "seconds": 111,
+      "failure": null
+    },
+    {
+      "id": "crlf-to-lf",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 26,
+      "failure": null
+    },
+    {
+      "id": "count-long-words",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 2,
+      "seconds": 44,
+      "failure": null
+    },
+    {
+      "id": "csv-columns",
+      "proposed": true,
+      "installed": false,
+      "correct": false,
+      "attempts": 3,
+      "seconds": 74,
+      "failure": "1/1 case(s) failed: exit code 3, expected 0"
+    },
+    {
+      "id": "sort-csv",
+      "proposed": true,
+      "installed": false,
+      "correct": false,
+      "attempts": 3,
+      "seconds": 105,
+      "failure": "1/1 case(s) failed: stdout did not contain \"Sorting the CSV file by the second column numerically and writing the sorted rows to output.csv.\" (got: \"Sorted the CSV file by the second column numerically and wrote the sorted rows to output.csv.\")"
+    },
+    {
+      "id": "count-empty-lines",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 20,
+      "failure": null
+    },
+    {
+      "id": "longest-word",
+      "proposed": true,
+      "installed": false,
+      "correct": false,
+      "attempts": 3,
+      "seconds": 70,
+      "failure": "1/1 case(s) failed: stdout did not contain \"Longest word: long\" (got: \"Longest word: simple\")"
+    }
+  ]
+}

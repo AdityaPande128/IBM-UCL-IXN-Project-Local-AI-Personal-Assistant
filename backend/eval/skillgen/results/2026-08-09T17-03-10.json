@@ -1,0 +1,100 @@
+{
+  "ran_at": "2026-08-09T17:03:10.080Z",
+  "entries": 10,
+  "proposed": 3,
+  "installed": 3,
+  "correct": 3,
+  "damaged": 0,
+  "results": [
+    {
+      "id": "reverse-lines",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 26,
+      "failure": null
+    },
+    {
+      "id": "tabs-to-spaces",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 24,
+      "failure": null
+    },
+    {
+      "id": "number-lines",
+      "proposed": true,
+      "installed": true,
+      "correct": true,
+      "attempts": 1,
+      "seconds": 23,
+      "failure": null
+    },
+    {
+      "id": "merge-txt",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    },
+    {
+      "id": "crlf-to-lf",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    },
+    {
+      "id": "count-long-words",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    },
+    {
+      "id": "csv-columns",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    },
+    {
+      "id": "sort-csv",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    },
+    {
+      "id": "count-empty-lines",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    },
+    {
+      "id": "longest-word",
+      "proposed": false,
+      "installed": false,
+      "correct": false,
+      "attempts": 1,
+      "seconds": 0,
+      "failure": "The generator model is unreachable: transport_error: connect ECONNREFUSED 127.0.0.1:8787"
+    }
+  ]
+}

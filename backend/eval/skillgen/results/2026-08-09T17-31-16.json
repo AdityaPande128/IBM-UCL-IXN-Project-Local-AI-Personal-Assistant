@@ -1,0 +1,28 @@
+{
+  "ran_at": "2026-08-09T17:31:16.573Z",
+  "entries": 2,
+  "proposed": 2,
+  "installed": 0,
+  "correct": 0,
+  "damaged": 0,
+  "results": [
+    {
+      "id": "number-lines",
+      "proposed": true,
+      "installed": false,
+      "correct": false,
+      "attempts": 3,
+      "seconds": 79,
+      "failure": "test case 1 asserts a full sentence in stdout_contains (\"Adding line numbers to input.txt and saving to output.txt.…\") — assert the smallest distinctive substring (a number, a filename), not prose the script must reproduce word for word"
+    },
+    {
+      "id": "sort-csv",
+      "proposed": true,
+      "installed": false,
+      "correct": false,
+      "attempts": 3,
+      "seconds": 94,
+      "failure": "test case 1 asserts a full sentence in stdout_contains (\"Sorting input.csv by the second column and saving to output.…\") — assert the smallest distinctive substring (a number, a filename), not prose the script must reproduce word for word"
+    }
+  ]
+}
