@@ -1,0 +1,14 @@
+mlx-whisper>=0.4.0
+mlx-audio==0.4.6  # pinned: 0.4.4 has a Kokoro vocoder shape bug, and installing
+                  # other mlx packages has silently downgraded it
+fastapi>=0.115.0
+uvicorn>=0.34.0
+python-multipart>=0.0.20
+# Kokoro TTS text processing (mlx-audio does not pull these in itself)
+misaki>=0.7.4
+num2words
+spacy
+# espeak-ng fallback for words outside Kokoro's pronunciation dictionary
+phonemizer-fork
+espeakng-loader
+mlx-embeddings>=0.1.0

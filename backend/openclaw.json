@@ -1,0 +1,27 @@
+{
+  "agents": {
+    "defaults": {
+      "model": {
+        "provider": "custom",
+        "baseUrl": "http://127.0.0.1:8787/v1",
+        "modelId": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit"
+      }
+    }
+  },
+  "tools": {
+    "exec": {
+      "enabled": true,
+      "workspaceOnly": false,
+      "allowSystemCommands": true
+    }
+  },
+  "skills": {
+    "directories": [
+      "./skills"
+    ]
+  },
+  "security": {
+    "sandboxRoot": "~/Jarvis_Sandbox",
+    "blockFileOpsOutsideSandbox": true
+  }
+}

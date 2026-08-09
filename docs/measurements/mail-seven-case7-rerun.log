@@ -1,0 +1,23 @@
+[SkillRegistry] Loaded 30 skill(s).
+[Bridge] Execution layer ready: 30 skill(s) available.
+(node:72534) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Live mail — 1 request(s) against the real mailbox
+
+[Bridge] Processing: "reply to sandhyapandey31@gmail.com saying "Hello, thank you for sending that ove"
+[SkillRetriever] 10 builtin + 8/20 generated: extract-emails(0.49), generate-directory-summary(0.43), rename-txt-to-md(0.43)
+[Router] generate_new_skill → generate (confidence 0.95, skill none, 2 stages, 2 attempt(s), 8408ms)
+[SkillRetriever] 10 builtin + 8/20 generated: extract-emails(0.49), generate-directory-summary(0.43), rename-txt-to-md(0.43)
+[Planner] 1 step(s): procedure.mail (1 attempt(s), 17473ms)
+
+======================================================================
+1. reply to sandhyapandey31@gmail.com saying "Hello, thank you for sending that over!"
+   success | composed | 37.7s
+   "Compose and send a reply to the specified email address with the given message."
+     · procedure.mail success — 
+
+======================================================================
+CASE  STATUS    TIME     REQUEST
+  7   success   37.7s    reply to sandhyapandey31@gmail.com saying "Hello, thank yo
+
+  1/1 succeeded   total 0.6 min (39s)   slowest 37.7s

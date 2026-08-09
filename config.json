@@ -1,0 +1,99 @@
+{
+  "model_id": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+  "stt_model": "mlx-community/whisper-large-v3-turbo",
+  "tts_model": "mlx-community/Kokoro-82M-bf16",
+  "ports": {
+    "backend": 8080,
+    "inference": 8787,
+    "openclaw": 18789
+  },
+  "models": {
+    "budget_gb": 14,
+    "voice_reserve_gb": 1.83,
+    "tiers": {
+      "guard": {
+        "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        "policy": "pinned"
+      },
+      "engine": {
+        "model": "mlx-community/granite-4.1-8b-4bit",
+        "policy": "resident"
+      },
+      "smith": {
+        "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+        "policy": "transient"
+      }
+    },
+    "measured_gb": {
+      "mlx-community/Qwen3-4B-Instruct-2507-4bit": 2.109,
+      "mlx-community/granite-4.1-8b-4bit": 4.879,
+      "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit": 7.739
+    }
+  },
+  "router": {
+    "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+    "temperature": 0,
+    "max_tokens": 300,
+    "timeout_ms": 30000,
+    "max_attempts": 2,
+    "confidence_threshold": 0.6
+  },
+  "planner": {
+    "temperature": 0,
+    "max_tokens": 700,
+    "timeout_ms": 60000,
+    "max_attempts": 2,
+    "max_steps": 6
+  },
+  "generation": {
+    "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    "temperature": 0.2,
+    "max_tokens": 2400,
+    "timeout_ms": 240000,
+    "max_attempts": 3,
+    "verify_timeout_ms": 30000
+  },
+  "security": {
+    "enforce_capabilities": "generated",
+    "socket_token_path": "~/.jarvis/socket-token"
+  },
+  "web": {
+    "headless": true,
+    "idle_timeout_ms": 120000,
+    "navigation_timeout_ms": 20000,
+    "action_timeout_ms": 8000,
+    "reacquire_ms": 1000,
+    "surface": "auto",
+    "desktop_browser": "Google Chrome",
+    "max_elements": 60,
+    "max_text_chars": 4000,
+    "max_actions": 16,
+    "temperature": 0,
+    "max_tokens": 300,
+    "timeout_ms": 45000,
+    "blocked_hosts": [
+      "accounts.google.com",
+      "login.microsoftonline.com",
+      "appleid.apple.com",
+      "checkout.stripe.com",
+      "paypal.com",
+      "www.paypal.com"
+    ],
+    "tier": "guard"
+  },
+  "distillation": {
+    "min_runs": 2,
+    "min_shared_words": 3,
+    "max_steps": 8
+  },
+  "retrieval": {
+    "enabled": true,
+    "model": "mlx-community/bge-small-en-v1.5-4bit",
+    "top_k": 8,
+    "procedure_top_k": 2,
+    "procedure_min_score": 0.5,
+    "timeout_ms": 10000,
+    "corpus_min_score": 0.56,
+    "corpus_margin": 0.06
+  }
+}

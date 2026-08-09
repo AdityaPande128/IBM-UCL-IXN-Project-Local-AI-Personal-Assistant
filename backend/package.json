@@ -1,0 +1,37 @@
+{
+  "name": "jarvis-backend",
+  "version": "1.0.0",
+  "description": "Personal Jarvis Backend Daemon - Local AI Voice Assistant Orchestrator",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "setup:openclaw": "npm install -g openclaw@latest && openclaw onboard --install-daemon",
+    "report:generation": "node tools/generation-report.js",
+    "bench:router": "node tools/router-bench.js",
+    "bench:devset": "node tools/router-devset.js",
+    "bench:plans": "node tools/plan-devset.js",
+    "bench:web": "node tools/web-devset.js",
+    "bench:mail": "node tools/mail-devset.js",
+    "bench:distil": "node tools/distil-devset.js",
+    "distil": "node tools/distil.js"
+  },
+  "keywords": [
+    "jarvis",
+    "ai",
+    "voice-assistant",
+    "openclaw",
+    "macos"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "js-yaml": "^5.2.2",
+    "openai": "^6.45.0",
+    "openclaw": "latest",
+    "playwright-core": "^1.59.0",
+    "ws": "^8.21.0"
+  }
+}

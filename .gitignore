@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-web/
+target/
+.DS_Store
+*.dmg
+
+# The accessibility helper is built from source; the binary is not committed.
+backend/native/jarvis-ax
+backend/data/skill-pins.json
+.claude/
+docs/*.pdf

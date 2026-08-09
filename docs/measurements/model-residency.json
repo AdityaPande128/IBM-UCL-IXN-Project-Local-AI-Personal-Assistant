@@ -1,0 +1,71 @@
+{
+  "device": "Apple M4 Pro",
+  "memory_size_gb": 24.0,
+  "working_set_gb": 17.76,
+  "models": [
+    {
+      "name": "mlx-community/bge-small-en-v1.5-4bit",
+      "kind": "embed",
+      "load_s": 0.38,
+      "gb": 0.019,
+      "note": "cold incl. first embed",
+      "warm_call_s": 0.009
+    },
+    {
+      "name": "mlx-community/Llama-3.2-1B-Instruct-4bit",
+      "kind": "llm",
+      "load_s": 1.08,
+      "gb": 0.647,
+      "note": "cold",
+      "first_gen_s": 0.22,
+      "peak_gb": 0.663,
+      "warm_s": 0.9
+    },
+    {
+      "name": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+      "kind": "llm",
+      "load_s": 0.92,
+      "gb": 2.109,
+      "note": "cold",
+      "first_gen_s": 0.24,
+      "peak_gb": 2.162,
+      "warm_s": 0.45
+    },
+    {
+      "name": "mlx-community/granite-4.1-8b-4bit",
+      "kind": "llm",
+      "load_s": 2.1,
+      "gb": 4.879,
+      "note": "cold",
+      "first_gen_s": 0.73,
+      "peak_gb": 4.931,
+      "warm_s": 0.66
+    },
+    {
+      "name": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+      "kind": "llm",
+      "load_s": 2.38,
+      "gb": 7.739,
+      "note": "cold",
+      "first_gen_s": 1.29,
+      "peak_gb": 7.799,
+      "warm_s": 1.91
+    },
+    {
+      "name": "mlx-community/whisper-large-v3-turbo",
+      "kind": "stt",
+      "load_s": 2.65,
+      "gb": 1.507,
+      "note": "cold incl. first transcribe",
+      "warm_call_s": 1.49
+    },
+    {
+      "name": "mlx-community/Kokoro-82M-bf16",
+      "kind": "tts",
+      "load_s": 1.48,
+      "gb": 0.305,
+      "note": "cold incl. first synth",
+      "warm_call_s": 0.54
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+# The personal index is derived data built from the user's own notes and mail.
+# The .jsonl metadata holds the chunk text verbatim, so committing it would put
+# private correspondence into git history. It is rebuildable at any time with
+# `node tools/index-corpus.js`, so there is nothing here worth versioning.
+*
+!.gitignore

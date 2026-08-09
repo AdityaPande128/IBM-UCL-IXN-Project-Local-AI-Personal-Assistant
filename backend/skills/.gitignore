@@ -1,0 +1,24 @@
+.generation-log.json
+
+# Skills the system writes for itself are runtime state, not source. They are
+# the product of running Jarvis, they are regenerated on demand, and a fresh
+# clone should start with the built-in set only — a clone that already held
+# nineteen "learned" skills would misrepresent what the system had done.
+#
+# The rule is inverted rather than a list of generated names, so a skill
+# authored tomorrow is ignored without anyone remembering to add it here.
+# Nothing is deleted: ignored skills stay on disk and keep working.
+#
+# What was generated during evaluation is recorded in
+# ClawBenchmark/generation_eval_*.json, which is tracked.
+/*/
+!/app-launch/
+!/app-quit/
+!/bluetooth-toggle/
+!/display-brightness/
+!/file-explore/
+!/media-control/
+!/screen-capture/
+!/system-mute/
+!/system-volume/
+!/wifi-toggle/

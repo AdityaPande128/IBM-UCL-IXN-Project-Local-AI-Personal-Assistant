@@ -1,0 +1,446 @@
+{
+  "model": "granite-4.1-8b-4bit",
+  "timestamp": "2026-07-26T12:16:38.193Z",
+  "records": [
+    {
+      "id": "G01",
+      "category": "organisation",
+      "prompt": "Sort every file in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G01-ShwqFn into subfolders named after its file extension",
+      "generateMs": 61764,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "1/1 case(s) failed: expected file was not created: test_files/.txt/file1.txt",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G02",
+      "category": "organisation",
+      "prompt": "Rename every .txt file in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G02-UKo2u6 so it has a .md extension instead",
+      "generateMs": 14116,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "rename-txt-to-md",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 970,
+        "execMs": 32
+      },
+      "parameters": {
+        "directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G02-UKo2u6"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "both files renamed to .md",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 966,
+        "execMs": 33
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 15118,
+      "warmTotalMs": 999,
+      "outcome": "correct"
+    },
+    {
+      "id": "G03",
+      "category": "organisation",
+      "prompt": "List every file in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G03-yUf3u9 bigger than 100 bytes and write the list to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G03-yUf3u9/big.txt",
+      "generateMs": 64804,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "the response was not valid JSON",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G04",
+      "category": "organisation",
+      "prompt": "Move every file from the nested subfolders of /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G04-GQwmcf up into /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G04-GQwmcf itself",
+      "generateMs": 72442,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "1/1 case(s) failed: exit code 1, expected 0",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G05",
+      "category": "organisation",
+      "prompt": "Find files with identical contents in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G05-Vv8gRR and write the duplicate groups to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G05-Vv8gRR/dupes.txt",
+      "generateMs": 23166,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "find-duplicate-files",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1920,
+        "execMs": 56
+      },
+      "parameters": {
+        "source_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G05-Vv8gRR",
+        "output_path": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G05-Vv8gRR/dupes.txt"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "duplicate pair identified",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1784,
+        "execMs": 41
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 25142,
+      "warmTotalMs": 1825,
+      "outcome": "correct"
+    },
+    {
+      "id": "G06",
+      "category": "extraction",
+      "prompt": "Extract every email address from the text files in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G06-0d1j3R and save them to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G06-0d1j3R/emails.csv",
+      "generateMs": 21595,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "extract-emails-to-csv",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 2005,
+        "execMs": 37
+      },
+      "parameters": {
+        "input_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G06-0d1j3R",
+        "output_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G06-0d1j3R/emails.csv"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "all three addresses extracted",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1794,
+        "execMs": 34
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 23637,
+      "warmTotalMs": 1828,
+      "outcome": "correct"
+    },
+    {
+      "id": "G07",
+      "category": "extraction",
+      "prompt": "Pull every http and https URL out of the files in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G07-pexuLq into /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G07-pexuLq/urls.txt",
+      "generateMs": 20495,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "extract-urls-to-file",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1984,
+        "execMs": 39
+      },
+      "parameters": {
+        "input_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G07-pexuLq",
+        "output_file": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G07-pexuLq/urls.txt"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "all three URLs extracted",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1780,
+        "execMs": 33
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 22518,
+      "warmTotalMs": 1813,
+      "outcome": "correct"
+    },
+    {
+      "id": "G08",
+      "category": "extraction",
+      "prompt": "Count the lines in each file in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G08-nBusOy and write a summary to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G08-nBusOy/lines.csv",
+      "generateMs": 48010,
+      "generationStatus": "registered",
+      "attempts": 2,
+      "skill": "count-lines-per-file",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1994,
+        "execMs": 44
+      },
+      "parameters": {
+        "input_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G08-nBusOy",
+        "output_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G08-nBusOy/lines.csv"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "line counts correct",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 2018,
+        "execMs": 34
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 50048,
+      "warmTotalMs": 2052,
+      "outcome": "correct"
+    },
+    {
+      "id": "G09",
+      "category": "extraction",
+      "prompt": "Find which files in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G09-gd3wNc contain the word \"urgent\" and list them in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G09-gd3wNc/matches.txt",
+      "generateMs": 67641,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "1/1 case(s) failed: exit code 1, expected 0",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G10",
+      "category": "extraction",
+      "prompt": "Take the first heading line from each markdown file in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G10-4nurep and build an index at /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G10-4nurep/index.md",
+      "generateMs": 19229,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "markdown-index-builder",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1729,
+        "execMs": 34
+      },
+      "parameters": {
+        "source_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G10-4nurep",
+        "output_file": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G10-4nurep/index.md"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "both headings indexed",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1690,
+        "execMs": 34
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 20992,
+      "warmTotalMs": 1724,
+      "outcome": "correct"
+    },
+    {
+      "id": "G11",
+      "category": "transformation",
+      "prompt": "Convert /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G11-tR0Iqi/data.csv into a JSON file at /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G11-tR0Iqi/data.json",
+      "generateMs": 13717,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "csv-to-json",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1785,
+        "execMs": 36
+      },
+      "parameters": {
+        "input_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G11-tR0Iqi/data.csv",
+        "output_json": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G11-tR0Iqi/data.json"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "CSV converted to valid JSON",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1847,
+        "execMs": 35
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 15538,
+      "warmTotalMs": 1882,
+      "outcome": "correct"
+    },
+    {
+      "id": "G12",
+      "category": "transformation",
+      "prompt": "Turn /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G12-c8U2Cq/records.json into a CSV file at /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G12-c8U2Cq/records.csv",
+      "generateMs": 60786,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "the response was not valid JSON",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G13",
+      "category": "transformation",
+      "prompt": "Merge all the CSV files in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G13-3sKOOa into a single /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G13-3sKOOa/combined.csv keeping one header row",
+      "generateMs": 71841,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "1/1 case(s) failed: exit code 1, expected 0 —     with open(output_csv, 'w', newline='') as outfile:          ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ FileNotFoundError: [Errno 2] No such file or directory: 'output_dir/combined.csv'",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G14",
+      "category": "transformation",
+      "prompt": "Split /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G14-coH8ao/sales.csv into one file per value in its region column, saved into /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G14-coH8ao",
+      "generateMs": 79405,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "1/1 case(s) failed: expected file was not created: output/ East.csv",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G15",
+      "category": "transformation",
+      "prompt": "Strip trailing whitespace from the end of every line in the text files in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G15-xCKklH",
+      "generateMs": 47736,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "1/1 case(s) failed: exit code 2, expected 0 — usage: run.py [-h] file_paths [file_paths ...] run.py: error: unrecognized arguments: --file_paths",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G16",
+      "category": "aggregation",
+      "prompt": "Add up the amount column in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G16-DT4Eqn/expenses.csv and write the total to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G16-DT4Eqn/total.txt",
+      "generateMs": 60849,
+      "generationStatus": "rejected",
+      "attempts": 3,
+      "skill": null,
+      "rejectionReason": "syntax error: line 24: invalid syntax",
+      "outcome": "not_registered"
+    },
+    {
+      "id": "G17",
+      "category": "aggregation",
+      "prompt": "Work out the most common words across the text files in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G17-9lFjWI and write the top 3 to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G17-9lFjWI/top.txt",
+      "generateMs": 18603,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "top-words",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1834,
+        "execMs": 40
+      },
+      "parameters": {
+        "input_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G17-9lFjWI",
+        "output_file": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G17-9lFjWI/top.txt"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "top words identified",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1809,
+        "execMs": 30
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 20477,
+      "warmTotalMs": 1839,
+      "outcome": "correct"
+    },
+    {
+      "id": "G18",
+      "category": "aggregation",
+      "prompt": "Group the rows of /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G18-XSTurq/orders.csv by their status column and write the counts to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G18-XSTurq/counts.csv",
+      "generateMs": 19872,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "group-csv-by-status",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 2011,
+        "execMs": 32
+      },
+      "parameters": {
+        "input_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G18-XSTurq/orders.csv",
+        "status_column": "status",
+        "output_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G18-XSTurq/counts.csv"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "group counts correct (open=3, closed=1)",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 2041,
+        "execMs": 31
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 21915,
+      "warmTotalMs": 2072,
+      "outcome": "correct"
+    },
+    {
+      "id": "G19",
+      "category": "aggregation",
+      "prompt": "Work out the total size of files per extension in /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G19-HoPWyZ and save a summary to /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G19-HoPWyZ/sizes.csv",
+      "generateMs": 18532,
+      "generationStatus": "registered",
+      "attempts": 1,
+      "skill": "file-size-summary-by-extension",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1834,
+        "execMs": 38
+      },
+      "parameters": {
+        "input_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G19-HoPWyZ",
+        "output_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G19-HoPWyZ/sizes.csv"
+      },
+      "independentlyCorrect": true,
+      "checkDetail": "txt total of 300 bytes reported",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1868,
+        "execMs": 35
+      },
+      "warmCorrect": true,
+      "coldTotalMs": 20404,
+      "warmTotalMs": 1903,
+      "outcome": "correct"
+    },
+    {
+      "id": "G20",
+      "category": "aggregation",
+      "prompt": "Produce a summary report of /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G20-1jHdrt at /private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G20-1jHdrt/report.txt with the file count and total size",
+      "generateMs": 16158,
+      "generationStatus": "duplicate",
+      "attempts": 1,
+      "skill": "file-size-summary-by-extension",
+      "rejectionReason": null,
+      "firstInvocation": {
+        "ok": true,
+        "status": "success",
+        "routeMs": 1886,
+        "execMs": 47
+      },
+      "parameters": {
+        "input_directory": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G20-1jHdrt",
+        "output_csv": "/private/var/folders/19/fz_vyt4s4wg5331dr7hr15s40000gn/T/geneval-G20-1jHdrt/report.txt"
+      },
+      "independentlyCorrect": false,
+      "checkDetail": "report incomplete: Extension,Total Size (bytes)\r\n.csv,20\r\n.md,30\r\n.txt,10\r\n",
+      "warmInvocation": {
+        "ok": true,
+        "routeMs": 1831,
+        "execMs": 37
+      },
+      "warmCorrect": false,
+      "coldTotalMs": 18091,
+      "warmTotalMs": 1868,
+      "outcome": "registered_but_wrong"
+    }
+  ]
+}

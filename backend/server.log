@@ -1,0 +1,14 @@
+[BOOT] Verifying Jarvis Sandbox at: /Users/adityapande/Jarvis_Sandbox
+[BOOT] Sandbox initialized successfully.
+[Jarvis Boot] Synchronized openclaw.json with model: mlx-community/Qwen2.5-Coder-14B-Instruct-4bit and inference port: 8787
+[SkillRegistry] Loaded 30 skill(s).
+[Bridge] Execution layer ready: 30 skill(s) available.
+(node:90238) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Jarvis] Backend daemon running on ws://localhost:8080
+[Jarvis] OpenClaw gateway: CONNECTED
+[Bridge] Processing: "Send an email to sandhyapandey31@gmail.com with subject 'catch up' and body 'mee"
+[SkillRetriever] 10 builtin + 8/20 generated: extract-emails(0.54), group-rows-by-status(0.46), extract-markdown-headings(0.44)
+[Router] generate_new_skill → generate (confidence 0.99, skill none, 2 stages, 2 attempt(s), 9211ms)
+[SkillRetriever] 10 builtin + 8/20 generated: extract-emails(0.54), group-rows-by-status(0.46), extract-markdown-headings(0.44)
+[Planner] 1 step(s): web.browse (1 attempt(s), 15403ms)

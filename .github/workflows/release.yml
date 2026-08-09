@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  dmg:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+      - run: npm ci
+        working-directory: frontend
+      - run: npx tauri build
+        working-directory: frontend
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-dmg
+          path: frontend/src-tauri/target/release/bundle/dmg/*.dmg
