@@ -12,4 +12,9 @@ declare const __JARVIS_CONFIG__: {
     socket_token_path?: string;
   };
   services?: Record<string, { argv: string[]; cwd: string }>;
+  logs?: {
+    dir?: string;
+    max_bytes?: number;
+    diagnostics_dir?: string;
+  };
 };

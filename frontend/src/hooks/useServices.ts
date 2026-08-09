@@ -50,7 +50,13 @@ export function useServices(): Record<string, ServiceStatus> {
 
         const ports = config.ports as Record<string, number>;
         const specs = Object.entries(config.services ?? {})
-          .map(([name, spec]) => ({ name, argv: spec.argv, cwd: spec.cwd, port: ports[name] }))
+          .map(([name, spec]) => ({
+            name,
+            argv: spec.argv,
+            cwd: spec.cwd,
+            port: ports[name],
+            log_max_bytes: config.logs?.max_bytes,
+          }))
           .filter((spec) => typeof spec.port === "number");
         if (specs.length) await invoke("start_services", { specs });
       } catch {

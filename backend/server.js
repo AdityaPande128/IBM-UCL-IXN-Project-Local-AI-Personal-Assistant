@@ -14,6 +14,7 @@ const skillRegistry = require('./services/skillRegistry');
 const skillPins = require('./services/skillPins');
 const procedureStore = require('./services/procedureStore');
 const generationLog = require('./services/generationLog');
+const diagnostics = require('./services/diagnostics');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -207,6 +208,19 @@ wss.on('connection', (ws) => {
                 activityBus.publish('registry', 'skill_removed', { skill: skill.name });
                 ws.send(JSON.stringify({ type: 'skill_remove_result',
                     status: 'removed', name: skill.name }));
+                return;
+            }
+
+            if (parsed.type === 'diagnostics') {
+                try {
+                    const bundle = diagnostics.collect(config);
+                    activityBus.publish('daemon', 'diagnostics_saved', { path: bundle.path });
+                    ws.send(JSON.stringify({ type: 'diagnostics_result',
+                        status: 'saved', path: bundle.path }));
+                } catch (err) {
+                    ws.send(JSON.stringify({ type: 'diagnostics_result',
+                        status: 'error', error: err.message }));
+                }
                 return;
             }
 

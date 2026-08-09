@@ -1,16 +1,24 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AbilitiesData } from "../hooks/useWebSocket";
+import type { AbilitiesData, DiagnosticsResult } from "../hooks/useWebSocket";
 
 interface AbilitiesViewProps {
   abilities: AbilitiesData | null;
+  diagnostics: DiagnosticsResult | null;
   onRefresh: () => void;
   onRemoveSkill: (name: string) => void;
+  onSaveDiagnostics: () => void;
 }
 
 const DOOR_ACK_KEY = "jarvis-openclaw-door-acknowledged";
 
-export function AbilitiesView({ abilities, onRefresh, onRemoveSkill }: AbilitiesViewProps) {
+export function AbilitiesView({
+  abilities,
+  diagnostics,
+  onRefresh,
+  onRemoveSkill,
+  onSaveDiagnostics,
+}: AbilitiesViewProps) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [doorOpen, setDoorOpen] = useState(false);
 
@@ -166,6 +174,29 @@ export function AbilitiesView({ abilities, onRefresh, onRemoveSkill }: Abilities
               <span className="build-meta">{tier.policy}</span>
             </div>
           ))}
+        </div>
+      </section>
+
+      <section className="abilities-section">
+        <h2>Diagnostics</h2>
+        <div className="diag-note">
+          Saves a zip of service logs, configuration and recent runs for
+          debugging. Nothing leaves this Mac unless you share it.
+        </div>
+        <div className="diag-row">
+          <button
+            className="diag-button"
+            disabled={diagnostics?.status === "saving"}
+            onClick={onSaveDiagnostics}
+          >
+            {diagnostics?.status === "saving" ? "Saving…" : "Save a diagnostics bundle"}
+          </button>
+          {diagnostics?.status === "saved" && (
+            <span className="diag-path">Saved to {diagnostics.path}</span>
+          )}
+          {diagnostics?.status === "error" && (
+            <span className="diag-error">Could not save: {diagnostics.error}</span>
+          )}
         </div>
       </section>
 

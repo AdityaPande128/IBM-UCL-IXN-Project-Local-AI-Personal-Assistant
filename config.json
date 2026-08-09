@@ -57,6 +57,11 @@
     "enforce_capabilities": "generated",
     "socket_token_path": "~/.jarvis/socket-token"
   },
+  "logs": {
+    "dir": "~/.jarvis/logs",
+    "max_bytes": 5242880,
+    "diagnostics_dir": "~/.jarvis/diagnostics"
+  },
   "web": {
     "headless": true,
     "idle_timeout_ms": 120000,
