@@ -3,6 +3,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const traceStore = require('./traceStore');
+const failureTaxonomy = require('./failureTaxonomy');
 
 function expand(p) {
     if (p && p.startsWith('~/')) return path.join(os.homedir(), p.slice(2));
@@ -46,6 +47,9 @@ function collect(config) {
     let plans = [];
     try { plans = traceStore.recentPlans(50); } catch { }
     fs.writeFileSync(path.join(bundle, 'recent-plans.json'), JSON.stringify(plans, null, 2));
+
+    fs.writeFileSync(path.join(bundle, 'failures.json'),
+        JSON.stringify(failureTaxonomy.report(), null, 2));
 
     const logs = logsDir(config);
     const logsOut = path.join(bundle, 'logs');

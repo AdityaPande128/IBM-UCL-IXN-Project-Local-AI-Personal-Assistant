@@ -334,6 +334,7 @@ test('a diagnostics bundle collects logs, config and recent runs — never the t
     assert.match(listing, /system\.txt/);
     assert.match(listing, /config\.json/);
     assert.match(listing, /recent-plans\.json/);
+    assert.match(listing, /failures\.json/);
     assert.match(listing, /logs\/backend\.log/);
     assert.strictEqual(listing.includes('socket-token'), false);
     client.ws.close();

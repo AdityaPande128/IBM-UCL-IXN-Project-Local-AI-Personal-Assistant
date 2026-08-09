@@ -291,6 +291,24 @@ function childPlans(planId) {
         .map(plan => ({ ...plan, detail: decode(plan.detail) }));
 }
 
+function failedSteps(limit = 200) {
+    return handle().prepare(`
+        SELECT steps.capability, steps.error, steps.summary, steps.tier,
+               plans.request, plans.ts
+        FROM steps JOIN plans ON plans.id = steps.plan_id
+        WHERE steps.status = 'failed'
+        ORDER BY steps.id DESC LIMIT ?
+    `).all(limit);
+}
+
+function recentOutcomes(capability, limit = 5) {
+    return handle().prepare(`
+        SELECT status FROM steps
+        WHERE capability = ?
+        ORDER BY id DESC LIMIT ?
+    `).all(capability, limit).map(row => row.status);
+}
+
 function stats() {
     const plans = handle().prepare(`
         SELECT COUNT(*) AS total,
@@ -315,6 +333,7 @@ module.exports = {
     open, close, handle,
     beginPlan, recordStep, finishPlan, reconcileInterrupted,
     getPlan, recentPlans, capabilityStats, gaps, stats,
+    failedSteps, recentOutcomes,
     procedures, childPlans,
     summarise,
     DEFAULT_PATH, MAX_SUMMARY_CHARS

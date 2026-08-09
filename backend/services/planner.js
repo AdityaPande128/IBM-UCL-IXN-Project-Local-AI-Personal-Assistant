@@ -3,6 +3,7 @@ const llmClient = require('./llmClient');
 const capabilityGraph = require('./capabilityGraph');
 const skillRetriever = require('./skillRetriever');
 const mailProvider = require('./mailProvider');
+const negativeMemory = require('./negativeMemory');
 const { extractJson } = require('../utils/jsonRepair');
 
 const config = configReader.readConfig();
@@ -422,7 +423,8 @@ async function selectCapabilities(request, options = {}) {
 
     const everyProcedure = all.filter(c => c.kind === 'procedure');
     const ids = new Set(everyProcedure.map(c => c.id));
-    const procedures = everyProcedure.filter(c => !(c.family && ids.has(`procedure.${c.family}`)));
+    const procedures = negativeMemory.offerable(
+        everyProcedure.filter(c => !(c.family && ids.has(`procedure.${c.family}`))));
 
     const skillRegistry = require('./skillRegistry');
     const manifests = skills

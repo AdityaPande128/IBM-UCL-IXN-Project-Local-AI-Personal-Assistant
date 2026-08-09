@@ -753,3 +753,69 @@ test('the plan prompt steers mail at the configured provider, not a hardcoded on
     assert.ok(prompt.includes(configured), 'the configured mailbox address must appear');
     assert.ok(!prompt.includes('${MAIL_URL}'), 'the template token must be substituted');
 });
+
+const failureTaxonomy = require('../services/failureTaxonomy');
+const negativeMemory = require('../services/negativeMemory');
+
+test('the failure taxonomy names every observed class of trouble', () => {
+    assert.strictEqual(failureTaxonomy.classifyStep(
+        { capability: 'web.browse', error: 'model call timed out after 45000ms' }), 'timeout');
+    assert.strictEqual(failureTaxonomy.classifyStep(
+        { capability: 'web.browse', error: 'transport_error: connect ECONNREFUSED 127.0.0.1:8787' }), 'model_unreachable');
+    assert.strictEqual(failureTaxonomy.classifyStep(
+        { capability: 'web.browse', error: 'stopped at a password field' }), 'credential_boundary');
+    assert.strictEqual(failureTaxonomy.classifyStep(
+        { capability: 'web.browse', error: 'pressing Send is outside what was asked' }), 'mandate_blocked');
+    assert.strictEqual(failureTaxonomy.classifyStep(
+        { capability: 'procedure.gmail-search', error: 'selector matched nothing' }), 'site_drift');
+    assert.strictEqual(failureTaxonomy.classifyStep(
+        { capability: 'skill.csv-to-json', error: 'exit code 2' }), 'execution_error');
+    assert.strictEqual(failureTaxonomy.classifyGeneration(
+        { failure: 'grounded_trial_failed' }), 'grounding_failure');
+    assert.strictEqual(failureTaxonomy.classifyGeneration(
+        { failure: 'script_syntax_error' }), 'generation_static');
+    for (const name of Object.keys(failureTaxonomy.report().classes)) {
+        assert.ok(failureTaxonomy.CLASSES.includes(name));
+    }
+});
+
+test('a recipe that failed its last two runs is not offered again', () => {
+    const dir = scratch();
+    try {
+        const recipe = { id: 'procedure.gmail-search', kind: 'procedure' };
+        const record = status => {
+            const planId = traceStore.beginPlan({
+                request: 'search my mail', status: status === 'failed' ? 'failed' : 'success',
+                stepCount: 1
+            });
+            traceStore.recordStep(planId, {
+                ordinal: 0, key: 's1', capability: recipe.id, status,
+                error: status === 'failed' ? 'selector matched nothing' : null
+            });
+        };
+
+        record('success');
+        assert.strictEqual(negativeMemory.isBlocked(recipe.id), false);
+
+        record('failed');
+        assert.strictEqual(negativeMemory.isBlocked(recipe.id), false,
+            'one failure is not a pattern');
+
+        record('failed');
+        assert.strictEqual(negativeMemory.isBlocked(recipe.id), true);
+        assert.deepStrictEqual(negativeMemory.offerable([recipe]), []);
+
+        record('success');
+        assert.strictEqual(negativeMemory.isBlocked(recipe.id), false,
+            'a success clears the block');
+
+        assert.strictEqual(negativeMemory.isBlocked('skill.csv-to-json'), false,
+            'only recipes are subject to negative memory');
+
+        const failures = failureTaxonomy.report();
+        assert.ok(failures.classes.site_drift.count >= 2);
+        assert.strictEqual(failures.classes.site_drift.examples[0].request, 'search my mail');
+    } finally {
+        cleanup(dir);
+    }
+});
