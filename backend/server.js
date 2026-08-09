@@ -10,6 +10,10 @@ const aiPipeline = require('./services/aiPipeline');
 const socketAuth = require('./services/socketAuth');
 const intentQueue = require('./services/intentQueue');
 const traceStore = require('./services/traceStore');
+const skillRegistry = require('./services/skillRegistry');
+const skillPins = require('./services/skillPins');
+const procedureStore = require('./services/procedureStore');
+const generationLog = require('./services/generationLog');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -153,6 +157,56 @@ wss.on('connection', (ws) => {
 
             if (parsed.type === 'abort') {
                 ws.send(JSON.stringify({ type: 'abort_result', ...intentQueue.abort(parsed.id) }));
+                return;
+            }
+
+            if (parsed.type === 'abilities') {
+                const tiers = (config.models && config.models.tiers) || {};
+                ws.send(JSON.stringify({
+                    type: 'abilities_result',
+                    skills: skillRegistry.list().map(s => ({
+                        name: s.name,
+                        version: s.version,
+                        description: s.description,
+                        author: (s.provenance && s.provenance.author) || 'unknown',
+                        capabilities: s.capabilities
+                    })),
+                    rejected: skillRegistry.errors(),
+                    recipes: procedureStore.list().map(p => ({
+                        name: p.name,
+                        description: p.description || p.goal || '',
+                        steps: Array.isArray(p.steps) ? p.steps.length : null
+                    })),
+                    builds: generationLog.read().slice(-50).reverse(),
+                    tiers: Object.entries(tiers).map(([tier, spec]) => ({
+                        tier, model: spec.model, policy: spec.policy
+                    })),
+                    openclaw: {
+                        connected: openclawBridge.isConnected(),
+                        dashboard: `http://127.0.0.1:${config.ports.openclaw}`
+                    }
+                }));
+                return;
+            }
+
+            if (parsed.type === 'skill_remove' && parsed.name) {
+                const skill = skillRegistry.get(parsed.name);
+                if (!skill) {
+                    ws.send(JSON.stringify({ type: 'skill_remove_result',
+                        status: 'unknown_skill', name: parsed.name }));
+                    return;
+                }
+                if (!skill.provenance || skill.provenance.author !== 'generated') {
+                    ws.send(JSON.stringify({ type: 'skill_remove_result', status: 'refused',
+                        name: skill.name, response: 'Built-in skills cannot be removed.' }));
+                    return;
+                }
+                fs.rmSync(skill.directory, { recursive: true, force: true });
+                skillPins.remove(skill.name);
+                skillRegistry.reload();
+                activityBus.publish('registry', 'skill_removed', { skill: skill.name });
+                ws.send(JSON.stringify({ type: 'skill_remove_result',
+                    status: 'removed', name: skill.name }));
                 return;
             }
 

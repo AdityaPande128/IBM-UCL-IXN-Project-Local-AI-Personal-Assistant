@@ -3,6 +3,7 @@ import { ChatLog } from "./components/ChatLog";
 import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
 import { ActivityPanel } from "./components/ActivityPanel";
+import { AbilitiesView } from "./components/AbilitiesView";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
 import { useServices, serviceBanner } from "./hooks/useServices";
@@ -16,15 +17,19 @@ function App() {
     messages,
     activities,
     proposal,
+    abilities,
     sendBinary,
     sendIntent,
     sendDecision,
     sendAbort,
+    requestAbilities,
+    removeSkill,
   } = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
   const services = useServices();
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
+  const [view, setView] = useState<"chat" | "abilities">("chat");
 
   const handleStart = async () => {
     await startRecording();
@@ -45,6 +50,12 @@ function App() {
           <span className="app-logo-text">Jarvis</span>
         </div>
         <div className="app-status">
+          <button
+            className={`activity-toggle ${view === "abilities" ? "activity-toggle--on" : ""}`}
+            onClick={() => setView((v) => (v === "chat" ? "abilities" : "chat"))}
+          >
+            {view === "chat" ? "Abilities" : "Chat"}
+          </button>
           <button
             className={`activity-toggle ${showActivity ? "activity-toggle--on" : ""}`}
             onClick={() => setShowActivity((visible) => !visible)}
@@ -68,8 +79,18 @@ function App() {
 
       <div className="app-body">
         <main className="app-main">
-          <ChatLog messages={messages} />
-          {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
+          {view === "chat" ? (
+            <>
+              <ChatLog messages={messages} />
+              {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
+            </>
+          ) : (
+            <AbilitiesView
+              abilities={abilities}
+              onRefresh={requestAbilities}
+              onRemoveSkill={removeSkill}
+            />
+          )}
         </main>
         {showActivity && <ActivityPanel activities={activities} />}
       </div>

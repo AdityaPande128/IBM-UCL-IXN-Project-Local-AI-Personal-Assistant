@@ -245,3 +245,71 @@ test('voice goes through the same consent gate and speaks its proposal', async (
         intentQueue.reset();
     }
 });
+
+test('abilities are listed over the wire and builtins refuse removal', async () => {
+    const client = await authed();
+    client.send({ type: 'abilities' });
+    const abilities = await client.next(m => m.type === 'abilities_result');
+
+    assert.ok(abilities.skills.length > 0);
+    const builtin = abilities.skills.find(s => s.author === 'builtin');
+    assert.ok(builtin, 'the repo ships builtin skills');
+    assert.ok(abilities.tiers.length >= 1);
+    assert.strictEqual(typeof abilities.openclaw.connected, 'boolean');
+    assert.match(abilities.openclaw.dashboard, /^http:\/\/127\.0\.0\.1:\d+$/);
+
+    client.send({ type: 'skill_remove', name: builtin.name });
+    const refused = await client.next(m => m.type === 'skill_remove_result');
+    assert.strictEqual(refused.status, 'refused');
+
+    client.send({ type: 'skill_remove', name: 'no-such-skill' });
+    const unknown = await client.next(m =>
+        m.type === 'skill_remove_result' && m.status === 'unknown_skill');
+    assert.ok(unknown);
+    client.ws.close();
+});
+
+test('a generated skill can be removed and vanishes from the registry', async () => {
+    const skillRegistry = require('../services/skillRegistry');
+    const dir = path.join(__dirname, '..', 'skills', 'wire-probe-skill');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), [
+        '---',
+        'name: wire-probe-skill',
+        'version: 1.0.0',
+        'description: Probe skill installed by the wire tests.',
+        'exec:',
+        '  type: command',
+        '  argv: ["/usr/bin/true"]',
+        'reply: "Done."',
+        'capabilities:',
+        '  exec: true',
+        '  filesystem: []',
+        '  network: false',
+        'provenance:',
+        '  author: generated',
+        '---',
+        'Probe.'
+    ].join('\n'));
+    skillRegistry.reload();
+
+    try {
+        const client = await authed();
+        client.send({ type: 'abilities' });
+        const before = await client.next(m => m.type === 'abilities_result');
+        assert.ok(before.skills.some(s => s.name === 'wire-probe-skill'));
+
+        client.send({ type: 'skill_remove', name: 'wire-probe-skill' });
+        const removed = await client.next(m => m.type === 'skill_remove_result');
+        assert.strictEqual(removed.status, 'removed');
+        assert.strictEqual(fs.existsSync(dir), false, 'the skill directory must be deleted');
+
+        client.send({ type: 'abilities' });
+        const after = await client.next(m => m.type === 'abilities_result');
+        assert.strictEqual(after.skills.some(s => s.name === 'wire-probe-skill'), false);
+        client.ws.close();
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+        skillRegistry.reload();
+    }
+});

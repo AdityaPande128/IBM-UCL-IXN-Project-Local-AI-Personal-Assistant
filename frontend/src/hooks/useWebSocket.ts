@@ -28,6 +28,23 @@ export interface ActivityEvent {
   detail: string;
 }
 
+export interface AbilitySkill {
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  capabilities: { exec?: boolean; network?: boolean; filesystem?: string[] };
+}
+
+export interface AbilitiesData {
+  skills: AbilitySkill[];
+  rejected: { skill: string; errors: string[] }[];
+  recipes: { name: string; description: string; steps: number | null }[];
+  builds: Record<string, any>[];
+  tiers: { tier: string; model: string; policy: string }[];
+  openclaw: { connected: boolean; dashboard: string };
+}
+
 interface UseWebSocketReturn {
   connected: boolean;
   openclawConnected: boolean;
@@ -35,10 +52,13 @@ interface UseWebSocketReturn {
   messages: ChatMessage[];
   activities: ActivityEvent[];
   proposal: Proposal | null;
+  abilities: AbilitiesData | null;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
   sendDecision: (id: string, decision: "yes" | "no") => void;
   sendAbort: () => void;
+  requestAbilities: () => void;
+  removeSkill: (name: string) => void;
 }
 
 import { config } from "../config";
@@ -93,6 +113,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [activities, setActivities] = useState<ActivityEvent[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [activeIntents, setActiveIntents] = useState<string[]>([]);
+  const [abilities, setAbilities] = useState<AbilitiesData | null>(null);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -177,6 +198,18 @@ export function useWebSocket(): UseWebSocketReturn {
           setActiveIntents((prev) => [...prev, msg.id]);
           return;
         }
+        if (msg.type === "abilities_result") {
+          const { type: _ignored, ...data } = msg;
+          setAbilities(data as AbilitiesData);
+          return;
+        }
+        if (msg.type === "skill_remove_result") {
+          if (msg.status !== "removed" && msg.response) {
+            addMessage("system", msg.response);
+          }
+          wsRef.current?.send(JSON.stringify({ type: "abilities" }));
+          return;
+        }
         if (msg.type === "abort_result") {
           return;
         }
@@ -250,6 +283,18 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const requestAbilities = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "abilities" }));
+    }
+  }, []);
+
+  const removeSkill = useCallback((name: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "skill_remove", name }));
+    }
+  }, []);
+
   return {
     connected,
     openclawConnected,
@@ -257,9 +302,12 @@ export function useWebSocket(): UseWebSocketReturn {
     messages,
     activities,
     proposal,
+    abilities,
     sendBinary,
     sendIntent,
     sendDecision,
     sendAbort,
+    requestAbilities,
+    removeSkill,
   };
 }
