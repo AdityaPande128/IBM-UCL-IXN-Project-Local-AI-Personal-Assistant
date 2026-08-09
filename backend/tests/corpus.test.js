@@ -219,16 +219,41 @@ test('a mismatched vector width is rejected rather than silently stored', () => 
     );
 });
 
-test('an index whose files disagree is treated as empty, not fatal', () => {
-    const dir = tmpdir();
-    new vectorIndex.Collection('t', dir)
-        .replace([{ vector: axis(0), meta: { id: 'a' } }])
-        .save();
+function writeLegacy(dir, name, rows) {
+    const buffer = Buffer.alloc(rows.length * DIM * 4);
+    rows.forEach((row, i) => {
+        row.vector.forEach((value, d) => buffer.writeFloatLE(value, (i * DIM + d) * 4));
+    });
+    fs.writeFileSync(path.join(dir, `${name}.vec`), buffer);
+    fs.writeFileSync(path.join(dir, `${name}.jsonl`),
+        rows.map(row => JSON.stringify(row.meta)).join('\n') + '\n');
+}
 
+test('a legacy .vec/.jsonl pair is imported into sqlite once', () => {
+    const dir = tmpdir();
+    writeLegacy(dir, 't', [
+        { vector: axis(3), meta: { id: 'three' } },
+        { vector: axis(7), meta: { id: 'seven' } }
+    ]);
+
+    const imported = new vectorIndex.Collection('t', dir).load();
+    assert.strictEqual(imported.size, 2);
+    assert.strictEqual(imported.search(axis(7), { topK: 1 })[0].meta.id, 'seven');
+    assert.ok(!fs.existsSync(path.join(dir, 't.vec')), 'legacy files must stop shadowing the db');
+    assert.ok(fs.existsSync(path.join(dir, 't.vec.imported')), 'legacy bytes must survive the import');
+
+    const again = new vectorIndex.Collection('t', dir).load();
+    assert.strictEqual(again.size, 2);
+});
+
+test('legacy files that disagree are ignored, not imported and not fatal', () => {
+    const dir = tmpdir();
+    writeLegacy(dir, 't', [{ vector: axis(0), meta: { id: 'a' } }]);
     fs.appendFileSync(path.join(dir, 't.jsonl'), JSON.stringify({ id: 'orphan' }) + '\n');
 
     const reopened = new vectorIndex.Collection('t', dir).load();
     assert.strictEqual(reopened.size, 0);
+    assert.ok(fs.existsSync(path.join(dir, 't.vec')), 'a refused import must leave the files alone');
 });
 
 test('a missing collection is empty rather than an error', () => {
