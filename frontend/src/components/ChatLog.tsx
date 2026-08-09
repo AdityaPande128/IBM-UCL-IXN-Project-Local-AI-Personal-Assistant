@@ -28,7 +28,7 @@ function revealFile(path: string) {
   revealItemInDir(path).catch(() => {});
 }
 
-function Artifacts({ artifacts }: { artifacts: MessageArtifacts }) {
+export function Artifacts({ artifacts }: { artifacts: MessageArtifacts }) {
   return (
     <div className="artifacts">
       {artifacts.files?.map((file) => (

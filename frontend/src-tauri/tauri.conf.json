@@ -21,6 +21,20 @@
         "center": true,
         "minWidth": 900,
         "minHeight": 400
+      },
+      {
+        "label": "overlay",
+        "title": "Jarvis",
+        "width": 680,
+        "height": 460,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "center": true
       }
     ],
     "security": {

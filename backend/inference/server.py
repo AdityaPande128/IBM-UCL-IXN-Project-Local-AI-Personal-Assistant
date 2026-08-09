@@ -850,6 +850,52 @@ async def health():
     }
 
 
+VISION_CONFIG = CONFIG.get("vision") or {}
+VISION_MODEL = VISION_CONFIG.get("model", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")
+VISION_MAX_TOKENS = int(VISION_CONFIG.get("max_tokens", 400))
+
+
+@app.post("/see")
+async def see(image: UploadFile = File(...),
+              prompt: str = Form(default="Describe what is on the screen.")):
+    data = await image.read()
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = tmp.name
+
+    def _answer():
+        import gc
+        import mlx.core as mx
+        from mlx_vlm import load as vlm_load, generate as vlm_generate
+        from mlx_vlm.prompt_utils import apply_chat_template
+
+        model, processor = vlm_load(VISION_MODEL)
+        try:
+            formatted = apply_chat_template(processor, model.config, prompt, num_images=1)
+            result = vlm_generate(model, processor, formatted, image=[tmp_path],
+                                  max_tokens=VISION_MAX_TOKENS, temperature=0.0,
+                                  verbose=False)
+            return getattr(result, "text", result)
+        finally:
+            del model, processor
+            gc.collect()
+            try:
+                mx.clear_cache()
+            except AttributeError:
+                mx.metal.clear_cache()
+
+    try:
+        started = time.time()
+        text = await _run_mlx(_answer)
+        print(f"[Vision] Answered a screen question in {time.time() - started:.1f}s")
+        return {"text": (text or "").strip()}
+    except Exception as e:
+        print(f"[Vision] FAILED: {e}")
+        return {"error": str(e)}
+    finally:
+        os.unlink(tmp_path)
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("INFERENCE_PORT", CONFIG.get("ports", {}).get("inference", 8787)))

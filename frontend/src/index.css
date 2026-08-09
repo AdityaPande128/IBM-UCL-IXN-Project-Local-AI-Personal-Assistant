@@ -1068,3 +1068,67 @@ body {
   color: var(--text-3);
   padding: 6px 10px;
 }
+
+.overlay-body,
+.overlay-body #root {
+  background: transparent;
+}
+
+.overlay-card {
+  margin: 14px;
+  background: rgba(13, 16, 23, 0.94);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.overlay-input-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+}
+
+.overlay-orb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--grad);
+  flex-shrink: 0;
+}
+
+.overlay-input {
+  flex: 1;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.overlay-input::placeholder {
+  color: var(--text-3);
+}
+
+.overlay-busy {
+  font-size: 12px;
+  color: var(--teal);
+  flex-shrink: 0;
+}
+
+.overlay-answer {
+  border-top: 1px solid var(--border);
+  padding: 14px 18px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text);
+  white-space: pre-wrap;
+  max-height: 330px;
+  overflow-y: auto;
+}
+
+.overlay-answer--error {
+  color: var(--red);
+}

@@ -57,6 +57,13 @@
     "enforce_capabilities": "generated",
     "socket_token_path": "~/.jarvis/socket-token"
   },
+  "vision": {
+    "model": "mlx-community/Qwen2.5-VL-3B-Instruct-4bit",
+    "max_tokens": 400
+  },
+  "overlay": {
+    "shortcut": "super+shift+j"
+  },
   "logs": {
     "dir": "~/.jarvis/logs",
     "max_bytes": 5242880,

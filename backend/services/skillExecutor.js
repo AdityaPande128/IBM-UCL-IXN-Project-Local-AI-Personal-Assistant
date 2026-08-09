@@ -8,6 +8,8 @@ const skillSandbox = require('./skillSandbox');
 const skillPins = require('./skillPins');
 
 const ENFORCE_MODE = (configReader.readConfig().security || {}).enforce_capabilities || 'generated';
+const INFERENCE_URL = process.env.INFERENCE_URL
+    || `http://127.0.0.1:${configReader.readConfig().ports.inference}`;
 
 
 function findValue(canonicalName, spec, supplied) {
@@ -293,7 +295,8 @@ async function execute(skill, supplied = {}) {
 
         result = await runProcess(sandboxed.argv, skill.exec.timeout_ms, skill.directory, {
             ...process.env,
-            TMPDIR: tempDir
+            TMPDIR: tempDir,
+            JARVIS_INFERENCE_URL: INFERENCE_URL
         });
     } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -318,11 +321,12 @@ async function execute(skill, supplied = {}) {
     }
 
     const reply = substitute(skill.reply, coercion.parameters, skill.directory);
-    const body = parsed.text !== null ? parsed.text : parsed.stdout;
 
     return {
         status: 'success',
-        response: body ? `${reply}\n${body}`.trim() : reply,
+        response: parsed.text !== null
+            ? parsed.text
+            : (parsed.stdout ? `${reply}\n${parsed.stdout}`.trim() : reply),
         skill: skill.name,
         version: skill.version,
         parameters: coercion.parameters,

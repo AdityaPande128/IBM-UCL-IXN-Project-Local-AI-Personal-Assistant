@@ -206,10 +206,50 @@ fn shutdown(supervisor: &Supervisor) {
     }
 }
 
+fn overlay_shortcut() -> String {
+    fs::read_to_string(project_root().join("config.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|config| {
+            config
+                .get("overlay")
+                .and_then(|o| o.get("shortcut"))
+                .and_then(|s| s.as_str())
+                .map(String::from)
+        })
+        .unwrap_or_else(|| "super+shift+j".to_string())
+}
+
+fn toggle_overlay(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("overlay") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            let _ = window.show();
+            let _ = window.set_focus();
+            let _ = window.emit("overlay-shown", ());
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use tauri_plugin_global_shortcut::ShortcutState;
+
+    let shortcut = overlay_shortcut();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcuts([shortcut.as_str()])
+                .expect("the overlay shortcut in config.json is not a valid accelerator")
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
+                        toggle_overlay(app);
+                    }
+                })
+                .build(),
+        )
         .manage(Supervisor::default())
         .invoke_handler(tauri::generate_handler![socket_token, start_services, ensure_screen_access])
         .build(tauri::generate_context!())
