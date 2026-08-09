@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { ChatLog } from "./components/ChatLog";
 import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
@@ -34,6 +35,10 @@ function App() {
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
   const [view, setView] = useState<"chat" | "abilities">("chat");
+
+  useEffect(() => {
+    invoke("ensure_screen_access").catch(() => {});
+  }, []);
 
   const handleStart = async () => {
     await startRecording();

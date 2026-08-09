@@ -3,11 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 
 type MessageType = "user" | "assistant" | "system" | "error";
 
+export interface MessageArtifacts {
+  files?: { path: string; name: string; bytes: number }[];
+  table?: { columns: string[]; rows: string[][]; total: number };
+}
+
 interface ChatMessage {
   id: string;
   type: MessageType;
   text: string;
   timestamp: Date;
+  artifacts?: MessageArtifacts;
 }
 
 export interface Proposal {
@@ -146,12 +152,15 @@ export function useWebSocket(): UseWebSocketReturn {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const addMessage = useCallback((type: MessageType, text: string) => {
-    setMessages((prev) => [
-      ...prev,
-      { id: crypto.randomUUID(), type, text, timestamp: new Date() },
-    ]);
-  }, []);
+  const addMessage = useCallback(
+    (type: MessageType, text: string, artifacts?: MessageArtifacts) => {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), type, text, timestamp: new Date(), artifacts },
+      ]);
+    },
+    []
+  );
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
@@ -256,7 +265,7 @@ export function useWebSocket(): UseWebSocketReturn {
             setProposal(msg.proposal);
           }
           const text = msg.response ?? msg.error ?? "No response.";
-          addMessage(msg.status === "error" ? "error" : "assistant", text);
+          addMessage(msg.status === "error" ? "error" : "assistant", text, msg.artifacts);
           return;
         }
       } catch {

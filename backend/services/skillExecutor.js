@@ -148,6 +148,66 @@ function buildArgv(skill, parameters) {
 
 const MAX_OUTPUT_BYTES = 16 * 1024 * 1024;
 
+const RESULT_MARKER = 'JARVIS_RESULT ';
+const MAX_FILES = 20;
+const MAX_ROWS = 100;
+const MAX_COLUMNS = 12;
+const MAX_CELL_CHARS = 200;
+
+function parseArtifacts(stdout) {
+    const lines = stdout.split('\n');
+    const kept = [];
+    let raw = null;
+    for (const line of lines) {
+        if (line.startsWith(RESULT_MARKER)) raw = line.slice(RESULT_MARKER.length);
+        else kept.push(line);
+    }
+    const cleaned = kept.join('\n').trim();
+    if (raw === null) return { stdout, artifacts: null, text: null };
+
+    let parsed;
+    try {
+        parsed = JSON.parse(raw);
+    } catch (err) {
+        console.warn(`[SkillExecutor] ignoring a malformed JARVIS_RESULT line: ${err.message}`);
+        return { stdout: cleaned, artifacts: null, text: null };
+    }
+
+    const artifacts = {};
+
+    if (Array.isArray(parsed.files)) {
+        const files = [];
+        for (const entry of parsed.files.slice(0, MAX_FILES)) {
+            if (typeof entry !== 'string') continue;
+            try {
+                const stat = fs.statSync(entry);
+                if (stat.isFile()) {
+                    files.push({ path: entry, name: path.basename(entry), bytes: stat.size });
+                }
+            } catch { }
+        }
+        if (files.length) artifacts.files = files;
+    }
+
+    if (parsed.table && Array.isArray(parsed.table.columns) && Array.isArray(parsed.table.rows)) {
+        const cell = value => String(value).slice(0, MAX_CELL_CHARS);
+        const columns = parsed.table.columns.slice(0, MAX_COLUMNS).map(cell);
+        const rows = parsed.table.rows
+            .filter(Array.isArray)
+            .slice(0, MAX_ROWS)
+            .map(row => row.slice(0, MAX_COLUMNS).map(cell));
+        if (columns.length) {
+            artifacts.table = { columns, rows, total: parsed.table.rows.length };
+        }
+    }
+
+    return {
+        stdout: cleaned,
+        artifacts: Object.keys(artifacts).length ? artifacts : null,
+        text: typeof parsed.text === 'string' && parsed.text.trim() ? parsed.text.trim() : null
+    };
+}
+
 function runProcess(argv, timeoutMs, cwd, env) {
     return new Promise((resolve) => {
         const [command, ...args] = argv;
@@ -241,29 +301,33 @@ async function execute(skill, supplied = {}) {
 
     const durationMs = Date.now() - startedAt;
 
+    const parsed = parseArtifacts(result.stdout);
+
     if (!result.success) {
-        const diagnostic = result.stderr || result.stdout || result.error;
+        const diagnostic = result.stderr || parsed.stdout || result.error;
         return {
             status: 'error',
             response: `${skill.name} failed: ${diagnostic}`,
             skill: skill.name,
             version: skill.version,
             stderr: result.stderr,
-            stdout: result.stdout,
+            stdout: parsed.stdout,
             sandboxed: enforced,
             durationMs
         };
     }
 
     const reply = substitute(skill.reply, coercion.parameters, skill.directory);
+    const body = parsed.text !== null ? parsed.text : parsed.stdout;
 
     return {
         status: 'success',
-        response: result.stdout ? `${reply}\n${result.stdout}`.trim() : reply,
+        response: body ? `${reply}\n${body}`.trim() : reply,
         skill: skill.name,
         version: skill.version,
         parameters: coercion.parameters,
-        stdout: result.stdout,
+        stdout: parsed.stdout,
+        ...(parsed.artifacts ? { artifacts: parsed.artifacts } : {}),
         sandboxed: enforced,
         durationMs
     };

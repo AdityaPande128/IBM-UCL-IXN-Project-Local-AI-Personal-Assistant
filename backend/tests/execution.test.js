@@ -117,3 +117,49 @@ test('a failing skill reports its own stderr rather than "Command failed"', asyn
     assert.strictEqual(result.status, 'error');
     assert.match(result.response, /no such column: amount/);
 });
+
+test('a skill can hand back files and a table through the result envelope', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-artifacts-'));
+    const real = path.join(dir, 'report.csv');
+    fs.writeFileSync(real, 'a,b\n1,2\n');
+    const missing = path.join(dir, 'ghost.csv');
+
+    const script = [
+        'import json',
+        "print('before')",
+        `print('JARVIS_RESULT ' + json.dumps({'files': ['${real}', '${missing}'], ` +
+            "'table': {'columns': ['n'], 'rows': [[i] for i in range(150)]}}))",
+        "print('after')"
+    ].join('\n');
+    const result = await skillExecutor.execute(makeSkill(['python3', '-c', script]), {});
+
+    assert.strictEqual(result.status, 'success');
+    assert.strictEqual(result.artifacts.files.length, 1, 'missing files must be dropped');
+    assert.strictEqual(result.artifacts.files[0].name, 'report.csv');
+    assert.ok(result.artifacts.files[0].bytes > 0);
+    assert.strictEqual(result.artifacts.table.rows.length, 100, 'rows must be capped');
+    assert.strictEqual(result.artifacts.table.total, 150);
+    assert.ok(!result.response.includes('JARVIS_RESULT'), 'the marker line must not be shown');
+    assert.match(result.response, /before/);
+    assert.match(result.response, /after/);
+});
+
+test('an envelope text replaces raw stdout in the visible reply', async () => {
+    const script = "print('raw noise')\nprint('JARVIS_RESULT {\"text\": \"42 files counted.\"}')";
+    const result = await skillExecutor.execute(makeSkill(['python3', '-c', script]), {});
+
+    assert.strictEqual(result.status, 'success');
+    assert.match(result.response, /42 files counted\./);
+    assert.ok(!result.response.includes('raw noise'));
+    assert.strictEqual(result.artifacts, undefined);
+});
+
+test('a malformed envelope is dropped without breaking the run', async () => {
+    const script = "print('useful output')\nprint('JARVIS_RESULT {not json')";
+    const result = await skillExecutor.execute(makeSkill(['python3', '-c', script]), {});
+
+    assert.strictEqual(result.status, 'success');
+    assert.match(result.response, /useful output/);
+    assert.ok(!result.response.includes('JARVIS_RESULT'));
+    assert.strictEqual(result.artifacts, undefined);
+});
