@@ -852,7 +852,63 @@ async def health():
 
 VISION_CONFIG = CONFIG.get("vision") or {}
 VISION_MODEL = VISION_CONFIG.get("model", "mlx-community/Qwen2.5-VL-3B-Instruct-4bit")
-VISION_MAX_TOKENS = int(VISION_CONFIG.get("max_tokens", 400))
+VISION_MAX_TOKENS = int(VISION_CONFIG.get("max_tokens", 700))
+VISION_REASON_TIER = VISION_CONFIG.get("reason_tier", "engine")
+VISION_REASON_MAX_TOKENS = int(VISION_CONFIG.get("reason_max_tokens", 600))
+
+TRANSCRIBE_PROMPT = (
+    "Transcribe the content of this screen exactly: every piece of visible text, "
+    "code, formula, equation and number, preserving their structure. Do not "
+    "summarise, correct or omit anything. After the transcription, add one short "
+    "paragraph describing the layout and which applications appear to be open."
+)
+
+
+def _transcribe_screen(tmp_path):
+    import gc
+    import mlx.core as mx
+    from mlx_vlm import load as vlm_load, generate as vlm_generate
+    from mlx_vlm.prompt_utils import apply_chat_template
+
+    model, processor = vlm_load(VISION_MODEL)
+    try:
+        formatted = apply_chat_template(processor, model.config, TRANSCRIBE_PROMPT,
+                                        num_images=1)
+        result = vlm_generate(model, processor, formatted, image=[tmp_path],
+                              max_tokens=VISION_MAX_TOKENS, temperature=0.0,
+                              verbose=False)
+        return (getattr(result, "text", result) or "").strip()
+    finally:
+        del model, processor
+        gc.collect()
+        try:
+            mx.clear_cache()
+        except AttributeError:
+            mx.metal.clear_cache()
+
+
+def _reason_about_screen(question, transcription):
+    return _generate_llm({
+        "model": VISION_REASON_TIER,
+        "max_tokens": VISION_REASON_MAX_TOKENS,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content":
+                "You are Jarvis, a local assistant. The user asked a question about "
+                "what is on their screen, and a vision model transcribed the screen "
+                "for you. Answer the user's question from the transcription alone. "
+                "When the question asks whether something is correct, verify it line "
+                "by line: recompute or re-derive each written step yourself, then "
+                "compare YOUR result with what the screen actually shows, quoting any "
+                "line where they differ. The screen may contain mistakes — never "
+                "assume a step or a stated conclusion is right because the screen "
+                "says so. If the transcription does not contain enough to answer, "
+                "say exactly what is missing. Be direct and concrete."},
+            {"role": "user", "content":
+                f"Question about the screen: {question}\n\n"
+                f"Screen transcription:\n{transcription}"},
+        ],
+    })
 
 
 @app.post("/see")
@@ -863,32 +919,16 @@ async def see(image: UploadFile = File(...),
         tmp.write(data)
         tmp_path = tmp.name
 
-    def _answer():
-        import gc
-        import mlx.core as mx
-        from mlx_vlm import load as vlm_load, generate as vlm_generate
-        from mlx_vlm.prompt_utils import apply_chat_template
-
-        model, processor = vlm_load(VISION_MODEL)
-        try:
-            formatted = apply_chat_template(processor, model.config, prompt, num_images=1)
-            result = vlm_generate(model, processor, formatted, image=[tmp_path],
-                                  max_tokens=VISION_MAX_TOKENS, temperature=0.0,
-                                  verbose=False)
-            return getattr(result, "text", result)
-        finally:
-            del model, processor
-            gc.collect()
-            try:
-                mx.clear_cache()
-            except AttributeError:
-                mx.metal.clear_cache()
-
     try:
         started = time.time()
-        text = await _run_mlx(_answer)
-        print(f"[Vision] Answered a screen question in {time.time() - started:.1f}s")
-        return {"text": (text or "").strip()}
+        transcription = await _run_mlx(_transcribe_screen, tmp_path)
+        if not transcription:
+            return {"error": "the vision model read nothing from the screen"}
+        looked = time.time()
+        answer = await _run_mlx(_reason_about_screen, prompt, transcription)
+        print(f"[Vision] Screen question answered: looked {looked - started:.1f}s, "
+              f"reasoned {time.time() - looked:.1f}s")
+        return {"text": (answer or "").strip(), "transcription": transcription}
     except Exception as e:
         print(f"[Vision] FAILED: {e}")
         return {"error": str(e)}
