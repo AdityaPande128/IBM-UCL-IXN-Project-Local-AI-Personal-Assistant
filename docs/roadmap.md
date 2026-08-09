@@ -5,6 +5,16 @@ Sequencing is fixed by one non-negotiable cut line: **only Phase 1 is in scope
 before the MSc submission.** Phases 2–6 are the Future Work chapter, written
 here first so the report's future work describes a plan, not a wish.
 
+**Revision (2026-08-09, evening):** submission is **2026-09-21**, a six-week
+runway, not four. Two items move across the cut line into Phase 1, inserted
+between the week-2 app work and freeze day (see the pulled-forward section
+below): the **capability-improvement work** from Phase 4/#66 — pulled because
+Suite C scores build success head-to-head against OpenClaw's native workshop,
+so pipeline quality lands directly in the headline table — and **Outlook web
+as a second mail provider** from Phase 5 (multi-account stays in Phase 5).
+Screen sight was built, shown workable, and cut the same day: it required a
+fourth model and ~35 s per answer; logged as a scope decision for the report.
+
 ## Phase 1 — Ship v1 (pre-submission)
 
 ### Week 1 — the visible app
@@ -71,6 +81,30 @@ here first so the report's future work describes a plan, not a wish.
   recording only follow it), and OpenClaw's Arm-C model pilot as defined in
   the protocol's §9. Nothing runs before the freeze; nothing changes after
   it.
+
+### Pulled forward (2026-08-09) — capability improvement and Outlook
+
+Sits between the week-2 app work and freeze day; the evidence and finish weeks
+below shift right accordingly on the 2026-09-21 calendar. Nothing here changes
+the protocol — Suite C already measures what this block improves.
+
+- **Skill-build pipeline quality** (from Phase 4 and #66's dev-side half):
+  repair with failure context — a failed verification feeds its own test
+  output and stderr back into one repair generation instead of a blind retry;
+  grounded verification — generated skills are tested on the request's own
+  data, not only synthetic fixtures; structured returns — built skills use
+  the artifact envelope so results compose. Progress is measured on a
+  build-success dev set (requests disjoint from Suite C's tasks, so the
+  frozen suite stays unseen), before/after per pipeline change.
+- **Outlook web as a second mail provider** (from Phase 5): the mail loop
+  becomes provider-agnostic — the linked mail provider is a setting, the
+  tier-2/3 lanes and mandate rules are shared, and the seven mail-case
+  sentences are exercised against an Outlook mailbox as a development check.
+  The evaluation suites remain Gmail-based as frozen; Outlook evidence is
+  reported as a portability demonstration, not a new suite.
+- The Arm-C **stronger-model pilot** for skill generation stays where the
+  protocol puts it (§9, pilot, excluded from results); the LoRA and
+  model-swap work beyond that stays in Phase 5.
 
 ### Week 3 — evidence
 - Evaluation runs per the frozen protocol — **~250 attended runs at 6–8
