@@ -53,7 +53,7 @@ PART 1 — a JSON object with the metadata. Do NOT include the script here:
       "parameters": { "<param_name>": "<value>" },
       "expect": {
         "exit_code": 0,
-        "stdout_contains": "<substring>",
+        "stdout_contains": "<shortest distinctive substring, like '3' or 'output.csv' — never a sentence>",
         "files_exist": ["relative/output.txt"]
       }
     }
@@ -76,30 +76,55 @@ Rules for the script:
 4. Print a short human-readable summary of what was done to stdout. Exit non-zero on failure.
 5. Expand a leading ~ in any path argument with os.path.expanduser.
 6. Do not delete or overwrite user data unless the request explicitly asks for it.
+7. If the skill's outcome is a file the user will open, the script's LAST stdout line must be the marker JARVIS_RESULT followed by one JSON object naming it, like: JARVIS_RESULT {"files": ["/absolute/path/to/output.csv"]} — one line, nothing after it. Skills that only report an answer print no marker.
 
 Rules for "tests":
-7. Author at least one test case. Tests run in a throwaway directory — declare any input files the script needs in "fixtures", using relative paths.
-8. Parameters in a test case must use paths relative to that directory, so the case is self-contained. Do not reference real user files.
-9. The assertions must actually demonstrate the skill worked, not merely that it ran.
+8. Author at least one test case. Tests run in a throwaway directory — declare any input files the script needs in "fixtures", using relative paths.
+9. Parameters in a test case must use paths relative to that directory, so the case is self-contained. Do not reference real user files.
+10. The assertions must actually demonstrate the skill worked, not merely that it ran.
+11. Compute each expected value by hand from the fixture content before writing it down — a test that asserts a wrong expectation rejects a correct script.
+12. In "stdout_contains", assert the smallest distinctive substring (a number, a filename), never a full sentence — you will not phrase the sentence identically in the script.
 
 Already installed: ${taken}
 
 Rules for "name": kebab-case, lowercase, descriptive of the action. If the request is already covered by an installed skill, reuse that skill's exact name — do not invent a variant.`;
 }
 
-const REPAIR_TEMPLATE = `That attempt was rejected. Reason: %REASON%
+const REPAIR_TEMPLATE = `That attempt was rejected. Reason:
 
-Produce the COMPLETE corrected JSON object — every field from the schema above,
-including "script" in full, not only the part that was wrong. A reply containing
-just the corrected field is itself a rejected attempt, and there are only a few.
-Respond with ONLY the JSON object.`;
+%REASON%
+
+Respond again in the SAME two-part format: PART 1, the complete corrected JSON
+metadata object — every field, not only what changed — then PART 2, the complete
+corrected Python script in its fenced block. A reply missing either part is
+itself a rejected attempt, and there are only a few.`;
+
+function describeVerificationFailure(verification) {
+    const lines = [];
+    for (const r of verification.results || []) {
+        if (r.passed) {
+            lines.push(`PASS ${r.name} — do not break this case while fixing the others.`);
+            continue;
+        }
+        lines.push(`FAIL ${r.name}: ${r.reason}`);
+        if (r.argv) lines.push(`  ran: ${r.argv}`);
+        if (r.stdout) lines.push(`  stdout: ${r.stdout}`);
+        if (r.stderr) lines.push(`  stderr: ${r.stderr}`);
+    }
+    lines.push('Diagnose the failure from the output above — especially any traceback — before rewriting. '
+        + 'If the test\'s expectation is itself wrong — recompute it by hand from the fixtures — fix the test, not the script.');
+    return lines.join('\n').slice(0, 4000);
+}
 
 
-async function callModel(messages) {
+async function callModel(messages, attempt = 1) {
     try {
+        // Warmer on each retry: at low temperature a rejected attempt tends to be
+        // reproduced verbatim, and a repair loop that regenerates the same
+        // envelope three times is just a slow rejection.
         return await llmClient.complete(messages, {
             tier: TIER,
-            temperature: TEMPERATURE,
+            temperature: Math.min(0.7, TEMPERATURE + 0.2 * (attempt - 1)),
             max_tokens: MAX_TOKENS,
             timeout_ms: TIMEOUT_MS
         });
@@ -194,6 +219,17 @@ function validateEnvelope(candidate) {
             errors.push(
                 `test case ${index + 1} ("${testCase?.name || 'unnamed'}") does not supply required ` +
                 `parameter(s): ${missing.join(', ')} — every required parameter must appear in each test case`
+            );
+        }
+
+        // A full-sentence assertion couples the test to phrasing the script will
+        // never reproduce exactly; attempts then burn on wording instead of logic.
+        const asserted = testCase?.expect?.stdout_contains;
+        if (typeof asserted === 'string' && asserted.length > 40 && asserted.split(' ').length > 6) {
+            errors.push(
+                `test case ${index + 1} asserts a full sentence in stdout_contains ` +
+                `("${asserted.slice(0, 60)}…") — assert the smallest distinctive substring ` +
+                `(a number, a filename), not prose the script must reproduce word for word`
             );
         }
     }
@@ -316,7 +352,7 @@ async function generate(request, options = {}) {
         stage = ledger.STAGES.MODEL_CALL;
         let raw;
         try {
-            raw = await callModel(messages);
+            raw = await callModel(messages, attempt);
         } catch (err) {
             ledger.append({
                 request, outcome: 'rejected', stage,
@@ -436,8 +472,35 @@ async function generate(request, options = {}) {
                 break;
             }
             messages.push({ role: 'assistant', content: raw });
-            messages.push({ role: 'user', content: REPAIR_TEMPLATE.replace('%REASON%', lastReason) });
+            messages.push({ role: 'user',
+                content: REPAIR_TEMPLATE.replace('%REASON%', () => describeVerificationFailure(verification)) });
             continue;
+        }
+
+        const grounded = await verifier.groundedTrial(candidate, request, VERIFY_TIMEOUT_MS);
+        if (grounded.skipped) {
+            console.log(`[SkillGenerator] Grounded trial skipped: ${grounded.why}`);
+        } else if (!grounded.passed) {
+            lastReason = grounded.reason;
+            console.warn(`[SkillGenerator] Attempt ${attempt}: grounded trial failed — ${lastReason}`);
+            activityBus.publish('generator', 'tests_failed', { attempt, reason: lastReason, grounded: true });
+            if (attempt === MAX_ATTEMPTS) {
+                ledger.append({
+                    request, outcome: 'rejected', stage,
+                    failure: ledger.FAILURES.GROUNDED_FAILED,
+                    detail: lastReason, attempts: attempt,
+                    candidate_name: candidate.name,
+                    durationMs: Date.now() - startedAt
+                });
+                break;
+            }
+            messages.push({ role: 'assistant', content: raw });
+            messages.push({ role: 'user',
+                content: REPAIR_TEMPLATE.replace('%REASON%',
+                    () => describeVerificationFailure({ results: [{ name: 'grounded trial', ...grounded }] })) });
+            continue;
+        } else {
+            console.log(`[SkillGenerator] Grounded trial passed on ${grounded.source}.`);
         }
 
         stage = ledger.STAGES.REGISTERED;
@@ -471,7 +534,7 @@ async function generate(request, options = {}) {
                 messages.push({ role: 'assistant', content: raw });
                 messages.push({
                     role: 'user',
-                    content: REPAIR_TEMPLATE.replace('%REASON%',
+                    content: REPAIR_TEMPLATE.replace('%REASON%', () =>
                         `${detail}. Every {{token}} in "reply" must be one of the declared parameter names; ` +
                         `do not reference computed values there.`)
                 });
@@ -527,5 +590,7 @@ module.exports = {
     buildManifest,
     renderSkillMd,
     extractJson,
-    toYaml
+    toYaml,
+    describeVerificationFailure,
+    REPAIR_TEMPLATE
 };

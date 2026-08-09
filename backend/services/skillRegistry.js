@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
-const SKILLS_DIR = path.resolve(__dirname, '..', 'skills');
+const SKILLS_DIR = process.env.JARVIS_SKILLS_DIR
+    ? path.resolve(process.env.JARVIS_SKILLS_DIR)
+    : path.resolve(__dirname, '..', 'skills');
 
 const VALID_PARAM_TYPES = ['number', 'string', 'boolean', 'enum'];
 const VALID_EXEC_TYPES = ['command', 'script'];
