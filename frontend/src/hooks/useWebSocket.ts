@@ -49,6 +49,22 @@ export interface AbilitiesData {
   builds: Record<string, any>[];
   tiers: { tier: string; model: string; policy: string }[];
   openclaw: { connected: boolean; dashboard: string };
+  browser: { current: string; installed: string[] };
+  budget: {
+    budget_gb: number | null;
+    voice_reserve_gb: number | null;
+    measured_gb: Record<string, number>;
+  };
+}
+
+export interface SettingsUpdate {
+  tiers?: Record<string, { model?: string; policy?: string }>;
+  desktop_browser?: string;
+}
+
+export interface SettingsResult {
+  status: "applying" | "applied" | "invalid";
+  error?: string;
 }
 
 interface UseWebSocketReturn {
@@ -60,6 +76,7 @@ interface UseWebSocketReturn {
   proposal: Proposal | null;
   abilities: AbilitiesData | null;
   diagnostics: DiagnosticsResult | null;
+  settingsResult: SettingsResult | null;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
   sendDecision: (id: string, decision: "yes" | "no") => void;
@@ -67,6 +84,7 @@ interface UseWebSocketReturn {
   requestAbilities: () => void;
   removeSkill: (name: string) => void;
   saveDiagnostics: () => void;
+  updateSettings: (update: SettingsUpdate) => void;
 }
 
 import { config } from "../config";
@@ -123,6 +141,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [activeIntents, setActiveIntents] = useState<string[]>([]);
   const [abilities, setAbilities] = useState<AbilitiesData | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
+  const [settingsResult, setSettingsResult] = useState<SettingsResult | null>(null);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -166,6 +185,7 @@ export function useWebSocket(): UseWebSocketReturn {
         if (msg.type === "connected") {
           setConnected(true);
           setOpenclawConnected(msg.openclaw || false);
+          setSettingsResult(null);
           addMessage("system", msg.message);
           return;
         }
@@ -214,6 +234,10 @@ export function useWebSocket(): UseWebSocketReturn {
         }
         if (msg.type === "diagnostics_result") {
           setDiagnostics({ status: msg.status, path: msg.path, error: msg.error });
+          return;
+        }
+        if (msg.type === "settings_update_result") {
+          setSettingsResult({ status: msg.status, error: msg.error });
           return;
         }
         if (msg.type === "skill_remove_result") {
@@ -315,6 +339,13 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const updateSettings = useCallback((update: SettingsUpdate) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setSettingsResult({ status: "applying" });
+      wsRef.current.send(JSON.stringify({ type: "settings_update", ...update }));
+    }
+  }, []);
+
   return {
     connected,
     openclawConnected,
@@ -324,6 +355,7 @@ export function useWebSocket(): UseWebSocketReturn {
     proposal,
     abilities,
     diagnostics,
+    settingsResult,
     sendBinary,
     sendIntent,
     sendDecision,
@@ -331,5 +363,6 @@ export function useWebSocket(): UseWebSocketReturn {
     requestAbilities,
     removeSkill,
     saveDiagnostics,
+    updateSettings,
   };
 }

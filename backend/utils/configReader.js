@@ -1,19 +1,24 @@
 const path = require('path');
 const fs = require('fs');
 
+function configPath() {
+    if (process.env.JARVIS_CONFIG_PATH) return process.env.JARVIS_CONFIG_PATH;
+
+    const possiblePaths = [
+        path.resolve(__dirname, '../../config.json'),
+        path.resolve(__dirname, '../config.json'),
+        path.resolve(__dirname, './config.json')
+    ];
+
+    for (const candidate of possiblePaths) {
+        if (fs.existsSync(candidate)) return candidate;
+    }
+    return possiblePaths[0];
+}
+
 function readConfig() {
     try {
-        const possiblePaths = [
-            path.resolve(__dirname, '../../config.json'),
-            path.resolve(__dirname, '../config.json'),
-            path.resolve(__dirname, './config.json')
-        ];
-
-        for (const configPath of possiblePaths) {
-            if (fs.existsSync(configPath)) {
-                return JSON.parse(fs.readFileSync(configPath, 'utf8'));
-            }
-        }
+        return JSON.parse(fs.readFileSync(configPath(), 'utf8'));
     } catch (e) {
         console.error("[ConfigReader] Error reading config.json:", e);
     }
@@ -28,4 +33,4 @@ function readConfig() {
     };
 }
 
-module.exports = { readConfig };
+module.exports = { readConfig, configPath };

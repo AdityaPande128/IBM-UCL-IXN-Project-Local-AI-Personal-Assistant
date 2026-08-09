@@ -15,6 +15,7 @@ const skillPins = require('./services/skillPins');
 const procedureStore = require('./services/procedureStore');
 const generationLog = require('./services/generationLog');
 const diagnostics = require('./services/diagnostics');
+const settings = require('./services/settings');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -185,8 +186,27 @@ wss.on('connection', (ws) => {
                     openclaw: {
                         connected: openclawBridge.isConnected(),
                         dashboard: `http://127.0.0.1:${config.ports.openclaw}`
-                    }
+                    },
+                    ...settings.describe(config)
                 }));
+                return;
+            }
+
+            if (parsed.type === 'settings_update') {
+                const result = settings.apply({
+                    tiers: parsed.tiers,
+                    desktop_browser: parsed.desktop_browser
+                });
+                if (result.status === 'applied') {
+                    activityBus.publish('daemon', 'settings_applied', {});
+                    ws.send(JSON.stringify({ type: 'settings_update_result',
+                        status: 'applied', restarting: true }));
+                    if (process.env.JARVIS_SETTINGS_RESTART !== 'off') {
+                        setTimeout(() => process.exit(0), 400);
+                    }
+                } else {
+                    ws.send(JSON.stringify({ type: 'settings_update_result', ...result }));
+                }
                 return;
             }
 

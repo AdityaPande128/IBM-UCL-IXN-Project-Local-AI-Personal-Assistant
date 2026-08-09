@@ -14,6 +14,9 @@ process.env.JARVIS_LOGS_DIR = path.join(scratch, 'logs');
 process.env.JARVIS_DIAGNOSTICS_DIR = path.join(scratch, 'diagnostics');
 fs.mkdirSync(process.env.JARVIS_LOGS_DIR, { recursive: true });
 fs.writeFileSync(path.join(process.env.JARVIS_LOGS_DIR, 'backend.log'), 'boot ok\n');
+process.env.JARVIS_CONFIG_PATH = path.join(scratch, 'config.json');
+fs.copyFileSync(path.resolve(__dirname, '../../config.json'), process.env.JARVIS_CONFIG_PATH);
+process.env.JARVIS_SETTINGS_RESTART = 'off';
 
 const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
@@ -333,5 +336,54 @@ test('a diagnostics bundle collects logs, config and recent runs — never the t
     assert.match(listing, /recent-plans\.json/);
     assert.match(listing, /logs\/backend\.log/);
     assert.strictEqual(listing.includes('socket-token'), false);
+    client.ws.close();
+});
+
+test('settings ride the abilities payload and edits land in config.json', async () => {
+    const client = await authed();
+    client.send({ type: 'abilities' });
+    const abilities = await client.next(m => m.type === 'abilities_result');
+    assert.ok(abilities.browser.installed.includes(abilities.browser.current));
+    assert.ok(abilities.budget.measured_gb);
+
+    client.send({
+        type: 'settings_update',
+        tiers: { engine: { policy: 'resident' } },
+        desktop_browser: abilities.browser.current
+    });
+    const applied = await client.next(m => m.type === 'settings_update_result');
+    assert.strictEqual(applied.status, 'applied');
+
+    const written = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
+    assert.strictEqual(written.models.tiers.engine.policy, 'resident');
+    assert.strictEqual(written.web.desktop_browser, abilities.browser.current);
+    client.ws.close();
+});
+
+test('a settings update that breaks the memory budget is refused', async () => {
+    const big = 'mlx-community/Qwen2.5-Coder-14B-Instruct-4bit';
+    const client = await authed();
+    client.send({
+        type: 'settings_update',
+        tiers: {
+            guard: { model: big, policy: 'pinned' },
+            engine: { model: big, policy: 'resident' }
+        }
+    });
+    const refused = await client.next(m => m.type === 'settings_update_result');
+    assert.strictEqual(refused.status, 'invalid');
+    assert.match(refused.error, /GB/);
+
+    const written = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
+    assert.notStrictEqual(written.models.tiers.guard.model, big);
+    client.ws.close();
+});
+
+test('a browser that is not installed is refused', async () => {
+    const client = await authed();
+    client.send({ type: 'settings_update', desktop_browser: 'Netscape Navigator' });
+    const refused = await client.next(m => m.type === 'settings_update_result');
+    assert.strictEqual(refused.status, 'invalid');
+    assert.match(refused.error, /not installed/);
     client.ws.close();
 });

@@ -19,6 +19,7 @@ function App() {
     proposal,
     abilities,
     diagnostics,
+    settingsResult,
     sendBinary,
     sendIntent,
     sendDecision,
@@ -26,6 +27,7 @@ function App() {
     requestAbilities,
     removeSkill,
     saveDiagnostics,
+    updateSettings,
   } = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
   const services = useServices();
@@ -88,11 +90,14 @@ function App() {
             </>
           ) : (
             <AbilitiesView
+              key={connected ? "online" : "offline"}
               abilities={abilities}
               diagnostics={diagnostics}
+              settingsResult={settingsResult}
               onRefresh={requestAbilities}
               onRemoveSkill={removeSkill}
               onSaveDiagnostics={saveDiagnostics}
+              onUpdateSettings={updateSettings}
             />
           )}
         </main>
