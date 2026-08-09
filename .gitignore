@@ -8,6 +8,7 @@ target/
 # The accessibility helper is built from source; the binary is not committed.
 backend/native/jarvis-ax
 backend/data/skill-pins.json
+backend/eval/skillgen/results/
 .claude/
 docs/
 

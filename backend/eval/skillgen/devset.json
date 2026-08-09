@@ -1,0 +1,87 @@
+{
+  "comment": "Development set for the skill-build pipeline. Ten capability requests with mechanically checkable outcomes, run before and after each pipeline change. These are development instruments: Suite C's frozen tasks must be authored disjoint from this list.",
+  "entries": [
+    {
+      "id": "reverse-lines",
+      "request": "make me a skill that reverses the order of lines in a text file, writing the result to a new file",
+      "fixtures": [{ "path": "poem.txt", "content": "north\nsouth\neast\nwest\n" }],
+      "invoke": { "input": "{dir}/poem.txt", "output": "{dir}/reversed.txt" },
+      "checks": [{ "type": "file_contains", "path": "{dir}/reversed.txt", "text": "west\neast\nsouth\nnorth" }]
+    },
+    {
+      "id": "tabs-to-spaces",
+      "request": "build a skill that replaces every tab character in a text file with four spaces, writing the result to a new file",
+      "fixtures": [{ "path": "code.txt", "content": "def x():\n\treturn 1\n" }],
+      "invoke": { "input": "{dir}/code.txt", "output": "{dir}/spaced.txt" },
+      "checks": [
+        { "type": "file_contains", "path": "{dir}/spaced.txt", "text": "    return 1" },
+        { "type": "file_not_contains", "path": "{dir}/spaced.txt", "text": "\t" }
+      ]
+    },
+    {
+      "id": "number-lines",
+      "request": "I want a skill that writes a copy of a text file with each line prefixed by its line number, a colon and a space, like '1: first line'",
+      "fixtures": [{ "path": "notes.txt", "content": "alpha\nbeta\ngamma\n" }],
+      "invoke": { "input": "{dir}/notes.txt", "output": "{dir}/numbered.txt" },
+      "checks": [{ "type": "file_contains", "path": "{dir}/numbered.txt", "text": "2: beta" }]
+    },
+    {
+      "id": "merge-txt",
+      "request": "combine all the .txt files in a folder into one output file, with each file's name on its own line before that file's content",
+      "fixtures": [
+        { "path": "box/a.txt", "content": "apple\n" },
+        { "path": "box/b.txt", "content": "banana\n" }
+      ],
+      "invoke": { "input": "{dir}/box", "output": "{dir}/merged.txt" },
+      "checks": [
+        { "type": "file_contains", "path": "{dir}/merged.txt", "text": "a.txt" },
+        { "type": "file_contains", "path": "{dir}/merged.txt", "text": "banana" }
+      ]
+    },
+    {
+      "id": "crlf-to-lf",
+      "request": "convert a text file with Windows line endings to Unix line endings, saving the converted version as a new file",
+      "fixtures": [{ "path": "dos.txt", "content": "one\r\ntwo\r\n" }],
+      "invoke": { "input": "{dir}/dos.txt", "output": "{dir}/unix.txt" },
+      "checks": [
+        { "type": "file_contains", "path": "{dir}/unix.txt", "text": "one\ntwo" },
+        { "type": "file_not_contains", "path": "{dir}/unix.txt", "text": "\r" }
+      ]
+    },
+    {
+      "id": "count-long-words",
+      "request": "count how many words in a text file are longer than 5 letters and tell me the number",
+      "fixtures": [{ "path": "words.txt", "content": "elephant giraffe cat dog hippopotamus fox\n" }],
+      "invoke": { "input": "{dir}/words.txt", "number": 5 },
+      "checks": [{ "type": "stdout_matches", "pattern": "\\b3\\b" }]
+    },
+    {
+      "id": "csv-columns",
+      "request": "tell me how many columns a csv file has by reading its header row",
+      "fixtures": [{ "path": "data.csv", "content": "a,b,c,d,e\n1,2,3,4,5\n" }],
+      "invoke": { "input": "{dir}/data.csv" },
+      "checks": [{ "type": "stdout_matches", "pattern": "\\b5\\b" }]
+    },
+    {
+      "id": "sort-csv",
+      "request": "sort a csv file by its second column numerically, writing the sorted rows to a new file with the header kept first",
+      "fixtures": [{ "path": "scores.csv", "content": "name,score\nzed,30\namy,10\nbob,20\n" }],
+      "invoke": { "input": "{dir}/scores.csv", "output": "{dir}/sorted.csv" },
+      "checks": [{ "type": "file_contains", "path": "{dir}/sorted.csv", "text": "amy,10\nbob,20\nzed,30" }]
+    },
+    {
+      "id": "count-empty-lines",
+      "request": "count the number of empty lines in a text file and report it",
+      "fixtures": [{ "path": "gaps.txt", "content": "a\n\nb\n\n\nc\n" }],
+      "invoke": { "input": "{dir}/gaps.txt" },
+      "checks": [{ "type": "stdout_matches", "pattern": "\\b3\\b" }]
+    },
+    {
+      "id": "longest-word",
+      "request": "find the longest word in a text file and print it",
+      "fixtures": [{ "path": "story.txt", "content": "it was the hippopotamus honestly\n" }],
+      "invoke": { "input": "{dir}/story.txt" },
+      "checks": [{ "type": "stdout_contains", "text": "hippopotamus" }]
+    }
+  ]
+}

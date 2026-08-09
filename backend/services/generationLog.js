@@ -1,7 +1,9 @@
 const fs = require('fs');
 const path = require('path');
 
-const LOG_PATH = path.resolve(__dirname, '..', 'skills', '.generation-log.json');
+const LOG_PATH = process.env.JARVIS_SKILLS_DIR
+    ? path.resolve(process.env.JARVIS_SKILLS_DIR, '.generation-log.json')
+    : path.resolve(__dirname, '..', 'skills', '.generation-log.json');
 
 const STAGES = {
     REQUESTED: 'requested',
@@ -22,6 +24,7 @@ const FAILURES = {
     NO_TESTS: 'no_tests_authored',
     VERIFICATION_FAILED: 'verification_failed',
     VERIFICATION_TIMEOUT: 'verification_timeout',
+    GROUNDED_FAILED: 'grounded_trial_failed',
     WRITE_FAILED: 'write_failed'
 };
 

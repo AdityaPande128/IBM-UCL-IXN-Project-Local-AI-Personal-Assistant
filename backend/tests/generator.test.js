@@ -39,6 +39,27 @@ test('validateEnvelope: requires a script', () => {
     assert.ok(r.errors.some(e => e.includes('script')));
 });
 
+test('validateEnvelope: rejects a full-sentence stdout assertion', () => {
+    const r = generator.validateEnvelope({
+        ...validEnvelope,
+        tests: [{
+            name: 'prose', parameters: { folder: 'docs' },
+            expect: { exit_code: 0, stdout_contains: 'Counted all of the words in the folder and wrote them to the file.' }
+        }]
+    });
+    assert.equal(r.valid, false);
+    assert.ok(r.errors.some(e => e.includes('smallest distinctive substring')));
+
+    const short = generator.validateEnvelope({
+        ...validEnvelope,
+        tests: [{
+            name: 'fine', parameters: { folder: 'docs' },
+            expect: { exit_code: 0, stdout_contains: '42 words' }
+        }]
+    });
+    assert.equal(short.valid, true, short.errors.join('; '));
+});
+
 test('validateEnvelope: rejects malformed parameter names', () => {
     const r = generator.validateEnvelope({
         ...validEnvelope,
@@ -405,4 +426,105 @@ test('buildPrompt: instructs the two-part format and forbids code in JSON', () =
     assert.ok(prompt.includes('```python'), 'fenced python block must be shown');
     assert.ok(/Never place source code inside the\s+JSON/.test(prompt),
         'prompt must forbid code inside JSON');
+});
+
+test('buildPrompt: teaches the artifact envelope for produced files', () => {
+    const prompt = generator.buildPrompt([]);
+    assert.ok(prompt.includes('JARVIS_RESULT'), 'the result marker must be taught');
+});
+
+test('the repair template demands both parts again, not JSON alone', () => {
+    assert.ok(generator.REPAIR_TEMPLATE.includes('PART 2'),
+        'a repair that asks for only the JSON loses the script');
+    assert.ok(!/ONLY the JSON/i.test(generator.REPAIR_TEMPLATE));
+});
+
+test('describeVerificationFailure carries the evidence, not just the verdict', () => {
+    const message = generator.describeVerificationFailure({
+        results: [
+            { name: 'happy path', passed: true },
+            {
+                name: 'sad path', passed: false, reason: 'exit code 2, expected 0',
+                argv: 'run.py --file a.txt',
+                stdout: '', stderr: 'Traceback (most recent call last):\n  KeyError: score'
+            }
+        ]
+    });
+    assert.ok(message.includes('FAIL sad path'));
+    assert.ok(message.includes('KeyError'), 'the traceback must reach the model');
+    assert.ok(message.includes('run.py --file a.txt'), 'the command line must reach the model');
+    assert.ok(message.includes('PASS happy path'), 'surviving cases must be named so they stay green');
+});
+
+test('runTestCase: a failing case reports what the script actually printed', async () => {
+    const result = await verifier.runTestCase(
+        'import sys; print("partial"); sys.exit(3)',
+        { name: 'fails', parameters: {}, expect: { exit_code: 0 } },
+        [],
+        10000
+    );
+    assert.equal(result.passed, false);
+    assert.ok(result.stdout.includes('partial'), 'stdout must be captured for repair');
+    assert.ok(result.argv.startsWith('run.py'), 'the invocation must be captured for repair');
+});
+
+
+test('extractRequestPaths: finds and expands paths the request names', () => {
+    const paths = verifier.extractRequestPaths(
+        'count the words in ~/Documents/notes.txt and also /tmp/x.csv, please');
+    assert.equal(paths.length, 2);
+    assert.ok(paths[0].endsWith('/Documents/notes.txt'));
+    assert.ok(!paths[0].startsWith('~'), 'the tilde must be expanded');
+    assert.equal(paths[1], '/tmp/x.csv');
+    assert.equal(verifier.extractRequestPaths('no paths here').length, 0);
+});
+
+test('pickPathParameter: unambiguous cases only', () => {
+    assert.equal(verifier.pickPathParameter({
+        input_file: { type: 'string', description: 'File to read.' },
+        min_length: { type: 'number' }
+    }), 'input_file');
+    assert.equal(verifier.pickPathParameter({
+        source_file: { type: 'string' },
+        output_path: { type: 'string' }
+    }), null, 'two path-like strings is ambiguous');
+    assert.equal(verifier.pickPathParameter({
+        query: { type: 'string', description: 'Word to look for.' }
+    }), 'query', 'a single string parameter is the only possible carrier');
+});
+
+test('groundedTrial: skips when the request names no real path', async () => {
+    const outcome = await verifier.groundedTrial(
+        { parameters: { f: { type: 'string' } }, script: 'print(1)' },
+        'reverse the lines of a text file', 5000);
+    assert.equal(outcome.skipped, true);
+});
+
+test('groundedTrial: runs the script on a copy of the named data', async () => {
+    const os = require('os');
+    const path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grounded-test-'));
+    const real = path.join(dir, 'data.txt');
+    fs.writeFileSync(real, 'alpha beta\n');
+    try {
+        const good = await verifier.groundedTrial({
+            parameters: { input_file: { type: 'string', required: true, description: 'File to read.' } },
+            script: 'import argparse\np = argparse.ArgumentParser()\np.add_argument("--input_file")\n' +
+                    'a = p.parse_args()\nprint(len(open(a.input_file).read().split()))'
+        }, `count the words in ${real}`, 10000);
+        assert.equal(good.passed, true, good.reason || good.why);
+
+        const bad = await verifier.groundedTrial({
+            parameters: { input_file: { type: 'string', required: true, description: 'File to read.' } },
+            script: 'import argparse, sys\np = argparse.ArgumentParser()\np.add_argument("--input_file")\n' +
+                    'p.parse_args()\nprint("boom", file=sys.stderr)\nsys.exit(2)'
+        }, `count the words in ${real}`, 10000);
+        assert.equal(bad.passed, false);
+        assert.ok(bad.reason.includes("request's own data"));
+        assert.ok(bad.stderr.includes('boom'), 'the trial stderr must reach the repair loop');
+
+        assert.ok(fs.readFileSync(real, 'utf8') === 'alpha beta\n', 'the original file is untouched');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });
