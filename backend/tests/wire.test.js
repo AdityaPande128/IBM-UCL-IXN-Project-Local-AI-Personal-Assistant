@@ -21,6 +21,9 @@ process.env.JARVIS_SETTINGS_RESTART = 'off';
 const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
 
+const watchers = require('../services/watchers');
+watchers.open(path.join(scratch, 'watchers.db'));
+
 const WebSocket = require('ws');
 const activityBus = require('../services/activityBus');
 const intentQueue = require('../services/intentQueue');
@@ -482,4 +485,28 @@ test('artifacts ride the intent result to the client', async () => {
     } finally {
         openclawBridge.executeIntent = realExecute;
     }
+});
+
+test('watchers answer over the wire and refuse an unknown recipe', async () => {
+    const client = await authed();
+
+    client.send({ type: 'watchers' });
+    const listed = await client.next(m => m.type === 'watchers_result');
+    assert.ok(Array.isArray(listed.watchers));
+    assert.ok(Array.isArray(listed.notices));
+
+    client.send({ type: 'watcher_add', target: 'no-such-recipe' });
+    const refused = await client.next(m => m.type === 'watcher_add_result');
+    assert.strictEqual(refused.status, 'refused');
+    assert.match(refused.response, /no such recipe/);
+
+    client.send({ type: 'notices_seen', ids: [] });
+    const marked = await client.next(m => m.type === 'notices_seen_result');
+    assert.strictEqual(marked.marked, 0);
+
+    client.send({ type: 'watcher_remove', id: 'not-there' });
+    const removed = await client.next(m => m.type === 'watcher_remove_result');
+    assert.strictEqual(removed.status, 'unknown_watcher');
+
+    client.ws.close();
 });

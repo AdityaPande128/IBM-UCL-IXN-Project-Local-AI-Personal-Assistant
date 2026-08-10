@@ -17,6 +17,8 @@ const generationLog = require('./services/generationLog');
 const webAgent = require('./services/webAgent');
 const diagnostics = require('./services/diagnostics');
 const settings = require('./services/settings');
+const availability = require('./services/availability');
+const watchers = require('./services/watchers');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -268,6 +270,50 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'watchers') {
+                ws.send(JSON.stringify({
+                    type: 'watchers_result',
+                    watchers: watchers.list(),
+                    notices: watchers.notices({ unseenOnly: false, limit: 50 })
+                }));
+                return;
+            }
+
+            if (parsed.type === 'watcher_add' && parsed.target) {
+                try {
+                    const watcher = watchers.add({
+                        name: parsed.name,
+                        target: parsed.target,
+                        args: parsed.args || {},
+                        intervalMinutes: parsed.interval_minutes
+                    });
+                    activityBus.publish('watchers', 'watcher_added', { name: watcher.name });
+                    ws.send(JSON.stringify({ type: 'watcher_add_result',
+                        status: 'added', watcher }));
+                } catch (err) {
+                    ws.send(JSON.stringify({ type: 'watcher_add_result',
+                        status: 'refused', response: err.message }));
+                }
+                return;
+            }
+
+            if (parsed.type === 'watcher_remove' && parsed.id) {
+                ws.send(JSON.stringify({
+                    type: 'watcher_remove_result',
+                    status: watchers.remove(parsed.id) ? 'removed' : 'unknown_watcher',
+                    id: parsed.id
+                }));
+                return;
+            }
+
+            if (parsed.type === 'notices_seen' && Array.isArray(parsed.ids)) {
+                ws.send(JSON.stringify({
+                    type: 'notices_seen_result',
+                    marked: watchers.markSeen(parsed.ids)
+                }));
+                return;
+            }
+
             if (parsed.type === 'status') {
                 ws.send(JSON.stringify({
                     type: 'status_result',
@@ -305,6 +351,14 @@ async function boot() {
         }
     } catch (err) {
         console.warn(`[Jarvis] Startup reconciliation failed: ${err.message}`);
+    }
+
+    try {
+        const held = availability.start();
+        if (held.holding) console.log('[Jarvis] Stay-awake assertion held (releases itself on battery).');
+        watchers.start();
+    } catch (err) {
+        console.warn(`[Jarvis] Availability startup failed: ${err.message}`);
     }
 
     await openclawBridge.initialize();
