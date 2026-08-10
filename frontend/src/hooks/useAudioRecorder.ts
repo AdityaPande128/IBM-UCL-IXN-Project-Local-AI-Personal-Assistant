@@ -75,7 +75,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   return { recording, startRecording, stopRecording };
 }
 
-function encodeWAV(samples: Float32Array, sampleRate: number): ArrayBuffer {
+export function encodeWAV(samples: Float32Array, sampleRate: number): ArrayBuffer {
   const buffer = new ArrayBuffer(44 + samples.length * 2);
   const view = new DataView(buffer);
 

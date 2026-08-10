@@ -165,7 +165,17 @@ async function handleIncomingAudio(audioBuffer, ws) {
         }
 
         send(ws, { type: 'stt_result', text: transcribedText });
+        await respondTo(transcribedText, ws);
+    } catch (err) {
+        console.error(`[Pipeline] Error: ${err.message}`);
+        send(ws, { type: 'pipeline_error', error: err.message });
+    }
+}
 
+// Everything after transcription: run the intent, then speak the reply.
+// The wake-word path enters here with words the wake service already vetted.
+async function respondTo(transcribedText, ws) {
+    try {
         console.log(`[Pipeline] Executing intent...`);
         const unsubscribe = activityBus.subscribe(event => send(ws, { type: 'activity', ...event }));
         let llmResult;
@@ -221,6 +231,7 @@ async function handleIncomingAudio(audioBuffer, ws) {
 
 module.exports = {
     handleIncomingAudio,
+    respondTo,
     chunkTextDynamically,
     speakableSummary,
     transcribeAudio,

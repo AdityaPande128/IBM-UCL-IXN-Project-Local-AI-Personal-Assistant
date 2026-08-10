@@ -8,6 +8,7 @@ import { AbilitiesView } from "./components/AbilitiesView";
 import { InboxView } from "./components/InboxView";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
+import { useWakeWord } from "./hooks/useWakeWord";
 import { useServices, serviceBanner } from "./hooks/useServices";
 import "./index.css";
 
@@ -25,6 +26,8 @@ function App() {
     brief,
     requestBrief,
     markNoticesSeen,
+    wakeMode,
+    setWakeMode,
     sendBinary,
     sendIntent,
     sendDecision,
@@ -35,6 +38,7 @@ function App() {
     updateSettings,
   } = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
+  const { listening, startListening, stopListening } = useWakeWord(sendBinary);
   const services = useServices();
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
@@ -55,6 +59,18 @@ function App() {
     }
   };
 
+  // The mic opens and the daemon arms together; either failing leaves both off.
+  const toggleWake = async () => {
+    if (listening) {
+      stopListening();
+      setWakeMode(false);
+      return;
+    }
+    if (await startListening()) {
+      setWakeMode(true);
+    }
+  };
+
   return (
     <div className="app">
       <header className="app-header">
@@ -63,6 +79,15 @@ function App() {
           <span className="app-logo-text">Jarvis</span>
         </div>
         <div className="app-status">
+          <button
+            className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
+            onClick={toggleWake}
+            title={listening
+              ? "Listening for “Hey Jarvis” — click to close the microphone"
+              : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
+          >
+            {listening && wakeMode ? "● Listening" : "Hey Jarvis"}
+          </button>
           <button
             className={`activity-toggle ${view === "inbox" ? "activity-toggle--on" : ""}`}
             onClick={() => setView((v) => (v === "inbox" ? "chat" : "inbox"))}

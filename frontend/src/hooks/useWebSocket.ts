@@ -123,6 +123,8 @@ interface UseWebSocketReturn {
   brief: BriefData | null;
   requestBrief: () => void;
   markNoticesSeen: (ids: number[]) => void;
+  wakeMode: boolean;
+  setWakeMode: (on: boolean) => void;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
   sendDecision: (id: string, decision: "yes" | "no") => void;
@@ -189,6 +191,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [settingsResult, setSettingsResult] = useState<SettingsResult | null>(null);
   const [brief, setBrief] = useState<BriefData | null>(null);
+  const [wakeMode, setWakeModeState] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -288,6 +291,14 @@ export function useWebSocket(): UseWebSocketReturn {
           return;
         }
         if (msg.type === "notices_seen_result") {
+          return;
+        }
+        if (msg.type === "wake_mode_result") {
+          setWakeModeState(Boolean(msg.on));
+          return;
+        }
+        if (msg.type === "wake") {
+          addMessage("user", msg.command ? `“Hey Jarvis, ${msg.command}”` : "“Hey Jarvis”");
           return;
         }
         if (msg.type === "diagnostics_result") {
@@ -390,6 +401,12 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const setWakeMode = useCallback((on: boolean) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "wake_mode", on }));
+    }
+  }, []);
+
   const markNoticesSeen = useCallback((ids: number[]) => {
     if (wsRef.current?.readyState === WebSocket.OPEN && ids.length) {
       wsRef.current.send(JSON.stringify({ type: "notices_seen", ids }));
@@ -434,6 +451,8 @@ export function useWebSocket(): UseWebSocketReturn {
     brief,
     requestBrief,
     markNoticesSeen,
+    wakeMode,
+    setWakeMode,
     sendBinary,
     sendIntent,
     sendDecision,

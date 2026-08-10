@@ -23,6 +23,7 @@ const morningBrief = require('./services/morningBrief');
 const channelAdapter = require('./services/channelAdapter');
 const memoryStore = require('./services/memoryStore');
 const memoryService = require('./services/memoryService');
+const wakeWord = require('./services/wakeWord');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -131,6 +132,16 @@ wss.on('connection', (ws) => {
         }
 
         if (isBinary) {
+            if (ws.wakeMode) {
+                // Idle speech dies here: no reply, no record, no transcript.
+                const probed = await wakeWord.probe(message);
+                if (!probed.wake) return;
+                ws.send(JSON.stringify({ type: 'wake', command: probed.command }));
+                if (probed.command) {
+                    await withActivity(ws, () => aiPipeline.respondTo(probed.command, ws));
+                }
+                return;
+            }
             await aiPipeline.handleIncomingAudio(message, ws);
             return;
         }
@@ -333,6 +344,12 @@ wss.on('connection', (ws) => {
                     type: 'notices_seen_result',
                     marked: watchers.markSeen(parsed.ids)
                 }));
+                return;
+            }
+
+            if (parsed.type === 'wake_mode') {
+                ws.wakeMode = parsed.on === true;
+                ws.send(JSON.stringify({ type: 'wake_mode_result', on: ws.wakeMode }));
                 return;
             }
 

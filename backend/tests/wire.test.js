@@ -563,3 +563,40 @@ test('memory is edited over the wire: add, list, wipe review, remove, incognito'
     await client.next(m => m.type === 'incognito_result');
     client.ws.close();
 });
+
+test('wake mode gates binary audio: idle speech vanishes, the phrase wakes', async () => {
+    intentQueue.reset();
+    const realExecute = openclawBridge.executeIntent;
+    const asked = [];
+    openclawBridge.executeIntent = async text => {
+        asked.push(text);
+        return { status: 'success', response: 'It is three.' };
+    };
+
+    try {
+        const client = await authed();
+        client.send({ type: 'wake_mode', on: true });
+        const armed = await client.next(m => m.type === 'wake_mode_result');
+        assert.strictEqual(armed.on, true);
+
+        fakeInference.transcript = 'talking to someone else entirely about lunch';
+        client.sendBinary(Buffer.alloc(8).buffer);
+        await new Promise(resolve => setTimeout(resolve, 300));
+        assert.ok(!client.received.some(m => m.type === 'wake' || m.type === 'stt_result'),
+            'idle speech must produce no message of any kind');
+        assert.strictEqual(asked.length, 0);
+
+        fakeInference.transcript = 'hey jarvis what time is it';
+        client.sendBinary(Buffer.alloc(8).buffer);
+        const woke = await client.next(m => m.type === 'wake');
+        assert.strictEqual(woke.command, 'what time is it');
+        await client.next(m => m.type === 'intent_result');
+        assert.deepStrictEqual(asked, ['what time is it']);
+
+        client.send({ type: 'wake_mode', on: false });
+        await client.next(m => m.type === 'wake_mode_result' && m.on === false);
+        client.ws.close();
+    } finally {
+        openclawBridge.executeIntent = realExecute;
+    }
+});
