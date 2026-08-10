@@ -1933,3 +1933,105 @@ test('a web step is judged on where its input came from, not on how sensitive it
         scope.cleanup();
     }
 });
+
+
+test('a booking is only done when the calendar shows the event', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    let filledTitle = false;
+    llmClient.complete = async messages => {
+        if (isIntentCall(messages)) {
+            return intentReply({ write: ['Squash with Sam'], act: 'book',
+                completes: 'the event is on the calendar' });
+        }
+        const shown = messages.find(m => m.role === 'user').content;
+        const title = (shown.match(/\[(e\d+)\] textbox/) || [])[1];
+        const save = (shown.match(/\[(e\d+)\] button "Save"/) || [])[1];
+        const create = (shown.match(/\[(e\d+)\] link "Create event"/) || [])[1];
+
+        if (title && !filledTitle) {
+            filledTitle = true;
+            return JSON.stringify({ action: 'fill', ref: title, text: 'Squash with Sam' });
+        }
+        if (filledTitle && save) {
+            return JSON.stringify({ action: 'click', ref: save, reason: 'save the event' });
+        }
+        if (create) return JSON.stringify({ action: 'click', ref: create, reason: 'open the editor' });
+        return JSON.stringify({ action: 'give_up', reason: 'lost' });
+    };
+
+    try {
+        const result = await webAgent.browse('put "Squash with Sam" on my calendar for Friday', {
+            url: `${site.origin}/calendar`, allowPrivate: true, maxActions: 6
+        });
+
+        assert.strictEqual(result.status, 'success', result.reason || result.answer);
+        assert.deepStrictEqual(site.booked, [{ title: 'Squash with Sam' }],
+            'the event must actually be on the calendar');
+        assert.ok(site.requests.some(url => url.startsWith('/calendar/save')),
+            'success must come after the save request, not before');
+
+        const done = result.actions.find(action => action.action === 'done');
+        assert.ok(done, 'the run ends with a done action');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('a save the calendar never recorded is not claimed as a booking', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    let filledTitle = false;
+    let savedOnce = false;
+    let claimed = 0;
+    llmClient.complete = async messages => {
+        if (isIntentCall(messages)) {
+            return intentReply({ write: ['Squash with Sam'], act: 'book',
+                completes: 'the event is on the calendar' });
+        }
+        const shown = messages.find(m => m.role === 'user').content;
+        const title = (shown.match(/\[(e\d+)\] textbox/) || [])[1];
+        const save = (shown.match(/\[(e\d+)\] button "Save"/) || [])[1];
+
+        if (title && !filledTitle) {
+            filledTitle = true;
+            return JSON.stringify({ action: 'fill', ref: title, text: 'Squash with Sam' });
+        }
+        if (save && !savedOnce) {
+            savedOnce = true;
+            return JSON.stringify({ action: 'click', ref: save, reason: 'save the event' });
+        }
+        claimed += 1;
+        if (claimed <= 2) {
+            return JSON.stringify({ action: 'done',
+                answer: 'The event is on the calendar — the page says Saved.' });
+        }
+        return JSON.stringify({ action: 'give_up', reason: 'the save does not stick' });
+    };
+
+    try {
+        const result = await webAgent.browse('put "Squash with Sam" on my calendar for Friday', {
+            url: `${site.origin}/calendar/new?forget=1`, allowPrivate: true, maxActions: 6
+        });
+
+        assert.notStrictEqual(result.status, 'success',
+            'a page that merely says "Saved." must not turn into a claimed booking');
+        assert.deepStrictEqual(site.booked, [], 'nothing was ever recorded');
+        assert.ok(claimed >= 1, 'the model tried to claim success and was refused');
+        assert.ok(!result.actions.some(action =>
+            action.action === 'done' && action.reason === 'the request is carried out'),
+        'no completion action may exist for an unlanded save');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});

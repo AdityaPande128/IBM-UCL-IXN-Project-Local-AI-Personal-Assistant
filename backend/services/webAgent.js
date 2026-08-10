@@ -1153,6 +1153,30 @@ async function browse(goal, options = {}) {
         return mandate.has('send') ? filled.length > 0 : true;
     };
 
+    // A booking is not done because Save was pressed; it is done when the
+    // calendar shows the event. A save that did not land is withdrawn from
+    // `performed` so the loop can finish the job — or end without claiming it.
+    const bookingLanded = async () => {
+        if (!mandate.has('book') || !performed.has('book')) return true;
+
+        const entry = written.find(w => w.text && !AN_ADDRESS.test(String(w.text).trim()))
+            || written[0];
+        const title = String((entry && entry.text) || (intent.write || [])[0] || '').trim();
+        if (!title) return true;
+
+        const seen = await surface.observe();
+        contextLabel = labels.join(contextLabel, seen.label);
+        const wanted = title.toLowerCase().replace(/\s+/g, ' ').slice(0, 48);
+        const shown = (`${seen.text || ''} ${((seen.elements || [])
+            .map(el => el.name || '').join(' '))}`).toLowerCase().replace(/\s+/g, ' ');
+        if (shown.includes(wanted)) return true;
+
+        performed.delete('book');
+        history.push(`Save was pressed, but the calendar does not show "${title}" — `
+            + 'the event has not landed, and this is not done until it is visible');
+        return false;
+    };
+
     let surface;
     try {
         surface = await chooseSurface(options.url, options);
@@ -1447,7 +1471,7 @@ async function browse(goal, options = {}) {
         if (status === 'success' && answer) {
         }
 
-        if (complete()) {
+        if (complete() && await bookingLanded()) {
             status = 'success';
             answer = intent.completes
                 || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
@@ -1462,7 +1486,7 @@ async function browse(goal, options = {}) {
             const stepStartedAt = Date.now();
 
             await carryOut();
-            if (complete()) {
+            if (complete() && await bookingLanded()) {
                 status = 'success';
                 answer = intent.completes
                     || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
@@ -1506,9 +1530,12 @@ async function browse(goal, options = {}) {
 
             const unsaid = outstanding().unsaid;
 
+            const finished = complete()
+                && (decision.action === 'give_up' || decision.action === 'done'
+                    ? await bookingLanded() : true);
+
             const { undone, short } = outstanding();
 
-            const finished = complete();
             if (finished && (decision.action === 'give_up' || decision.action === 'done')) {
                 status = 'success';
                 answer = decision.answer
@@ -1533,6 +1560,10 @@ async function browse(goal, options = {}) {
                         + `have filled ${filled.length} field(s)`
                         + (filled.length ? ` (${filled.join(', ')})` : '')
                         + '. Every named field needs its own fill before this is finished.';
+                } else if (undone.includes('book')) {
+                    why = 'not done: the calendar does not show the event, so the save has not '
+                        + 'landed. If an editor or a dialog is still open, complete it and press '
+                        + 'its Save; do not claim this is done until the event is visible.';
                 } else {
                     why = 'not done: nothing has been sent. Pressing Enter in a message body starts a '
                         + 'new line; only the Send control sends. Find it and press it.';
@@ -1769,6 +1800,7 @@ async function browse(goal, options = {}) {
             ).catch(err => ({ ok: false, detail: err.message }));
 
             if (outcome.ok && decision.action === 'fill' && decision.text) {
+                if (mandate.has('compose')) performed.add('compose');
                 typed.push(String(decision.text).toLowerCase());
                 if (element && /\bsearch\b/i.test(element.name || '')) searched = true;
                 const into = (outcome.detail || '').match(/"([^"]+)"/);
@@ -1781,7 +1813,7 @@ async function browse(goal, options = {}) {
 
             const actedMs = Date.now() - stepStartedAt;
 
-            if (outcome.ok && outcome.mandated && complete()) {
+            if (outcome.ok && outcome.mandated && complete() && await bookingLanded()) {
                 status = 'success';
                 answer = `Done: ${[...performed].join(', ')}`
                     + (filled.length ? ` — ${filled.join(', ')} filled.` : '.');
@@ -1934,6 +1966,16 @@ async function browse(goal, options = {}) {
                 error: achieved ? null : (outcome.detail + note),
                 durationMs: actedMs
             });
+
+            // The loop must never exit on a completion nobody verified: claim
+            // it if it stands up, or withdraw the unlanded part and carry on.
+            if (complete() && await bookingLanded()) {
+                status = 'success';
+                answer = intent.completes
+                    || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
+                actions.push({ action: 'done', reason: 'the request is carried out', answer });
+                break;
+            }
         }
 
         if (status === 'exhausted') {

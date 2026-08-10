@@ -224,6 +224,7 @@ function start() {
     const requests = [];
 
     const sent = [];
+    const booked = [];
 
     const server = http.createServer((req, res) => {
         requests.push(req.url);
@@ -231,7 +232,8 @@ function start() {
         const [pathname, query] = req.url.split('?');
         const params = Object.fromEntries(new URLSearchParams(query || ''));
 
-        const mail = mailRoute(pathname, params, sent);
+        const mail = mailRoute(pathname, params, sent)
+            ?? calendarRoute(pathname, params, booked);
         if (mail !== undefined) {
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`<!doctype html><html><head><meta charset="utf-8"></head><body>${mail}</body></html>`);
@@ -261,6 +263,7 @@ function start() {
                 origin: `http://127.0.0.1:${port}`,
                 requests,
                 sent,
+                booked,
                 close: () => new Promise(done => server.close(done))
             });
         });
@@ -330,6 +333,52 @@ function mailRoute(pathname, params, sent) {
         sent.push({ to: params.to || '', body: params.body || '' });
         return mailPage('Sent', `<p>Your message has been sent to ${params.to || 'nobody'}.</p>
             <a href="/mail">Back to the inbox</a>`);
+    }
+
+    return undefined;
+}
+
+function calendarRoute(pathname, params, booked) {
+    const week = () => booked.length
+        ? `<ul>${booked.map(event => `<li>${event.title} — Friday 3pm</li>`).join('\n')}</ul>`
+        : '<p>Nothing scheduled this week.</p>';
+
+    if (pathname === '/calendar') {
+        return `
+        <title>Calendar</title>
+        <main>
+          <h1>Calendar</h1>
+          ${week()}
+          <a href="/calendar/new">Create event</a>
+          <a href="/">Back to the shop</a>
+        </main>`;
+    }
+
+    if (pathname === '/calendar/new') {
+        return `
+        <title>New event</title>
+        <main>
+          <h1>New event</h1>
+          <form action="/calendar/save" method="get">
+            ${params.forget ? '<input type="hidden" name="forget" value="1">' : ''}
+            <label for="title">Event title</label>
+            <input id="title" name="title">
+            <button type="submit">Save</button>
+          </form>
+        </main>`;
+    }
+
+    if (pathname === '/calendar/save') {
+        const kept = !params.forget && (params.title || '').trim();
+        if (kept) booked.push({ title: params.title.trim() });
+        return `
+        <title>Calendar</title>
+        <main>
+          <h1>Calendar</h1>
+          <p>Saved.</p>
+          ${week()}
+          ${kept ? '<a href="/calendar/new">Create event</a>' : ''}
+        </main>`;
     }
 
     return undefined;
