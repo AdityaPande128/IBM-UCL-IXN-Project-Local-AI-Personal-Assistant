@@ -148,3 +148,85 @@ test('unscored sources are never dropped by the margin', () => {
 
     assert.deepStrictEqual(kept.map(p => p.cite), ['catalogue', 'doc']);
 });
+
+
+test('the verdict line is recognised in its variants and stripped from the prose', () => {
+    const { parseVerdict } = answerService;
+
+    assert.deepStrictEqual(parseVerdict('ANSWERED\nAt 3pm on Thursday.'),
+        { verdict: 'answered', prose: 'At 3pm on Thursday.' });
+    assert.deepStrictEqual(parseVerdict('answered: at 3pm.'),
+        { verdict: 'answered', prose: 'at 3pm.' });
+    assert.strictEqual(parseVerdict('NOT_STATED').verdict, 'not_stated');
+    assert.strictEqual(parseVerdict('not stated\nThe context is about dental plans.').verdict, 'not_stated');
+});
+
+test('a reply with no verdict line passes through untouched', () => {
+    const { verdict, prose } = answerService.parseVerdict('The meeting is at 3pm.');
+
+    assert.strictEqual(verdict, null);
+    assert.strictEqual(prose, 'The meeting is at 3pm.');
+});
+
+test('a bare ANSWERED with nothing after it does not count as a verdict', () => {
+    assert.strictEqual(answerService.parseVerdict('ANSWERED').verdict, null);
+    assert.strictEqual(answerService.parseVerdict('  answered.  ').verdict, null);
+});
+
+test('the refusal names where it looked', () => {
+    const { refusal } = answerService;
+
+    assert.match(refusal([{ source: 'mail' }]), /your email/);
+    assert.match(refusal([{ source: 'mail' }, { source: 'documents' }]),
+        /your email and your documents/);
+    assert.match(refusal([{ source: 'files' }, { source: 'documents' }]), /your documents,?\b/);
+    assert.match(refusal([{}]), /the material I was given/);
+    assert.match(refusal([]), /what I could reach/);
+});
+
+
+const llmClient = require('../services/llmClient');
+
+function withModel(t, reply) {
+    const original = llmClient.complete;
+    llmClient.complete = async () => reply;
+    t.after(() => { llmClient.complete = original; });
+}
+
+test('a NOT_STATED verdict becomes a refusal and the model prose never leaks', async (t) => {
+    withModel(t, 'NOT_STATED\nThe closest match is a newsletter about dental plans.');
+
+    const result = await answerService.answer('when is my dentist appointment', {
+        passages: [{ text: 'Whiten your teeth today with our new plan',
+            cite: 'email: "Dental plan" from noreply', source: 'mail' }]
+    });
+
+    assert.strictEqual(result.refused, true);
+    assert.strictEqual(result.grounded, true);
+    assert.ok(!result.text.includes('newsletter'), 'discarded prose leaked into the refusal');
+    assert.match(result.text, /your email/);
+});
+
+test('an ANSWERED verdict is stripped and the prose is the answer', async (t) => {
+    withModel(t, 'ANSWERED\nIt is at 3pm on Thursday.');
+
+    const result = await answerService.answer('when is my dentist appointment', {
+        passages: [{ text: 'Your appointment: Thursday 3pm',
+            cite: 'email: "Reminder" from dentist', source: 'mail' }]
+    });
+
+    assert.strictEqual(result.refused, false);
+    assert.strictEqual(result.text, 'It is at 3pm on Thursday.');
+});
+
+test('a model that ignores the verdict protocol still answers as before', async (t) => {
+    withModel(t, 'It is at 3pm on Thursday.');
+
+    const result = await answerService.answer('when is my dentist appointment', {
+        passages: [{ text: 'Your appointment: Thursday 3pm',
+            cite: 'email: "Reminder" from dentist', source: 'mail' }]
+    });
+
+    assert.strictEqual(result.refused, false);
+    assert.strictEqual(result.text, 'It is at 3pm on Thursday.');
+});

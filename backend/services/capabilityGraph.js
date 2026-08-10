@@ -466,6 +466,7 @@ function builtins() {
                 return {
                     text: result.text,
                     grounded: result.grounded,
+                    refused: result.refused,
                     sources: result.sources
                 };
             }
