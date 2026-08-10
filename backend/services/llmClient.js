@@ -23,7 +23,10 @@ function complete(messages, opts = {}) {
     const timeout_ms = opts.timeout_ms ?? defaults.timeout_ms ?? 30000;
 
     return new Promise((resolve, reject) => {
-        const payload = JSON.stringify({ model, messages, temperature, max_tokens });
+        const payload = JSON.stringify({
+            model, messages, temperature, max_tokens,
+            ...(opts.response_format ? { response_format: opts.response_format } : {})
+        });
 
         const req = http.request({
             hostname: '127.0.0.1',

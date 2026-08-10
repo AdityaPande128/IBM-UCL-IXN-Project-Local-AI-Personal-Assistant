@@ -316,6 +316,16 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
     top_p = req.get("top_p")
 
     generate_kwargs = {"max_tokens": max_tokens, "verbose": False}
+
+    response_format = req.get("response_format") or {}
+    if response_format.get("type") in ("json_object", "json"):
+        try:
+            from constrain import JsonConstraint
+            generate_kwargs["logits_processors"] = [JsonConstraint(target_tokenizer)]
+            print("[Inference] Constrained decoding: json_object", flush=True)
+        except Exception as e:
+            print(f"[Inference] Constrained decoding unavailable: {e}", flush=True)
+
     if temperature is not None or top_p is not None:
         try:
             from mlx_lm.sample_utils import make_sampler

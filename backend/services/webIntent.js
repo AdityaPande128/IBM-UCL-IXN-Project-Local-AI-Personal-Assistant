@@ -118,7 +118,8 @@ async function read(goal, options = {}) {
         raw = await llmClient.complete([
             { role: 'system', content: SYSTEM_PROMPT },
             { role: 'user', content: `The request: ${words}\n\nThe JSON:` }
-        ], { tier: TIER, temperature: 0, max_tokens: MAX_TOKENS, timeout_ms: TIMEOUT_MS });
+        ], { tier: TIER, temperature: 0, max_tokens: MAX_TOKENS, timeout_ms: TIMEOUT_MS,
+             response_format: { type: 'json_object' } });
     } catch (err) {
         return fallback(goal, options.label, `unreachable: ${err.message}`);
     }
@@ -170,7 +171,8 @@ async function recompose(goal, previous) {
             + 'are the one who will read it. Write what they should receive, in the '
             + 'first person, as one short natural sentence. Reply with the same JSON '
             + 'object and nothing else.' }
-    ], { tier: TIER, temperature: 0, max_tokens: MAX_TOKENS, timeout_ms: TIMEOUT_MS });
+    ], { tier: TIER, temperature: 0, max_tokens: MAX_TOKENS, timeout_ms: TIMEOUT_MS,
+         response_format: { type: 'json_object' } });
 
     const parsed = extractJson(raw);
     return parsed && typeof parsed === 'object' ? list(parsed.write) : null;
