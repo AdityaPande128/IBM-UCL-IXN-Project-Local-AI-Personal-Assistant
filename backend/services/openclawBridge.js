@@ -7,6 +7,7 @@ const answerService = require('./answerService');
 const planner = require('./planner');
 const planExecutor = require('./planExecutor');
 const traceStore = require('./traceStore');
+const routerTraces = require('./routerTraces');
 const proposals = require('./proposals');
 const activityBus = require('./activityBus');
 
@@ -281,6 +282,7 @@ async function executeIntent(intentText, options = {}) {
     }
 
     const decision = await router.route(intentText);
+    const routeTraceId = routerTraces.record(intentText, decision);
     activityBus.publish('router', 'decision', {
         action: decision.action, skill: decision.target_skill || null,
         confidence: decision.confidence ?? null
@@ -337,6 +339,14 @@ async function executeIntent(intentText, options = {}) {
                 response: `Unknown routing action: ${decision.action}`,
                 action: 'error'
             };
+    }
+
+    // A decision is verified by its outcome: only what succeeded can teach
+    // the guard. Refusals stay recorded but unconfirmed.
+    if (outcome.status === 'success' && decision.action !== router.ACTIONS.REFUSE) {
+        routerTraces.confirm(routeTraceId, outcome.action);
+    } else {
+        routerTraces.note(routeTraceId, outcome.status);
     }
 
     return {

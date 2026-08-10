@@ -96,8 +96,19 @@ BUDGET_BYTES = (float(MODELS_CONFIG["budget_gb"]) * GB
                 if MODELS_CONFIG.get("budget_gb") else _default_budget_bytes())
 
 
+# A tier may name a LoRA adapter to load over its model — how a tuned guard
+# is adopted once it has beaten the plain one on the router benchmark.
+ADAPTERS = {spec["model"]: spec["adapter"]
+            for spec in TIERS.values()
+            if isinstance(spec, dict) and spec.get("model") and spec.get("adapter")}
+
+
 def _load_model(model_id: str):
     from mlx_lm import load
+    adapter = ADAPTERS.get(model_id)
+    if adapter:
+        print(f"[Inference] Loading {model_id} with adapter {adapter}", flush=True)
+        return load(model_id, adapter_path=adapter)
     return load(model_id)
 
 
