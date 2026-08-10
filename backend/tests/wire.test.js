@@ -24,6 +24,11 @@ traceStore.open(path.join(scratch, 'traces.db'));
 const watchers = require('../services/watchers');
 watchers.open(path.join(scratch, 'watchers.db'));
 
+const memoryStore = require('../services/memoryStore');
+memoryStore.open(path.join(scratch, 'memory.db'));
+const memoryService = require('../services/memoryService');
+memoryService.setEmbedder(async texts => texts.map(() => [1, 0, 0, 0]));
+
 const WebSocket = require('ws');
 const activityBus = require('../services/activityBus');
 const intentQueue = require('../services/intentQueue');
@@ -519,5 +524,42 @@ test('the morning brief answers over the wire', async () => {
     assert.ok(Array.isArray(brief.approvals));
     assert.ok(Array.isArray(brief.drafts));
     assert.match(brief.text, /^Good morning\./);
+    client.ws.close();
+});
+
+test('memory is edited over the wire: add, list, wipe review, remove, incognito', async () => {
+    const client = await authed();
+
+    client.send({ type: 'memory_add', text: 'the dentist is Dr Rao' });
+    const added = await client.next(m => m.type === 'memory_add_result');
+    assert.strictEqual(added.status, 'remembered');
+
+    client.send({ type: 'memory' });
+    const listed = await client.next(m => m.type === 'memory_result');
+    assert.strictEqual(listed.facts.length, 1);
+    assert.strictEqual(listed.incognito, false);
+
+    client.send({ type: 'memory_wipe', term: 'rao' });
+    const review = await client.next(m => m.type === 'memory_wipe_result');
+    assert.strictEqual(review.candidates.length, 1);
+
+    client.send({ type: 'memory_remove', ids: review.candidates.map(f => f.id) });
+    const removed = await client.next(m => m.type === 'memory_remove_result');
+    assert.strictEqual(removed.removed, 1);
+
+    client.send({ type: 'memory_wipe_all' });
+    const refused = await client.next(m => m.type === 'memory_wipe_all_result');
+    assert.strictEqual(refused.status, 'refused');
+
+    client.send({ type: 'incognito', on: true });
+    const dark = await client.next(m => m.type === 'incognito_result');
+    assert.strictEqual(dark.incognito, true);
+
+    client.send({ type: 'memory_add', text: 'a secret' });
+    const blocked = await client.next(m => m.type === 'memory_add_result');
+    assert.strictEqual(blocked.status, 'refused');
+
+    client.send({ type: 'incognito', on: false });
+    await client.next(m => m.type === 'incognito_result');
     client.ws.close();
 });

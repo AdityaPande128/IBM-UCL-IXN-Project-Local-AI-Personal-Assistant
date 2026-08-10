@@ -336,5 +336,6 @@ module.exports = {
     failedSteps, recentOutcomes,
     procedures, childPlans,
     summarise,
-    DEFAULT_PATH, MAX_SUMMARY_CHARS
+    DEFAULT_PATH, MAX_SUMMARY_CHARS,
+    get path() { return dbPath; }
 };

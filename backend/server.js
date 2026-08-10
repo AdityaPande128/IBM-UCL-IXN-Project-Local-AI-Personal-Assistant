@@ -21,6 +21,8 @@ const availability = require('./services/availability');
 const watchers = require('./services/watchers');
 const morningBrief = require('./services/morningBrief');
 const channelAdapter = require('./services/channelAdapter');
+const memoryStore = require('./services/memoryStore');
+const memoryService = require('./services/memoryService');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -51,7 +53,17 @@ function syncOpenClawConfig() {
         openclawConfig.agents.defaults.model.provider = "custom";
         openclawConfig.agents.defaults.model.modelId = openclawModel;
         openclawConfig.agents.defaults.model.baseUrl = `http://127.0.0.1:${config.ports.inference}/v1`;
-        
+
+        // The phone channel belongs to Jarvis: a bot token has exactly one
+        // getUpdates consumer, so OpenClaw must never open its own Telegram
+        // channel — phone messages reach it through the bridge instead.
+        if (!openclawConfig.channels) openclawConfig.channels = {};
+        openclawConfig.channels.telegram = {
+            ...(openclawConfig.channels.telegram || {}),
+            enabled: false,
+            managedBy: "jarvis"
+        };
+
         fs.writeFileSync(openclawPath, JSON.stringify(openclawConfig, null, 2), 'utf8');
         console.log(`[Jarvis Boot] Synchronized openclaw.json with model: ${openclawModel} and inference port: ${config.ports.inference}`);
     } catch (e) {
@@ -149,6 +161,14 @@ wss.on('connection', (ws) => {
 
                 broadcast({ type: 'state_sync', skill: result.skill || null,
                             status: result.status }, ws);
+
+                // Inference never writes memory: anything durable it spots in
+                // this exchange becomes a consent card, not a row.
+                if (result.status === 'success') {
+                    memoryService.inferFrom(
+                        `user: ${parsed.text}\nassistant: ${result.response || ''}`)
+                        .catch(() => null);
+                }
                 return;
             }
 
@@ -316,6 +336,71 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'memory') {
+                ws.send(JSON.stringify({
+                    type: 'memory_result',
+                    facts: memoryStore.list({ status: parsed.status || 'active' }),
+                    ...memoryService.status()
+                }));
+                return;
+            }
+
+            if (parsed.type === 'memory_add' && parsed.text) {
+                try {
+                    const fact = await memoryService.add(String(parsed.text));
+                    ws.send(JSON.stringify({ type: 'memory_add_result',
+                        status: 'remembered', fact }));
+                } catch (err) {
+                    ws.send(JSON.stringify({ type: 'memory_add_result',
+                        status: 'refused', response: err.message }));
+                }
+                return;
+            }
+
+            if (parsed.type === 'memory_remove' && Array.isArray(parsed.ids)) {
+                ws.send(JSON.stringify({
+                    type: 'memory_remove_result',
+                    removed: memoryStore.hardDelete(parsed.ids)
+                }));
+                return;
+            }
+
+            if (parsed.type === 'memory_pin' && parsed.id) {
+                ws.send(JSON.stringify({
+                    type: 'memory_pin_result',
+                    fact: memoryStore.setPinned(parsed.id, parsed.pinned !== false)
+                }));
+                return;
+            }
+
+            if (parsed.type === 'memory_wipe' && parsed.term) {
+                ws.send(JSON.stringify({
+                    type: 'memory_wipe_result',
+                    term: parsed.term,
+                    candidates: memoryStore.wipeCandidates(parsed.term)
+                }));
+                return;
+            }
+
+            if (parsed.type === 'memory_wipe_all') {
+                if (parsed.confirm !== true) {
+                    ws.send(JSON.stringify({ type: 'memory_wipe_all_result',
+                        status: 'refused', response: 'A full wipe needs confirm: true.' }));
+                    return;
+                }
+                ws.send(JSON.stringify({ type: 'memory_wipe_all_result',
+                    status: 'wiped', removed: memoryStore.wipeAll() }));
+                return;
+            }
+
+            if (parsed.type === 'incognito') {
+                ws.send(JSON.stringify({
+                    type: 'incognito_result',
+                    ...memoryService.setIncognito(parsed.on !== false)
+                }));
+                return;
+            }
+
             if (parsed.type === 'brief') {
                 const brief = morningBrief.assemble({
                     browse: goal => intentQueue.submit(() =>
@@ -368,6 +453,7 @@ async function boot() {
         const held = availability.start();
         if (held.holding) console.log('[Jarvis] Stay-awake assertion held (releases itself on battery).');
         watchers.start();
+        memoryService.start();
         morningBrief.start({
             browse: goal => intentQueue.submit(() => webAgent.browse(String(goal))).result
         });
