@@ -579,6 +579,25 @@ test('opening a reply is not sending it, and a request to draft cannot send', ()
 
         const unsent = webPolicy.mandateFrom('write back to Sam but leave it unsent', USER);
         assert.ok(!unsent.has('send'), '"leave it unsent" cannot carry a send mandate');
+
+        // A question about somebody ELSE's sending names the act without
+        // asking for it: "what did she email me about" is a request to know,
+        // and it must grant nothing a Send button could ride on.
+        for (const asked of [
+            'what did she email me about',
+            'did Philip email me back yesterday',
+            'has anyone messaged me today',
+            'did she reply to my invitation',
+            'what did he tell you about the trip'
+        ]) {
+            assert.strictEqual(webPolicy.mandateFrom(asked, USER).size, 0,
+                `"${asked}" is a question, and a question authorises nothing`);
+        }
+
+        // The modal politeness form is still a command to this system.
+        const polite = webPolicy.mandateFrom('could you email Sam saying hi', USER);
+        assert.deepStrictEqual([...polite].sort(), ['compose', 'send'],
+            '"could you email Sam" asks this system to send, and keeps its grant');
     } finally {
         scope.cleanup();
     }

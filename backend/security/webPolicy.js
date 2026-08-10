@@ -292,6 +292,15 @@ const INTENT_MANDATE = {
 // "compose") and the recipe guard both already do.
 const DRAFT_INTENT = /\b(draft|drafts|drafting|don'?t send|do not send|without sending|leave it unsent)\b/i;
 
+// A verb governed by somebody else's subject, or by an interrogative
+// auxiliary, describes an act to find out about, not one to perform: "what
+// did she email me about", "has Philip replied to it" name sending without
+// asking for any. The guard reads the word or two before the matched verb —
+// an imperative's verb has the request's own opening there, never "she" or
+// "did". Modal requests to this system ("could you email Sam") keep their
+// grant, because "you" is deliberately absent from the list.
+const ANOTHERS_ACT = /\b(she|he|they|who|anyone|someone|somebody|did|does|has|have|had)\s+(\w+\s+)?$/i;
+
 function safeHost(url) {
     try { return new URL(String(url)).host; } catch { return String(url || ''); }
 }
@@ -313,7 +322,9 @@ function mandateFrom(text, label) {
     const asks = entry => {
         const found = entry.pattern.exec(words);
         if (!found) return false;
-        return !entry.notAfter || !entry.notAfter.test(words.slice(0, found.index));
+        const before = words.slice(0, found.index);
+        if (ANOTHERS_ACT.test(before)) return false;
+        return !entry.notAfter || !entry.notAfter.test(before);
     };
 
     const asked = new Set();
@@ -484,6 +495,7 @@ module.exports = {
     mandateFromIntent,
     INTENT_MANDATE,
     DRAFT_INTENT,
+    ANOTHERS_ACT,
     isPrivateHost,
     IRREVERSIBLE,
     MANDATES,
