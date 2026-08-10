@@ -7,6 +7,8 @@ import { ActivityPanel } from "./components/ActivityPanel";
 import { AbilitiesView } from "./components/AbilitiesView";
 import { InboxView } from "./components/InboxView";
 import { MemoryView } from "./components/MemoryView";
+import { AuditView } from "./components/AuditView";
+import { PermissionsView } from "./components/PermissionsView";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
 import { useWakeWord } from "./hooks/useWakeWord";
@@ -47,13 +49,26 @@ function App() {
     removeSkill,
     saveDiagnostics,
     updateSettings,
+    audit,
+    requestAudit,
+    permissions,
+    requestPermissions,
+    checkpointResult,
+    createCheckpoint,
+    listCheckpoints,
+    restoreCheckpoint,
+    bundleResult,
+    exportBundle,
+    importBundle,
   } = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
   const { listening, startListening, stopListening } = useWakeWord(sendBinary);
   const services = useServices();
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
-  const [view, setView] = useState<"chat" | "abilities" | "inbox" | "memory">("chat");
+  const [view, setView] = useState<
+    "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions"
+  >("chat");
 
   useEffect(() => {
     invoke("ensure_screen_access").catch(() => {});
@@ -129,6 +144,18 @@ function App() {
             Abilities
           </button>
           <button
+            className={`activity-toggle ${view === "audit" ? "activity-toggle--on" : ""}`}
+            onClick={() => setView((v) => (v === "audit" ? "chat" : "audit"))}
+          >
+            Audit
+          </button>
+          <button
+            className={`activity-toggle ${view === "permissions" ? "activity-toggle--on" : ""}`}
+            onClick={() => setView((v) => (v === "permissions" ? "chat" : "permissions"))}
+          >
+            Permissions
+          </button>
+          <button
             className={`activity-toggle ${showActivity ? "activity-toggle--on" : ""}`}
             onClick={() => setShowActivity((visible) => !visible)}
           >
@@ -189,6 +216,27 @@ function App() {
               onRemoveSkill={removeSkill}
               onSaveDiagnostics={saveDiagnostics}
               onUpdateSettings={updateSettings}
+            />
+          )}
+          {view === "audit" && (
+            <AuditView
+              key={connected ? "online" : "offline"}
+              audit={audit}
+              onRefresh={requestAudit}
+            />
+          )}
+          {view === "permissions" && (
+            <PermissionsView
+              key={connected ? "online" : "offline"}
+              permissions={permissions}
+              checkpointResult={checkpointResult}
+              bundleResult={bundleResult}
+              onRefresh={requestPermissions}
+              onCreateCheckpoint={createCheckpoint}
+              onListCheckpoints={listCheckpoints}
+              onRestoreCheckpoint={restoreCheckpoint}
+              onExportBundle={exportBundle}
+              onImportBundle={importBundle}
             />
           )}
         </main>

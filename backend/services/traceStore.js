@@ -229,6 +229,13 @@ function recentPlans(limit = 20) {
         .map(plan => ({ ...plan, detail: decode(plan.detail) }));
 }
 
+function plansSince(ts, limit = 200) {
+    return handle()
+        .prepare('SELECT * FROM plans WHERE ts >= ? ORDER BY id DESC LIMIT ?')
+        .all(String(ts), limit)
+        .map(plan => ({ ...plan, detail: decode(plan.detail) }));
+}
+
 function capabilityStats() {
     return handle().prepare(`
         SELECT capability,
@@ -340,7 +347,7 @@ function stats() {
 module.exports = {
     open, close, handle,
     beginPlan, recordStep, finishPlan, reconcileInterrupted,
-    getPlan, recentPlans, capabilityStats, gaps, stats,
+    getPlan, recentPlans, plansSince, capabilityStats, gaps, stats,
     failedSteps, recentOutcomes,
     procedures, childPlans,
     summarise,

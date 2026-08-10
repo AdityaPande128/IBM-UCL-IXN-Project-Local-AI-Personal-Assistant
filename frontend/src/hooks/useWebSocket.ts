@@ -134,6 +134,88 @@ export interface WipePreview {
   candidates: MemoryFact[];
 }
 
+export interface AuditData {
+  since: string;
+  generatedAt: string;
+  summary: {
+    plans: number;
+    succeeded: number;
+    failed: number;
+    decisions: number;
+    denied: number;
+    approvals: number;
+    builds: number;
+    notices: number;
+  };
+  plans: {
+    at: string; request: string; goal: string | null; status: string;
+    steps: number; surface: string | null; error: string | null;
+  }[];
+  decisions: {
+    at: string; channel: string; action: string; decision: string;
+    summary: string | null; destination: string | null;
+  }[];
+  approvals: {
+    at: string; action: string; summary: string; status: string;
+    resolvedAt: string | null;
+  }[];
+  builds: {
+    at: string; request: string; outcome: string;
+    skill: string | null; failure: string | null;
+  }[];
+  notices: { at: string; title: string; body: string; seen: boolean }[];
+}
+
+export interface PermissionsData {
+  generatedAt: string;
+  enforce_mode: string;
+  sandbox_available: boolean;
+  skills: {
+    name: string; author: string; exec: boolean; network: boolean;
+    filesystem: string[]; sandboxed: boolean;
+    pin: "pinned" | "unpinned" | "drifted" | null;
+  }[];
+  web: {
+    sites: { host: string; label: string | null; granted_ts: string }[];
+    blocked_hosts: string[];
+    browser: string;
+    headless: boolean;
+  };
+  roots: Record<string, { path: string; granted_ts: string }[]>;
+  mail: {
+    default: string;
+    accounts: { account: string; provider: string; label: string }[];
+  };
+  channel: {
+    telegram: { enabled: boolean; bound_chat: string | null; token_present: boolean };
+  };
+  memory: { incognito: boolean; secure_delete?: boolean };
+  sandbox_root: string;
+}
+
+export interface CheckpointEntry {
+  name: string;
+  createdAt: string;
+  label: string | null;
+  files: number;
+}
+
+export interface CheckpointResult {
+  status: string;
+  name?: string;
+  reason?: string;
+  restarting?: boolean;
+  checkpoints?: CheckpointEntry[];
+}
+
+export interface BundleResult {
+  status: string;
+  path?: string;
+  files?: number;
+  reason?: string;
+  restarting?: boolean;
+}
+
 interface UseWebSocketReturn {
   connected: boolean;
   openclawConnected: boolean;
@@ -167,6 +249,17 @@ interface UseWebSocketReturn {
   removeSkill: (name: string) => void;
   saveDiagnostics: () => void;
   updateSettings: (update: SettingsUpdate) => void;
+  audit: AuditData | null;
+  requestAudit: (since?: number) => void;
+  permissions: PermissionsData | null;
+  requestPermissions: () => void;
+  checkpointResult: CheckpointResult | null;
+  createCheckpoint: () => void;
+  listCheckpoints: () => void;
+  restoreCheckpoint: (name: string) => void;
+  bundleResult: BundleResult | null;
+  exportBundle: () => void;
+  importBundle: (path: string) => void;
 }
 
 import { config } from "../config";
@@ -227,6 +320,10 @@ export function useWebSocket(): UseWebSocketReturn {
   const [brief, setBrief] = useState<BriefData | null>(null);
   const [memory, setMemory] = useState<MemoryData | null>(null);
   const [wipePreview, setWipePreview] = useState<WipePreview | null>(null);
+  const [audit, setAudit] = useState<AuditData | null>(null);
+  const [permissions, setPermissions] = useState<PermissionsData | null>(null);
+  const [checkpointResult, setCheckpointResult] = useState<CheckpointResult | null>(null);
+  const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
@@ -377,6 +474,26 @@ export function useWebSocket(): UseWebSocketReturn {
         }
         if (msg.type === "wake") {
           addMessage("user", msg.command ? `“Hey Jarvis, ${msg.command}”` : "“Hey Jarvis”");
+          return;
+        }
+        if (msg.type === "audit_result") {
+          const { type: _ignored, ...data } = msg;
+          setAudit(data as AuditData);
+          return;
+        }
+        if (msg.type === "permissions_result") {
+          const { type: _ignored, ...data } = msg;
+          setPermissions(data as PermissionsData);
+          return;
+        }
+        if (msg.type === "checkpoint_result") {
+          const { type: _ignored, ...data } = msg;
+          setCheckpointResult(data as CheckpointResult);
+          return;
+        }
+        if (msg.type === "bundle_export_result" || msg.type === "bundle_import_result") {
+          const { type: _ignored, ...data } = msg;
+          setBundleResult(data as BundleResult);
           return;
         }
         if (msg.type === "diagnostics_result") {
@@ -563,6 +680,52 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const requestAudit = useCallback((since?: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "audit", ...(since ? { since } : {}) }));
+    }
+  }, []);
+
+  const requestPermissions = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "permissions" }));
+    }
+  }, []);
+
+  const createCheckpoint = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setCheckpointResult({ status: "working" });
+      wsRef.current.send(JSON.stringify({ type: "checkpoint", action: "create" }));
+    }
+  }, []);
+
+  const listCheckpoints = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "checkpoint", action: "list" }));
+    }
+  }, []);
+
+  const restoreCheckpoint = useCallback((name: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setCheckpointResult({ status: "working" });
+      wsRef.current.send(JSON.stringify({ type: "checkpoint", action: "restore", name }));
+    }
+  }, []);
+
+  const exportBundle = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setBundleResult({ status: "working" });
+      wsRef.current.send(JSON.stringify({ type: "bundle_export" }));
+    }
+  }, []);
+
+  const importBundle = useCallback((path: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && path.trim()) {
+      setBundleResult({ status: "working" });
+      wsRef.current.send(JSON.stringify({ type: "bundle_import", path: path.trim() }));
+    }
+  }, []);
+
   return {
     connected,
     openclawConnected,
@@ -596,5 +759,16 @@ export function useWebSocket(): UseWebSocketReturn {
     removeSkill,
     saveDiagnostics,
     updateSettings,
+    audit,
+    requestAudit,
+    permissions,
+    requestPermissions,
+    checkpointResult,
+    createCheckpoint,
+    listCheckpoints,
+    restoreCheckpoint,
+    bundleResult,
+    exportBundle,
+    importBundle,
   };
 }

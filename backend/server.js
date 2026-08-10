@@ -28,8 +28,16 @@ const memoryService = require('./services/memoryService');
 const wakeWord = require('./services/wakeWord');
 const distiller = require('./services/distiller');
 const configReader = require('./utils/configReader');
+const auditView = require('./services/auditView');
+const permissionsView = require('./services/permissionsView');
+const checkpoints = require('./services/checkpoints');
+const stateBundle = require('./services/stateBundle');
 
 verifySandboxInitialized();
+
+// A staged checkpoint restore is applied before anything reads the stores —
+// or the config, which the restore may also have replaced.
+checkpoints.applyPending();
 
 const config = configReader.readConfig();
 const PORT = process.env.PORT || config.ports.backend;
@@ -315,6 +323,63 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'audit') {
+                ws.send(JSON.stringify({ type: 'audit_result',
+                    ...auditView.digest(parsed.since) }));
+                return;
+            }
+
+            if (parsed.type === 'permissions') {
+                ws.send(JSON.stringify({ type: 'permissions_result',
+                    ...permissionsView.snapshot(config) }));
+                return;
+            }
+
+            if (parsed.type === 'checkpoint') {
+                if (parsed.action === 'create') {
+                    const created = checkpoints.create('manual');
+                    checkpoints.prune((config.checkpoints || {}).keep ?? 5);
+                    activityBus.publish('daemon', 'checkpoint_created', { name: created.name });
+                    ws.send(JSON.stringify({ type: 'checkpoint_result',
+                        status: 'created', ...created, checkpoints: checkpoints.list() }));
+                    return;
+                }
+                if (parsed.action === 'restore' && parsed.name) {
+                    const staged = checkpoints.restore(parsed.name);
+                    ws.send(JSON.stringify({ type: 'checkpoint_result', ...staged }));
+                    if (staged.status === 'staged'
+                        && process.env.JARVIS_SETTINGS_RESTART !== 'off') {
+                        setTimeout(() => process.exit(0), 400);
+                    }
+                    return;
+                }
+                ws.send(JSON.stringify({ type: 'checkpoint_result',
+                    status: 'listed', checkpoints: checkpoints.list() }));
+                return;
+            }
+
+            if (parsed.type === 'bundle_export') {
+                try {
+                    const bundle = stateBundle.exportBundle();
+                    activityBus.publish('daemon', 'bundle_exported', { path: bundle.path });
+                    ws.send(JSON.stringify({ type: 'bundle_export_result', ...bundle }));
+                } catch (err) {
+                    ws.send(JSON.stringify({ type: 'bundle_export_result',
+                        status: 'error', reason: err.message }));
+                }
+                return;
+            }
+
+            if (parsed.type === 'bundle_import' && parsed.path) {
+                const staged = stateBundle.importBundle(parsed.path);
+                ws.send(JSON.stringify({ type: 'bundle_import_result', ...staged }));
+                if (staged.status === 'staged'
+                    && process.env.JARVIS_SETTINGS_RESTART !== 'off') {
+                    setTimeout(() => process.exit(0), 400);
+                }
+                return;
+            }
+
             if (parsed.type === 'diagnostics') {
                 try {
                     const bundle = diagnostics.collect(config);
@@ -489,6 +554,30 @@ async function boot() {
         }
     } catch (err) {
         console.warn(`[Jarvis] Startup reconciliation failed: ${err.message}`);
+    }
+
+    // Checkpointed store snapshots: one on a schedule, pruned to a budget.
+    const checkpointSettings = config.checkpoints || {};
+    if (checkpointSettings.enabled !== false) {
+        const intervalMs = (checkpointSettings.interval_hours ?? 24) * 60 * 60 * 1000;
+        const keep = checkpointSettings.keep ?? 5;
+        const takeCheckpoint = () => {
+            try {
+                const created = checkpoints.create('scheduled');
+                const pruned = checkpoints.prune(keep);
+                activityBus.publish('daemon', 'checkpoint_created',
+                    { name: created.name, pruned: pruned.length });
+            } catch (err) {
+                console.warn(`[Jarvis] Scheduled checkpoint failed: ${err.message}`);
+            }
+        };
+        const newest = checkpoints.list()
+            .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))
+            .at(-1);
+        if (!newest || Date.now() - Date.parse(newest.createdAt) > intervalMs) {
+            takeCheckpoint();
+        }
+        setInterval(takeCheckpoint, intervalMs).unref();
     }
 
     try {

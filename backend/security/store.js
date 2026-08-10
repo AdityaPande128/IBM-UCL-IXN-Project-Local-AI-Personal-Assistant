@@ -125,6 +125,21 @@ function recentDecisions(limit = 50) {
         .map(row => ({ ...row, label: labels.deserialise(row.label) }));
 }
 
+function decisionsSince(ts, limit = 200) {
+    return handle()
+        .prepare('SELECT * FROM audit WHERE ts >= ? ORDER BY id DESC LIMIT ?')
+        .all(String(ts), limit)
+        .map(row => ({ ...row, label: labels.deserialise(row.label) }));
+}
+
+function approvalsSince(ts, limit = 100) {
+    return handle()
+        .prepare(`SELECT * FROM approvals
+                  WHERE ts >= ? OR (resolved_ts IS NOT NULL AND resolved_ts >= ?)
+                  ORDER BY id DESC LIMIT ?`)
+        .all(String(ts), String(ts), limit);
+}
+
 
 function requestApproval(request) {
     const statement = handle().prepare(`
@@ -253,6 +268,8 @@ module.exports = {
     SCHEMA_VERSION,
     recordDecision,
     recentDecisions,
+    decisionsSince,
+    approvalsSince,
     requestApproval,
     pendingApprovals,
     getApproval,

@@ -17,6 +17,7 @@ fs.writeFileSync(path.join(process.env.JARVIS_LOGS_DIR, 'backend.log'), 'boot ok
 process.env.JARVIS_CONFIG_PATH = path.join(scratch, 'config.json');
 fs.copyFileSync(path.resolve(__dirname, '../../config.json'), process.env.JARVIS_CONFIG_PATH);
 process.env.JARVIS_SETTINGS_RESTART = 'off';
+process.env.JARVIS_CHECKPOINTS_DIR = path.join(scratch, 'checkpoints');
 
 const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
@@ -345,6 +346,27 @@ test('a diagnostics bundle collects logs, config and recent runs — never the t
     assert.match(listing, /failures\.json/);
     assert.match(listing, /logs\/backend\.log/);
     assert.strictEqual(listing.includes('socket-token'), false);
+    client.ws.close();
+});
+
+test('the audit and permissions surfaces answer over the wire', async () => {
+    const client = await authed();
+
+    client.send({ type: 'audit' });
+    const audit = await client.next(m => m.type === 'audit_result');
+    assert.ok(audit.summary, 'the digest carries a summary');
+    assert.ok(Array.isArray(audit.plans));
+    assert.ok(Array.isArray(audit.decisions));
+
+    client.send({ type: 'permissions' });
+    const permissions = await client.next(m => m.type === 'permissions_result');
+    assert.ok(Array.isArray(permissions.skills));
+    assert.ok(permissions.web && Array.isArray(permissions.web.blocked_hosts));
+    assert.strictEqual(typeof permissions.memory.incognito, 'boolean');
+
+    client.send({ type: 'checkpoint', action: 'list' });
+    const listed = await client.next(m => m.type === 'checkpoint_result');
+    assert.ok(Array.isArray(listed.checkpoints));
     client.ws.close();
 });
 
