@@ -19,6 +19,7 @@ const diagnostics = require('./services/diagnostics');
 const settings = require('./services/settings');
 const availability = require('./services/availability');
 const watchers = require('./services/watchers');
+const morningBrief = require('./services/morningBrief');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -314,6 +315,15 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'brief') {
+                const brief = morningBrief.assemble({
+                    browse: goal => intentQueue.submit(() =>
+                        webAgent.browse(String(goal))).result
+                });
+                ws.send(JSON.stringify({ type: 'brief_result', ...brief }));
+                return;
+            }
+
             if (parsed.type === 'status') {
                 ws.send(JSON.stringify({
                     type: 'status_result',
@@ -357,6 +367,9 @@ async function boot() {
         const held = availability.start();
         if (held.holding) console.log('[Jarvis] Stay-awake assertion held (releases itself on battery).');
         watchers.start();
+        morningBrief.start({
+            browse: goal => intentQueue.submit(() => webAgent.browse(String(goal))).result
+        });
     } catch (err) {
         console.warn(`[Jarvis] Availability startup failed: ${err.message}`);
     }

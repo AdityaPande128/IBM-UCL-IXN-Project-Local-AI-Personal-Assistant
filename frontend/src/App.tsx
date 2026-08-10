@@ -5,6 +5,7 @@ import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { AbilitiesView } from "./components/AbilitiesView";
+import { InboxView } from "./components/InboxView";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
 import { useServices, serviceBanner } from "./hooks/useServices";
@@ -21,6 +22,9 @@ function App() {
     abilities,
     diagnostics,
     settingsResult,
+    brief,
+    requestBrief,
+    markNoticesSeen,
     sendBinary,
     sendIntent,
     sendDecision,
@@ -34,7 +38,7 @@ function App() {
   const services = useServices();
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
-  const [view, setView] = useState<"chat" | "abilities">("chat");
+  const [view, setView] = useState<"chat" | "abilities" | "inbox">("chat");
 
   useEffect(() => {
     invoke("ensure_screen_access").catch(() => {});
@@ -60,10 +64,21 @@ function App() {
         </div>
         <div className="app-status">
           <button
-            className={`activity-toggle ${view === "abilities" ? "activity-toggle--on" : ""}`}
-            onClick={() => setView((v) => (v === "chat" ? "abilities" : "chat"))}
+            className={`activity-toggle ${view === "inbox" ? "activity-toggle--on" : ""}`}
+            onClick={() => setView((v) => (v === "inbox" ? "chat" : "inbox"))}
           >
-            {view === "chat" ? "Abilities" : "Chat"}
+            Inbox
+            {brief && brief.notices.length + brief.proposals.length > 0 && (
+              <span className="inbox-badge">
+                {brief.notices.length + brief.proposals.length}
+              </span>
+            )}
+          </button>
+          <button
+            className={`activity-toggle ${view === "abilities" ? "activity-toggle--on" : ""}`}
+            onClick={() => setView((v) => (v === "abilities" ? "chat" : "abilities"))}
+          >
+            Abilities
           </button>
           <button
             className={`activity-toggle ${showActivity ? "activity-toggle--on" : ""}`}
@@ -88,12 +103,21 @@ function App() {
 
       <div className="app-body">
         <main className="app-main">
-          {view === "chat" ? (
+          {view === "chat" && (
             <>
               <ChatLog messages={messages} />
               {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
             </>
-          ) : (
+          )}
+          {view === "inbox" && (
+            <InboxView
+              brief={brief}
+              onRefresh={requestBrief}
+              onDecision={sendDecision}
+              onMarkSeen={markNoticesSeen}
+            />
+          )}
+          {view === "abilities" && (
             <AbilitiesView
               key={connected ? "online" : "offline"}
               abilities={abilities}

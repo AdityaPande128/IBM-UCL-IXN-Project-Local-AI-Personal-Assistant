@@ -510,3 +510,14 @@ test('watchers answer over the wire and refuse an unknown recipe', async () => {
 
     client.ws.close();
 });
+
+test('the morning brief answers over the wire', async () => {
+    const client = await authed();
+    client.send({ type: 'brief' });
+    const brief = await client.next(m => m.type === 'brief_result');
+    assert.ok(Array.isArray(brief.notices));
+    assert.ok(Array.isArray(brief.approvals));
+    assert.ok(Array.isArray(brief.drafts));
+    assert.match(brief.text, /^Good morning\./);
+    client.ws.close();
+});

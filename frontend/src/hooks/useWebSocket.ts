@@ -75,6 +75,41 @@ export interface SettingsResult {
   error?: string;
 }
 
+export interface BriefNotice {
+  id: number;
+  watcher_id: string;
+  at: number;
+  title: string;
+  body: string;
+  seen: number;
+}
+
+export interface BriefDraft {
+  id: string;
+  kind: string;
+  summary?: string;
+  who?: string;
+  subject?: string;
+  goal?: string;
+}
+
+export interface BriefApproval {
+  id: number;
+  ts: string;
+  channel: string;
+  action: string;
+  summary: string;
+}
+
+export interface BriefData {
+  at: number;
+  text: string;
+  notices: BriefNotice[];
+  proposals: BriefDraft[];
+  drafts: BriefDraft[];
+  approvals: BriefApproval[];
+}
+
 interface UseWebSocketReturn {
   connected: boolean;
   openclawConnected: boolean;
@@ -85,6 +120,9 @@ interface UseWebSocketReturn {
   abilities: AbilitiesData | null;
   diagnostics: DiagnosticsResult | null;
   settingsResult: SettingsResult | null;
+  brief: BriefData | null;
+  requestBrief: () => void;
+  markNoticesSeen: (ids: number[]) => void;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
   sendDecision: (id: string, decision: "yes" | "no") => void;
@@ -150,6 +188,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [abilities, setAbilities] = useState<AbilitiesData | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [settingsResult, setSettingsResult] = useState<SettingsResult | null>(null);
+  const [brief, setBrief] = useState<BriefData | null>(null);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -241,6 +280,14 @@ export function useWebSocket(): UseWebSocketReturn {
         if (msg.type === "abilities_result") {
           const { type: _ignored, ...data } = msg;
           setAbilities(data as AbilitiesData);
+          return;
+        }
+        if (msg.type === "brief_result") {
+          const { type: _ignored, ...data } = msg;
+          setBrief(data as BriefData);
+          return;
+        }
+        if (msg.type === "notices_seen_result") {
           return;
         }
         if (msg.type === "diagnostics_result") {
@@ -337,6 +384,23 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const requestBrief = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "brief" }));
+    }
+  }, []);
+
+  const markNoticesSeen = useCallback((ids: number[]) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && ids.length) {
+      wsRef.current.send(JSON.stringify({ type: "notices_seen", ids }));
+      setBrief((prev) =>
+        prev
+          ? { ...prev, notices: prev.notices.filter((n) => !ids.includes(n.id)) }
+          : prev
+      );
+    }
+  }, []);
+
   const removeSkill = useCallback((name: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "skill_remove", name }));
@@ -367,6 +431,9 @@ export function useWebSocket(): UseWebSocketReturn {
     abilities,
     diagnostics,
     settingsResult,
+    brief,
+    requestBrief,
+    markNoticesSeen,
     sendBinary,
     sendIntent,
     sendDecision,
