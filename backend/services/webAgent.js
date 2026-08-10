@@ -1763,7 +1763,8 @@ async function browse(goal, options = {}) {
                 { goal, userLabel: inputLabel, contextLabel, mandate, home,
                   dictated: intent.write || [],
                   addressed: addressedIt,
-                  unsent: mandate.has('compose') && filled.length > 0 && !performed.has('send') },
+                  unsent: mandate.has('compose') && filled.length > 0
+                      && !performed.has('send') && !performed.has('book') },
                 options
             ).catch(err => ({ ok: false, detail: err.message }));
 

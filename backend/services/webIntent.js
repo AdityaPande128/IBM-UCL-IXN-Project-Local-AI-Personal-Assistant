@@ -10,12 +10,12 @@ const TIER = webConfig.intent_tier || webConfig.tier || 'engine';
 const TIMEOUT_MS = webConfig.intent_timeout_ms ?? 20000;
 const MAX_TOKENS = 400;
 
-const ACTS = new Set(['read', 'compose', 'send', 'spend', 'delete', 'agree']);
+const ACTS = new Set(['read', 'compose', 'send', 'book', 'spend', 'delete', 'agree']);
 
 const SYSTEM_PROMPT = `You read a user's request and work out what it is asking for, before any website is opened.
 
 Respond with ONLY a JSON object, no markdown fences and no commentary:
-{"query":"<what to type in the site's search box, or null>","write":["<text to type>"],"act":"<read|compose|send|spend|delete|agree>","completes":"<short phrase: what will be true when this is done>"}
+{"query":"<what to type in the site's search box, or null>","write":["<text to type>"],"act":"<read|compose|send|book|spend|delete|agree>","completes":"<short phrase: what will be true when this is done>"}
 
 THE FIELDS
 
@@ -68,7 +68,11 @@ act     What the user is asking to have HAPPEN, not what words appear:
                    "tell X that", "let X know", "send X" all mean — a message
                    nobody sent is not a reply, and someone who says "tell my
                    friend I'm running late" is asking for it to arrive.
-          spend    buy, order, pay, book.
+          book     put something on the user's calendar: "book a meeting",
+                   "schedule a call", "add it to my calendar". An event is
+                   made, but no money moves and no message goes to anyone.
+          spend    buy, order, pay — money changes hands. Booking a flight,
+                   a hotel or a table is spend, not book.
           delete   delete, remove, unsubscribe.
           agree    accept terms, opt in, consent.
         When you are torn between read and send, ask what the user would be
@@ -100,7 +104,10 @@ EXAMPLES
 {"query":"from:philip","write":["Sounds good to me"],"act":"compose","completes":"the draft is written"}
 
 "let Sam know I'm running twenty minutes late"
-{"query":"sam","write":["I'm running about twenty minutes late, sorry."],"act":"send","completes":"the message has been sent"}`;
+{"query":"sam","write":["I'm running about twenty minutes late, sorry."],"act":"send","completes":"the message has been sent"}
+
+"put lunch with Sam on my calendar for Friday at 1pm"
+{"query":null,"write":["Lunch with Sam"],"act":"book","completes":"the event is on the calendar"}`;
 
 async function read(goal, options = {}) {
     const words = String(goal || '').trim();

@@ -232,6 +232,9 @@ const IRREVERSIBLE = [
     { kind: 'send',
       pattern: /\b(send|post|publish|submit application|tweet|reply all)\b/i,
       what: 'sends something to other people' },
+    { kind: 'book',
+      pattern: /\bsave\b|\b(create|add|schedule) event\b/i,
+      what: 'puts an event on the calendar' },
     { kind: 'compose',
       pattern: /\b(reply|forward|compose|new message|write)\b/i,
       what: 'starts a message to other people' },
@@ -248,6 +251,13 @@ const MANDATES = [
     { kind: 'send', pattern: /\b(email|message)\b/i, notAfter: AS_NOUN },
     { kind: 'send', pattern: /\btell\s+(?!me\b|us\b)/i },
     { kind: 'compose', pattern: /\b(draft|compose)\b/i },
+    // Booking is calendar work unless the words nearby say commerce — "book a
+    // meeting" schedules, "book me a flight" spends, and spend is never
+    // granted from text.
+    { kind: 'book',
+      pattern: /\b(book|schedule)\b(?![^.]{0,20}\b(flights?|hotels?|tables?|tickets?|taxis?|cabs?|rooms?)\b)/i },
+    { kind: 'book',
+      pattern: /\b(add|put|create|set up|make)\b[^.]{0,40}\b(event|appointment|reminder|calendar)\b/i },
     { kind: 'spend', pattern: /\b(buy|purchase|pay|checkout|subscribe|donate)\b/i },
     { kind: 'spend', pattern: /\b(order|book)\b/i, notAfter: AS_NOUN },
     { kind: 'delete', pattern: /\b(delete|remove|erase|unsubscribe|clear out|throw away)\b/i },
@@ -258,6 +268,7 @@ const INTENT_MANDATE = {
     read: [],
     compose: ['compose'],
     send: ['compose', 'send'],
+    book: ['compose', 'book'],
     spend: [],
     delete: [],
     agree: []

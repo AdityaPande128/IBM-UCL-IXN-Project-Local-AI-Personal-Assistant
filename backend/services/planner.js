@@ -125,7 +125,11 @@ RULES
    site — plan a web.browse starting at the address it gives, and do not send
    files.search looking for them. Start it at the site the question is ABOUT:
    what the user is doing, where they have to be or what time something is on a
-   date starts at their calendar, and who wrote what starts at their mail. An
+   date starts at their calendar, and who wrote what starts at their mail.
+   PUTTING something on the calendar — "book a meeting", "schedule a call",
+   "add it to my calendar" — starts at the calendar too, one web.browse with
+   the user's own words as the goal: their words are what authorises saving
+   the event. An
    order, a delivery or a booking from a company starts at their MAIL too — the
    confirmation and the dispatch note were emailed to them — and not at that
    company's website, which nobody is signed in to and which the browser is

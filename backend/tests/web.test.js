@@ -571,6 +571,43 @@ test('opening a reply is not sending it, and a request to draft cannot send', ()
     }
 });
 
+test('booking words unlock the calendar save and nothing more', () => {
+    const scope = scratch();
+    try {
+        const save = { ref: 'e1', role: 'button', name: 'Save' };
+        const send = { ref: 'e2', role: 'button', name: 'Send' };
+
+        const booking = webPolicy.mandateFrom('book a meeting with Sam at 3pm on Friday', USER);
+        assert.deepStrictEqual([...booking].sort(), ['book', 'compose']);
+        assert.strictEqual(webPolicy.checkClick({ element: save, label: USER, mandate: booking }).allowed, true);
+
+        const sendRefused = webPolicy.checkClick({ element: send, label: USER, mandate: booking });
+        assert.strictEqual(sendRefused.allowed, false,
+            'an event on the calendar is not a message to a person');
+
+        const unasked = webPolicy.checkClick({ element: save, label: USER, mandate: new Set() });
+        assert.strictEqual(unasked.allowed, false);
+        assert.strictEqual(unasked.refusal, webPolicy.REFUSAL.IRREVERSIBLE);
+
+        assert.strictEqual(
+            webPolicy.mandateFrom('add the dentist appointment to my calendar', USER).has('book'),
+            true);
+        assert.strictEqual(
+            webPolicy.mandateFrom('schedule a call with the supervisor for Monday', USER).has('book'),
+            true);
+        assert.strictEqual(
+            webPolicy.mandateFrom('book me a flight to Paris next weekend', USER).has('book'),
+            false, 'booking travel is spending, and spending is never granted from text');
+        assert.strictEqual(
+            webPolicy.mandateFrom('what appointments do I have this week', USER).has('book'),
+            false, 'a question about the calendar authorises nothing');
+        assert.strictEqual(webPolicy.mandateFrom('book a meeting with Sam', FROM_WEB).size, 0,
+            'page-touched words grant nothing, booking included');
+    } finally {
+        scope.cleanup();
+    }
+});
+
 test('ATTACK: a goal a page has touched cannot authorise the page\'s own send button', () => {
     const words = 'send the confirmation and accept the terms';
 
