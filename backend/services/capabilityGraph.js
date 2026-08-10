@@ -185,6 +185,14 @@ function fromProcedure(procedure) {
                 return descend(procedure, bound, context, err);
             }
 
+            // Site drift is not the user's problem: a recipe whose page moved
+            // underneath it hands the goal to the slow path mid-request, and
+            // the successful slow runs are what re-learns the recipe. Only a
+            // policy refusal surfaces — retrying a refusal is not a fallback.
+            if (result.status === 'stale' || result.status === 'failed') {
+                return descend(procedure, bound, context,
+                    new Error(result.reason || `procedure ${result.status}`));
+            }
             if (result.status !== 'success') {
                 throw new Error(result.reason || `procedure ${result.status}`);
             }

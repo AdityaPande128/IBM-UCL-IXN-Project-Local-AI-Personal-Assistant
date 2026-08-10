@@ -854,3 +854,155 @@ test('a keyboard shortcut in a control name is not part of what it is called', (
     assert.strictEqual(perception.find(observation, { role: 'link', name: 'Inbox (24)' }).element.ref, 'e3');
     assert.strictEqual(perception.find(observation, { role: 'button', name: 'Search' }).element, null);
 });
+
+
+function retiredSearch({ family } = {}) {
+    const procedure = procedureStore.save({
+        name: 'bookshop-search',
+        surface: 'books.example',
+        start_url: 'https://books.example/search',
+        description: 'Search the bookshop catalogue for a title.',
+        goal_template: 'what does the bookshop say about {title}',
+        ...(family ? { family: 'bookshop', action: 'search' } : {}),
+        parameters: { title: { type: 'string', required: true, description: 'the title' } },
+        steps: [
+            { action: 'fill', role: 'textbox', name: 'Title or author', slot: 'title' },
+            { action: 'click', role: 'button', name: 'Search' }
+        ]
+    });
+    procedureStore.recordReplay('bookshop-search', { ok: false, error: 'element gone' });
+    procedureStore.recordReplay('bookshop-search', { ok: false, error: 'element gone' });
+    assert.strictEqual(procedureStore.isOffered(procedureStore.get('bookshop-search')), false,
+        'the recipe must start this test retired');
+    return procedure;
+}
+
+test('the same steps proving out again revive a retired recipe', () => {
+    const world = scratch();
+    try {
+        TWO_GOALS.forEach(searchRun);
+        const first = distiller.distil({});
+        assert.strictEqual(first.learned.length, 1);
+        const name = first.learned[0].name;
+
+        procedureStore.recordReplay(name, { ok: false, error: 'flaky network' });
+        procedureStore.recordReplay(name, { ok: false, error: 'flaky network' });
+        assert.strictEqual(procedureStore.isOffered(procedureStore.get(name)), false);
+
+        const second = distiller.distil({});
+        assert.strictEqual(second.learned.length, 0);
+        assert.strictEqual(second.revived.length, 1);
+        assert.strictEqual(second.revived[0].name, name);
+
+        const back = procedureStore.get(name);
+        assert.strictEqual(procedureStore.isOffered(back), true);
+        assert.strictEqual(back.health.consecutive_failures, 0);
+        assert.ok(back.relearned_at, 'revival must be stamped');
+    } finally { world.cleanup(); }
+});
+
+test('a drifted site re-learns the recipe in place: same name, new steps', () => {
+    const world = scratch();
+    try {
+        retiredSearch({ family: true });
+
+        const drifted = ({ goal, typed }) => searchRun({
+            goal, typed,
+            steps: [
+                { capability: 'web.fill', status: 'success',
+                  inputs: { role: 'searchbox', name: 'Search books', ref: 'e1', text: typed } },
+                { capability: 'web.click', status: 'success',
+                  inputs: { role: 'button', name: 'Go', ref: 'e2' } },
+                { capability: 'web.done', status: 'success', summary: 'found it' }
+            ]
+        });
+        TWO_GOALS.forEach(drifted);
+
+        const result = distiller.distil({});
+        assert.strictEqual(result.learned.length, 1);
+
+        const healed = result.learned[0];
+        assert.strictEqual(healed.name, 'bookshop-search',
+            'the capability keeps its name across the drift');
+        assert.strictEqual(healed.family, 'bookshop');
+        assert.strictEqual(healed.action, 'search');
+        assert.strictEqual(healed.steps[0].name, 'Search books',
+            'the steps are the new page, not the old one');
+        assert.ok(healed.relearned_at);
+        assert.strictEqual(procedureStore.isOffered(procedureStore.get('bookshop-search')), true);
+    } finally { world.cleanup(); }
+});
+
+test('a stale replay hands the goal to the slow path mid-request', async () => {
+    const world = scratch();
+    const realReplay = procedureRunner.replay;
+    const realBrowse = webAgent.browse;
+    try {
+        const procedure = retiredSearch();
+
+        procedureRunner.replay = async () => ({
+            status: 'stale', reason: 'the page has no "Title or author" any more'
+        });
+        let browsedFor = null;
+        webAgent.browse = async goal => {
+            browsedFor = goal;
+            return { status: 'success', answer: 'It is in stock.', passages: [],
+                     url: 'https://books.example/results', files: [] };
+        };
+
+        const capability = capabilityGraph.fromProcedure(procedure);
+        const out = await capability.run({ title: 'The Long Field' }, {
+            request: 'what does the bookshop say about The Long Field'
+        });
+
+        assert.strictEqual(out.text, 'It is in stock.');
+        assert.match(browsedFor, /The Long Field/);
+    } finally {
+        procedureRunner.replay = realReplay;
+        webAgent.browse = realBrowse;
+        world.cleanup();
+    }
+});
+
+test('a policy refusal is not drift: it surfaces instead of being retried', async () => {
+    const world = scratch();
+    const realReplay = procedureRunner.replay;
+    try {
+        const procedure = retiredSearch();
+        procedureRunner.replay = async () => ({
+            status: 'blocked', reason: 'that control spends money, and nothing asked for it'
+        });
+
+        const capability = capabilityGraph.fromProcedure(procedure);
+        await assert.rejects(
+            () => capability.run({ title: 'x' }, { request: 'buy it' }),
+            /spends money/);
+    } finally {
+        procedureRunner.replay = realReplay;
+        world.cleanup();
+    }
+});
+
+test('failures from before a re-learn do not block the rebuilt recipe', async () => {
+    const world = scratch();
+    const negativeMemory = require('../services/negativeMemory');
+    try {
+        retiredSearch();
+
+        const plan = traceStore.beginPlan({ request: 'old world', status: 'running' });
+        ['a1', 'a2'].forEach((key, ordinal) => traceStore.recordStep(plan, {
+            ordinal, key, capability: 'procedure.bookshop-search', tier: 1,
+            status: 'failed', error: 'element gone'
+        }));
+        traceStore.finishPlan(plan, { status: 'failed', runMs: 100 });
+
+        assert.strictEqual(negativeMemory.isBlocked('procedure.bookshop-search'), true,
+            'two dead runs block the recipe');
+
+        await new Promise(beat => setTimeout(beat, 15));
+        procedureStore.revive('bookshop-search');
+
+        assert.strictEqual(negativeMemory.isBlocked('procedure.bookshop-search'), false,
+            'the record starts over at the re-learn');
+    } finally { world.cleanup(); }
+});

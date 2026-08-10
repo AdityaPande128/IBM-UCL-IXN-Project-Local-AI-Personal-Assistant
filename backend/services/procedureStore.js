@@ -180,6 +180,37 @@ function save(procedure) {
     return record;
 }
 
+// Fresh evidence that the same steps still work: the failures were noise,
+// not drift, and the recipe is offered again with a clean slate.
+function revive(name) {
+    const procedure = get(name);
+    if (!procedure) return null;
+
+    procedure.health = freshHealth();
+    procedure.relearned_at = new Date().toISOString();
+    try {
+        fs.writeFileSync(fileFor(name), `${JSON.stringify(procedure, null, 2)}\n`, 'utf8');
+    } catch (err) {
+        console.warn(`[Procedures] Could not revive ${name}: ${err.message}`);
+    }
+    return procedure;
+}
+
+// Re-learning keeps the name: the capability id, the family and the place in
+// plans all survive the site having moved underneath the old steps.
+function replace(name, next) {
+    const old = get(name);
+    if (!old) return save(next);
+
+    const record = { ...next, name, health: freshHealth(),
+                     relearned_at: new Date().toISOString() };
+    if (record.family === undefined && old.family !== undefined) {
+        record.family = old.family;
+        record.action = old.action;
+    }
+    return save(record);
+}
+
 function recordReplay(name, { ok, error = null, ms = null } = {}) {
     const procedure = get(name);
     if (!procedure) return null;
@@ -237,6 +268,7 @@ function reload() {
 
 module.exports = {
     open, load, reload, all, list, get, has, save, remove, recordReplay,
+    revive, replace,
     validate, isOffered, freshHealth, slotsIn, fillSlots,
     DEFAULT_DIR, RETIRE_AFTER_CONSECUTIVE_FAILURES,
     get directory() { return directory; }

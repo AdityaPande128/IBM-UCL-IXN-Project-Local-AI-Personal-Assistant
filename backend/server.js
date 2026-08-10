@@ -24,6 +24,7 @@ const channelAdapter = require('./services/channelAdapter');
 const memoryStore = require('./services/memoryStore');
 const memoryService = require('./services/memoryService');
 const wakeWord = require('./services/wakeWord');
+const distiller = require('./services/distiller');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -471,6 +472,7 @@ async function boot() {
         if (held.holding) console.log('[Jarvis] Stay-awake assertion held (releases itself on battery).');
         watchers.start();
         memoryService.start();
+        distiller.start();
         morningBrief.start({
             browse: goal => intentQueue.submit(() => webAgent.browse(String(goal))).result
         });

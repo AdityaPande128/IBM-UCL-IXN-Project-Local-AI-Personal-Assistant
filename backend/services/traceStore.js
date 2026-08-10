@@ -301,12 +301,20 @@ function failedSteps(limit = 200) {
     `).all(limit);
 }
 
-function recentOutcomes(capability, limit = 5) {
+function recentOutcomes(capability, limit = 5, { since = null } = {}) {
+    if (!since) {
+        return handle().prepare(`
+            SELECT status FROM steps
+            WHERE capability = ?
+            ORDER BY id DESC LIMIT ?
+        `).all(capability, limit).map(row => row.status);
+    }
     return handle().prepare(`
-        SELECT status FROM steps
-        WHERE capability = ?
-        ORDER BY id DESC LIMIT ?
-    `).all(capability, limit).map(row => row.status);
+        SELECT s.status FROM steps s
+        JOIN plans p ON p.id = s.plan_id
+        WHERE s.capability = ? AND p.ts >= ?
+        ORDER BY s.id DESC LIMIT ?
+    `).all(capability, since, limit).map(row => row.status);
 }
 
 function stats() {

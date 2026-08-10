@@ -12,9 +12,15 @@ const CONSECUTIVE_FAILURES_TO_BLOCK = 2;
 function isBlocked(capabilityId) {
     if (!String(capabilityId).startsWith('procedure.')) return false;
 
+    // Failures from before a re-learn belong to the old steps: the record
+    // that blocks a recipe starts over at the moment it was rebuilt.
+    const name = String(capabilityId).slice('procedure.'.length);
+    const procedure = require('./procedureStore').get(name);
+    const since = (procedure && procedure.relearned_at) || null;
+
     let recent;
     try {
-        recent = traceStore.recentOutcomes(capabilityId, CONSECUTIVE_FAILURES_TO_BLOCK);
+        recent = traceStore.recentOutcomes(capabilityId, CONSECUTIVE_FAILURES_TO_BLOCK, { since });
     } catch {
         return false;
     }

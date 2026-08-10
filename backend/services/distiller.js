@@ -279,6 +279,7 @@ function distil({ limit = 200, surface = null, dryRun = false } = {}) {
 
     const taken = new Set(procedureStore.all().map(procedure => procedure.name));
     const learned = [];
+    const revived = [];
 
     for (const group of groups.values()) {
         if (group.runs.length < MIN_RUNS) {
@@ -303,6 +304,12 @@ function distil({ limit = 200, surface = null, dryRun = false } = {}) {
             && signatureOf(procedure) === signature(group.runs[0].actions));
 
         if (existing) {
+            // The same steps proved out again after retirement: the failures
+            // were noise, not drift, and the recipe earns its way back.
+            if (!procedureStore.isOffered(existing)) {
+                revived.push(dryRun ? existing : procedureStore.revive(existing.name));
+                continue;
+            }
             skipped.push({
                 surface: group.surface, plans: group.runs.map(run => run.id),
                 why: `already known as "${existing.name}"`
@@ -310,10 +317,28 @@ function distil({ limit = 200, surface = null, dryRun = false } = {}) {
             continue;
         }
 
+        // Drift healed: a retired recipe that served this same goal on this
+        // surface is replaced in place — same name, new steps. Templates are
+        // compared with their slot names blanked, because the same goal
+        // re-learned from a renamed field names its slot differently.
+        const shapeOf = template => String(template || '').replace(/\{[a-z0-9_]+\}/gi, '{}');
+        const displaced = procedureStore.all().find(procedure =>
+            !procedureStore.isOffered(procedure)
+            && procedure.surface === group.surface
+            && procedure.goal_template
+            && shapeOf(procedure.goal_template) === shapeOf(result.procedure.goal_template));
+
+        if (displaced) {
+            learned.push(dryRun
+                ? { ...result.procedure, name: displaced.name }
+                : procedureStore.replace(displaced.name, result.procedure));
+            continue;
+        }
+
         learned.push(dryRun ? result.procedure : procedureStore.save(result.procedure));
     }
 
-    return { learned, skipped, groups: groups.size, considered: runs.length };
+    return { learned, revived, skipped, groups: groups.size, considered: runs.length };
 }
 
 function signatureOf(procedure) {
@@ -322,8 +347,48 @@ function signatureOf(procedure) {
     })));
 }
 
+const TICK_MS = distillConfig.tick_ms ?? 6 * 60 * 60 * 1000;
+const FIRST_PASS_MS = distillConfig.first_pass_ms ?? 90 * 1000;
+
+let ticker = null;
+let opener = null;
+
+// Re-learning is a habit, not an event: every pass reads the recent slow
+// runs, and a recipe the site broke is rebuilt or revived as soon as the
+// slow path has walked the new ground often enough.
+function start() {
+    if (ticker) return;
+
+    const pass = () => {
+        try {
+            const result = distil({});
+            if (result.learned.length || result.revived.length) {
+                const names = [...result.learned, ...result.revived]
+                    .map(procedure => procedure.name).join(', ');
+                console.log(`[Distiller] Learned ${result.learned.length}, `
+                    + `revived ${result.revived.length}: ${names}`);
+                require('./capabilityGraph').reload();
+            }
+        } catch (err) {
+            console.warn(`[Distiller] pass failed: ${err.message}`);
+        }
+    };
+
+    opener = setTimeout(pass, FIRST_PASS_MS);
+    if (opener.unref) opener.unref();
+    ticker = setInterval(pass, TICK_MS);
+    if (ticker.unref) ticker.unref();
+}
+
+function stop() {
+    if (opener) clearTimeout(opener);
+    if (ticker) clearInterval(ticker);
+    opener = null;
+    ticker = null;
+}
+
 module.exports = {
     distil, normalise, signature, signatureOf, align, induce,
-    slotName, procedureName,
+    slotName, procedureName, start, stop,
     MIN_RUNS, MIN_SHARED_WORDS, MAX_STEPS
 };
