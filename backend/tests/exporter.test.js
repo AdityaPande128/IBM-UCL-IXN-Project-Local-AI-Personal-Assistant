@@ -139,6 +139,17 @@ test('a pack that tries to write outside its directory is refused', async () => 
     assert.ok(result.reason.includes('unsafe path'), result.reason);
 });
 
+test('a skill containing a symlink cannot be exported as a pack', () => {
+    const dir = writeSkill('linked-skill', { script: COUNTER, tests: COUNTER_TESTS });
+    fs.symlinkSync('/etc/passwd', path.join(dir, 'leak'));
+    skillRegistry.reload();
+    const result = skillExporter.exportPack('linked-skill', { destDir: packsDir, keyPath });
+    assert.strictEqual(result.status, 'refused');
+    assert.ok(result.reason.includes('symlink'), result.reason);
+    fs.rmSync(dir, { recursive: true, force: true });
+    skillRegistry.reload();
+});
+
 test('a skill that fails its own tests here does not install', async () => {
     writeSkill('wrong-count', {
         script: 'print("nothing useful")\n',

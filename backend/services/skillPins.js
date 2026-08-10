@@ -31,21 +31,26 @@ function writeStore(store) {
 function walk(dir, files) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) walk(full, files);
-        else if (entry.isFile()) files.push(full);
+        if (entry.isSymbolicLink()) files.push({ full, link: true });
+        else if (entry.isDirectory()) walk(full, files);
+        else if (entry.isFile()) files.push({ full, link: false });
     }
 }
 
 function hashDirectory(directory) {
     const files = [];
     walk(directory, files);
-    files.sort();
+    files.sort((a, b) => a.full < b.full ? -1 : a.full > b.full ? 1 : 0);
 
     const hash = crypto.createHash('sha256');
-    for (const file of files) {
-        hash.update(path.relative(directory, file));
+    for (const { full, link } of files) {
+        // A symlink is part of what the directory does — its target changing
+        // must read as drift, so the link itself is hashed, not what it
+        // points at. Regular files hash exactly as they always have.
+        if (link) hash.update('link\0');
+        hash.update(path.relative(directory, full));
         hash.update('\0');
-        hash.update(fs.readFileSync(file));
+        hash.update(link ? fs.readlinkSync(full) : fs.readFileSync(full));
         hash.update('\0');
     }
     return hash.digest('hex');

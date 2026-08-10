@@ -258,3 +258,79 @@ test('a state bundle round-trips, refuses tampering, and rejects unsafe members'
     assert.strictEqual(
         stateBundle.importBundle(path.join(bundles, 'never.tar.gz')).status, 'refused');
 });
+
+test('a manifest path that steps outside invalidates the whole checkpoint', () => {
+    // The payload sits inside the checkpoint, but its manifest rel walks out —
+    // verify() must refuse it before restore can ever write beyond its roots.
+    const dir = path.join(scratch, 'checkpoints', 'escape');
+    fs.mkdirSync(path.join(dir, 'data'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'payload'), 'owned');
+    const hash = require('crypto').createHash('sha256')
+        .update(fs.readFileSync(path.join(dir, 'payload'))).digest('hex');
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+        format: 'jarvis-checkpoint/1', name: 'escape',
+        createdAt: new Date().toISOString(),
+        files: { 'data/../payload': hash }
+    }) + '\n');
+
+    const checked = checkpoints.verify('escape');
+    assert.strictEqual(checked.ok, false);
+    assert.ok(checked.reason.includes('unsafe'), checked.reason);
+    assert.strictEqual(checkpoints.restore('escape').status, 'refused');
+
+    // The same rule holds for a bundle's manifest keys.
+    const bundles = path.join(scratch, 'bundles');
+    const build = fs.mkdtempSync(path.join(scratch, 'evil-bundle-'));
+    fs.mkdirSync(path.join(build, 'data'));
+    fs.writeFileSync(path.join(build, 'payload'), 'owned');
+    fs.writeFileSync(path.join(build, 'bundle-manifest.json'), JSON.stringify({
+        format: stateBundle.FORMAT, createdAt: new Date().toISOString(),
+        files: { 'data/../payload': hash }
+    }) + '\n');
+    const evil = path.join(bundles, 'evil.tar.gz');
+    require('child_process').execFileSync('/usr/bin/tar', ['-czf', evil, '-C', build, '.']);
+    const refused = stateBundle.importBundle(evil,
+        { checkpointRoot: path.join(scratch, 'checkpoints') });
+    assert.strictEqual(refused.status, 'refused');
+    assert.ok(refused.reason.includes('unsafe'), refused.reason);
+});
+
+test('a restore that displaces skills saves them into the undo first', () => {
+    const dataDir = seedDataDir('data-d');
+    const liveSkills = path.join(scratch, 'skills-live');
+    fs.mkdirSync(path.join(liveSkills, 'greeter'), { recursive: true });
+    fs.writeFileSync(path.join(liveSkills, 'greeter', 'run.py'), 'print("mine")\n');
+
+    // A checkpoint that carries a different version of the same skill —
+    // the shape a bundle import lands as.
+    const name = 'with-skills';
+    const dir = path.join(scratch, 'checkpoints', name);
+    fs.mkdirSync(path.join(dir, 'skills', 'greeter'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'skills', 'greeter', 'run.py'), 'print("theirs")\n');
+    const hash = require('crypto').createHash('sha256')
+        .update(fs.readFileSync(path.join(dir, 'skills', 'greeter', 'run.py'))).digest('hex');
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+        format: 'jarvis-checkpoint/1', name, createdAt: new Date().toISOString(),
+        files: { 'skills/greeter/run.py': hash }
+    }) + '\n');
+
+    assert.strictEqual(checkpoints.restore(name).status, 'staged');
+    const applied = checkpoints.applyPending({
+        dataDir, skillsDir: liveSkills,
+        configPath: path.join(scratch, 'config-skills.json'), log: () => { }
+    });
+    assert.strictEqual(applied.status, 'restored');
+    assert.strictEqual(
+        fs.readFileSync(path.join(liveSkills, 'greeter', 'run.py'), 'utf8'),
+        'print("theirs")\n');
+
+    // The displaced skill rode into the undo checkpoint, hashed like the rest.
+    const undoDir = path.join(scratch, 'checkpoints', applied.undo);
+    assert.strictEqual(
+        fs.readFileSync(path.join(undoDir, 'skills', 'greeter', 'run.py'), 'utf8'),
+        'print("mine")\n');
+    const undoManifest = JSON.parse(
+        fs.readFileSync(path.join(undoDir, 'manifest.json'), 'utf8'));
+    assert.ok(undoManifest.files['skills/greeter/run.py']);
+    assert.strictEqual(checkpoints.verify(applied.undo).ok, true);
+});

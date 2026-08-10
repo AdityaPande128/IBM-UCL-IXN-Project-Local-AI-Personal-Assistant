@@ -53,6 +53,11 @@ function readFiles(directory) {
     const walk = (dir) => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
             const full = path.join(dir, entry.name);
+            if (entry.isSymbolicLink()) {
+                // A pack materializes as regular files, so a symlink could
+                // never round-trip to the hash the pin took here.
+                throw new Error('the skill contains a symlink, which cannot travel in a pack');
+            }
             if (entry.isDirectory()) { walk(full); continue; }
             if (!entry.isFile()) continue;
             const buffer = fs.readFileSync(full);

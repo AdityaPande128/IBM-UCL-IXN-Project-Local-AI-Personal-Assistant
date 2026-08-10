@@ -34,6 +34,29 @@ test('the directory hash is stable and sensitive to every file', () => {
     fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('a symlink is part of the hash, and retargeting it reads as drift', () => {
+    freshStore();
+    const dir = fakeSkillDir();
+    fs.writeFileSync(path.join(dir, 'real-a.py'), 'print("a")');
+    fs.writeFileSync(path.join(dir, 'real-b.py'), 'print("a")');
+    fs.symlinkSync('real-a.py', path.join(dir, 'run-link.py'));
+
+    const linked = skillPins.hashDirectory(dir);
+    // The link itself is hashed, not what it points at: retargeting the link
+    // to an identical file must still change the hash.
+    fs.rmSync(path.join(dir, 'run-link.py'));
+    fs.symlinkSync('real-b.py', path.join(dir, 'run-link.py'));
+    const retargeted = skillPins.hashDirectory(dir);
+    assert.notStrictEqual(retargeted, linked);
+
+    // And a link is never mistaken for a plain file holding the same text.
+    fs.rmSync(path.join(dir, 'run-link.py'));
+    fs.writeFileSync(path.join(dir, 'run-link.py'), 'real-b.py');
+    assert.notStrictEqual(skillPins.hashDirectory(dir), retargeted);
+
+    fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('a pinned skill verifies until its content drifts', () => {
     freshStore();
     const dir = fakeSkillDir();

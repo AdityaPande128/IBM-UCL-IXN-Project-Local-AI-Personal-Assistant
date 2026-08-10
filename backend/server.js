@@ -337,11 +337,16 @@ wss.on('connection', (ws) => {
 
             if (parsed.type === 'checkpoint') {
                 if (parsed.action === 'create') {
-                    const created = checkpoints.create('manual');
-                    checkpoints.prune((config.checkpoints || {}).keep ?? 5);
-                    activityBus.publish('daemon', 'checkpoint_created', { name: created.name });
-                    ws.send(JSON.stringify({ type: 'checkpoint_result',
-                        status: 'created', ...created, checkpoints: checkpoints.list() }));
+                    try {
+                        const created = checkpoints.create('manual');
+                        checkpoints.prune((config.checkpoints || {}).keep ?? 5);
+                        activityBus.publish('daemon', 'checkpoint_created', { name: created.name });
+                        ws.send(JSON.stringify({ type: 'checkpoint_result',
+                            status: 'created', ...created, checkpoints: checkpoints.list() }));
+                    } catch (err) {
+                        ws.send(JSON.stringify({ type: 'checkpoint_result',
+                            status: 'refused', reason: err.message }));
+                    }
                     return;
                 }
                 if (parsed.action === 'restore' && parsed.name) {
@@ -371,7 +376,12 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'bundle_import' && parsed.path) {
-                const staged = stateBundle.importBundle(parsed.path);
+                let staged;
+                try {
+                    staged = stateBundle.importBundle(parsed.path);
+                } catch (err) {
+                    staged = { status: 'refused', reason: err.message };
+                }
                 ws.send(JSON.stringify({ type: 'bundle_import_result', ...staged }));
                 if (staged.status === 'staged'
                     && process.env.JARVIS_SETTINGS_RESTART !== 'off') {

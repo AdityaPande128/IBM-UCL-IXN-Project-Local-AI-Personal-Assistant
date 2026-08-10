@@ -119,6 +119,14 @@ function importBundle(bundlePath, { checkpointRoot } = {}) {
             return { status: 'refused', reason: `not a ${FORMAT} bundle` };
         }
 
+        // Manifest keys become paths — first inside staging, then inside the
+        // checkpoint, then as restore targets — so they are held to the same
+        // rule as tar member names: nothing absolute, nothing stepping out.
+        const badKey = Object.keys(manifest.files || {}).find(unsafeMember);
+        if (badKey) {
+            return { status: 'refused', reason: `unsafe path in the manifest: "${badKey}"` };
+        }
+
         for (const [rel, hash] of Object.entries(manifest.files || {})) {
             const target = path.join(staging, rel);
             if (!fs.existsSync(target)) {
@@ -134,7 +142,8 @@ function importBundle(bundlePath, { checkpointRoot } = {}) {
         // same stage-then-apply-at-boot path every checkpoint restore takes.
         const root = checkpointRoot || checkpoints.rootDir();
         checkpoints.open(root);
-        const name = `imported-${manifest.createdAt.replace(/[:.]/g, '-')}`;
+        const name = `imported-${String(manifest.createdAt || Date.now())}`
+            .replace(/[^\w-]/g, '-');
         const dir = path.join(root, name);
         if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
         fs.mkdirSync(dir, { recursive: true });

@@ -137,6 +137,14 @@ function prune(keep) {
     return removed;
 }
 
+// A manifest names files by relative path, and those paths become write
+// targets on restore — so a path that steps outside (absolute, or any ".."
+// segment) makes the whole checkpoint invalid, not just the one entry.
+function unsafeRel(rel) {
+    if (typeof rel !== 'string' || !rel || path.isAbsolute(rel)) return true;
+    return rel.split(/[\\/]/).some(part => !part || part === '.' || part === '..');
+}
+
 function verify(name) {
     const dir = path.join(root, name);
     let manifest;
@@ -146,6 +154,7 @@ function verify(name) {
         return { ok: false, reason: 'no readable manifest' };
     }
     for (const [rel, hash] of Object.entries(manifest.files || {})) {
+        if (unsafeRel(rel)) return { ok: false, reason: `unsafe path in manifest: ${rel}` };
         const target = path.join(dir, rel);
         if (!fs.existsSync(target)) return { ok: false, reason: `missing: ${rel}` };
         if (sha256(target) !== hash) return { ok: false, reason: `altered: ${rel}` };
@@ -211,6 +220,28 @@ function applyPending({
         log(`[Checkpoints] Restore of "${pending.name}" refused: `
             + `the current state could not be checkpointed first (${err.message})`);
         return { status: 'refused', name: pending.name, reason: err.message };
+    }
+
+    // The undo checkpoint covers the data dir and config, but a restore can
+    // also overwrite skills (bundle imports carry them) — so any skill file
+    // about to be displaced is saved into the undo first.
+    const undoDir = path.join(root, undo.name);
+    const undoManifestPath = path.join(undoDir, 'manifest.json');
+    const undoManifest = JSON.parse(fs.readFileSync(undoManifestPath, 'utf8'));
+    let undoGrew = false;
+    for (const rel of Object.keys(checked.manifest.files)) {
+        if (!rel.startsWith('skills/')) continue;
+        const displaced = path.join(skillsDir, rel.slice('skills/'.length));
+        if (!fs.existsSync(displaced)) continue;
+        const saved = path.join(undoDir, rel);
+        fs.mkdirSync(path.dirname(saved), { recursive: true });
+        fs.copyFileSync(displaced, saved);
+        undoManifest.files[rel] = sha256(saved);
+        undoGrew = true;
+    }
+    if (undoGrew) {
+        fs.writeFileSync(undoManifestPath,
+            JSON.stringify(undoManifest, null, 2) + '\n');
     }
 
     const dir = path.join(root, pending.name);
