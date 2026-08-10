@@ -7,6 +7,8 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
 fn home() -> PathBuf {
@@ -34,6 +36,49 @@ fn socket_token(path: Option<String>) -> Result<String, String> {
 extern "C" {
     fn CGPreflightScreenCaptureAccess() -> bool;
     fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+// The menu-bar half of the mic-privacy contract: whenever the microphone is
+// open for "Hey Jarvis", a dot shows in the menu bar — outside the app's own
+// window, visible even when the window is hidden. The dot and the mic are
+// switched by the same call, so one cannot be on without the other showing.
+#[tauri::command]
+fn set_wake_indicator(app: AppHandle, listening: bool) {
+    if let Some(tray) = app.tray_by_id("jarvis") {
+        let _ = tray.set_title(if listening { Some("●") } else { None::<&str> });
+        let _ = tray.set_tooltip(Some(if listening {
+            "Jarvis is listening for \u{201c}Hey Jarvis\u{201d} — the microphone is open"
+        } else {
+            "Jarvis — microphone off"
+        }));
+    }
+}
+
+fn build_tray(app: &AppHandle) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Jarvis", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit Jarvis", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+
+    let mut tray = TrayIconBuilder::with_id("jarvis")
+        .menu(&menu)
+        .show_menu_on_left_click(true)
+        .tooltip("Jarvis — microphone off")
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+            }
+            "quit" => app.exit(0),
+            _ => {}
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone()).icon_as_template(true);
+    }
+    tray.build(app)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -211,7 +256,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(Supervisor::default())
-        .invoke_handler(tauri::generate_handler![socket_token, start_services, ensure_screen_access])
+        .invoke_handler(tauri::generate_handler![
+            socket_token,
+            start_services,
+            ensure_screen_access,
+            set_wake_indicator
+        ])
+        .setup(|app| {
+            build_tray(&app.handle())?;
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
