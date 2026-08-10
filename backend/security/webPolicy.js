@@ -45,20 +45,46 @@ function mayLeaveUnattended(label, channel = egress.CHANNEL.NETWORK) {
 
 const ALLOWED_SCHEMES = new Set(['http:', 'https:']);
 
-function isPrivateHost(hostname) {
-    const host = String(hostname || '').toLowerCase();
-    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
-    if (host === '::1' || host === '[::1]') return true;
-
+function isPrivateV4(host) {
     const octets = host.split('.');
     if (octets.length !== 4 || octets.some(part => !/^\d{1,3}$/.test(part))) return false;
 
     const [a, b] = octets.map(Number);
     if (a === 127 || a === 0 || a === 10) return true;
-    if (a === 169 && b === 254) return true;
+    if (a === 169 && b === 254) return true;   // link-local, incl. cloud metadata
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
     return false;
+}
+
+// WHATWG URL canonicalises IPv6 to a compressed lowercase form, so the range
+// can be read off the front. ::ffff:a.b.c.d (IPv4-mapped) is resolved by the
+// network stack to its embedded IPv4, so it is judged as that address; the
+// other non-global ranges — loopback, unspecified, link-local (fe80::/10),
+// unique-local (fc00::/7) — never reach the public web and are refused whole.
+// Nothing publicly routable begins with an f hextet (global unicast is
+// 2000::/3), so f[cdef] catches ULA, link/site-local and multicast together.
+function isPrivateV6(host) {
+    if (!host.includes(':')) return false;
+    if (host === '::1' || host === '::') return true;
+
+    const mapped = host.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (mapped) {
+        const hi = parseInt(mapped[1], 16);
+        const lo = parseInt(mapped[2], 16);
+        return isPrivateV4(`${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`);
+    }
+    if (/^f[cdef]/.test(host)) return true;
+    if (host.startsWith('::')) return true;   // other ::/8 special-use
+    return false;
+}
+
+function isPrivateHost(hostname) {
+    let host = String(hostname || '').toLowerCase();
+    if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+    if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+    if (host.includes(':')) return isPrivateV6(host);
+    return isPrivateV4(host);
 }
 
 function checkTarget(url, { allowPrivate = ALLOW_PRIVATE_HOSTS, grantedOnly = false } = {}) {

@@ -27,9 +27,17 @@ let transport = null;
 let binding = null;
 let bindingPath = BINDING_PATH;
 let pairingCode = null;
+let pairingAttempts = 0;
 let offset = 0;
 let running = false;
 let deps = {};
+
+// A pairing code is a short secret guessed over the network, so it cannot be
+// left open to unlimited attempts. After a handful of wrong guesses the code
+// is thrown away and a fresh one minted — which voids everything an attacker
+// has tried, and makes a sustained attack visible as repeated regenerations
+// in the log. A legitimate owner types the code once and never trips this.
+const MAX_PAIRING_ATTEMPTS = 5;
 
 function setTransport(fn) {
     transport = fn;
@@ -175,6 +183,7 @@ function currentPairingCode() {
     if (boundChat()) return null;
     if (!pairingCode) {
         pairingCode = String(crypto.randomInt(100000, 1000000));
+        pairingAttempts = 0;
         console.log(`[Channel] Telegram unpaired. Send ${pairingCode} to the bot to pair this device.`);
     }
     return pairingCode;
@@ -183,6 +192,7 @@ function currentPairingCode() {
 function unpair() {
     writeBinding({});
     pairingCode = null;
+    pairingAttempts = 0;
 }
 
 async function say(chatId, text) {
@@ -219,8 +229,18 @@ async function handleMessage(message) {
         if (String(message.text || '').trim() === code) {
             writeBinding({ chat_id: chatId, paired_at: Date.now() });
             pairingCode = null;
+            pairingAttempts = 0;
             await say(chatId, 'Paired. This chat now speaks for you — text or voice.');
             activityBus.publish('channel', 'paired', { chat: chatId });
+            return;
+        }
+        // A wrong guess, still in silence. Enough of them retires the code.
+        if (++pairingAttempts >= MAX_PAIRING_ATTEMPTS) {
+            pairingCode = null;
+            pairingAttempts = 0;
+            console.warn('[Channel] Too many wrong pairing codes; the code has been '
+                + 'regenerated. If you did not just mistype, someone is guessing it.');
+            currentPairingCode();
         }
         return;
     }

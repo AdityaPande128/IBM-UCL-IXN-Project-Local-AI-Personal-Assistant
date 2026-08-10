@@ -52,6 +52,31 @@ test('an unpaired stranger gets silence; the pairing code binds the chat', async
     }
 });
 
+test('a run of wrong pairing codes retires the code that was being guessed', async () => {
+    const scope = harness();
+    try {
+        const code = channelAdapter.currentPairingCode();
+
+        // Five wrong guesses, each in silence, before the owner is even reached.
+        for (let i = 0; i < 5; i++) {
+            await channelAdapter.handleUpdate(messageFrom(999, `guess-${i}`));
+        }
+        assert.strictEqual(scope.sent.length, 0, 'a guessing stranger still learns nothing');
+
+        // The code that was being guessed is dead — offering it now binds nothing.
+        await channelAdapter.handleUpdate(messageFrom(999, code));
+        assert.strictEqual(channelAdapter.boundChat(), null, 'the retired code no longer pairs');
+
+        // The freshly minted code still pairs the real owner.
+        const fresh = channelAdapter.currentPairingCode();
+        assert.notStrictEqual(fresh, code);
+        await channelAdapter.handleUpdate(messageFrom(111, fresh));
+        assert.strictEqual(channelAdapter.boundChat(), 111);
+    } finally {
+        scope.cleanup();
+    }
+});
+
 test('only the bound chat is heard', async () => {
     const asked = [];
     const scope = harness({

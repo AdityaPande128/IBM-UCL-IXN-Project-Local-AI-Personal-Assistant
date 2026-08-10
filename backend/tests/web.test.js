@@ -75,8 +75,27 @@ test('ATTACK: the browser cannot be pointed at the assistant\'s own services', (
     }
 });
 
-test('a public address is fine', () => {
+test('ATTACK: private hosts cannot hide behind IPv6 or a numeric literal', () => {
+    for (const target of [
+        'http://[::1]/',                   // loopback
+        'http://[::ffff:127.0.0.1]/',      // loopback via IPv4-mapped IPv6
+        'http://[::ffff:10.0.0.1]/',       // private via IPv4-mapped IPv6
+        'http://[fe80::1]/',               // link-local
+        'http://[fc00::1]/',               // unique-local
+        'http://[fd12:3456::1]/',          // unique-local
+        'http://2130706433/',              // 127.0.0.1 as a 32-bit integer
+        'http://0x7f000001/'               // 127.0.0.1 in hex
+    ]) {
+        const verdict = webPolicy.checkTarget(target);
+        assert.strictEqual(verdict.allowed, false, `${target} was allowed`);
+        assert.strictEqual(verdict.refusal, webPolicy.REFUSAL.PRIVATE, target);
+    }
+});
+
+test('a public address is fine, including public IPv6', () => {
     assert.strictEqual(webPolicy.checkTarget('https://en.wikipedia.org/wiki/Bayes').allowed, true);
+    assert.strictEqual(webPolicy.checkTarget('http://[2606:4700:4700::1111]/').allowed, true);
+    assert.strictEqual(webPolicy.checkTarget('http://[::ffff:8.8.8.8]/').allowed, true);
 });
 
 test('sign-in and payment hosts are refused by name', () => {
