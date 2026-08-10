@@ -12,6 +12,7 @@ const intentQueue = require('./services/intentQueue');
 const traceStore = require('./services/traceStore');
 const skillRegistry = require('./services/skillRegistry');
 const skillPins = require('./services/skillPins');
+const skillExporter = require('./services/skillExporter');
 const procedureStore = require('./services/procedureStore');
 const generationLog = require('./services/generationLog');
 const webAgent = require('./services/webAgent');
@@ -289,6 +290,28 @@ wss.on('connection', (ws) => {
                 activityBus.publish('registry', 'skill_removed', { skill: skill.name });
                 ws.send(JSON.stringify({ type: 'skill_remove_result',
                     status: 'removed', name: skill.name }));
+                return;
+            }
+
+            if (parsed.type === 'skill_export' && parsed.name) {
+                const pack = skillExporter.exportPack(parsed.name);
+                const wrapper = pack.status === 'exported'
+                    ? skillExporter.exportWrapper(parsed.name)
+                    : null;
+                if (pack.status === 'exported') {
+                    activityBus.publish('registry', 'skill_exported', { skill: pack.name });
+                }
+                ws.send(JSON.stringify({ type: 'skill_export_result',
+                    ...pack, wrapper: wrapper && wrapper.path }));
+                return;
+            }
+
+            if (parsed.type === 'skill_import' && parsed.path) {
+                const result = await skillExporter.importPack(parsed.path);
+                if (result.status === 'installed') {
+                    activityBus.publish('registry', 'skill_imported', { skill: result.name });
+                }
+                ws.send(JSON.stringify({ type: 'skill_import_result', ...result }));
                 return;
             }
 

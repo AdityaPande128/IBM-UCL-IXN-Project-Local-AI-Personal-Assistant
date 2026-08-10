@@ -1,0 +1,44 @@
+---
+name: jarvis-skill-builder
+description: Builds a brand-new capability on request. Use when the user asks for something no installed skill covers — Jarvis generates a script, tests it in a sandbox, and installs it as a new skill.
+---
+
+# Jarvis skill builder
+
+Jarvis — the local assistant that manages this machine's skills — can write,
+test and install a new skill from a plain-English request. This meta-skill
+hands your request to that pipeline instead of improvising a script here.
+
+## When to use
+
+Use it when the user asks for a capability none of the available skills
+provide: converting files, counting or extracting things, bulk renames, and
+similar scriptable jobs on local files. Do not use it when an existing skill
+already does the job.
+
+## How
+
+Run the builder with the exec tool, passing the user's request verbatim as one
+quoted argument:
+
+    node "%BUILDER%" "count how many files of each extension are in ~/Downloads"
+
+Expect it to take a few minutes: a code model is loaded, the script is written,
+and its authored tests run in a sandbox that denies network access. The command
+prints what happened either way.
+
+## After it succeeds
+
+The output names the new skill and its parameters, and a wrapper for it is
+placed in this workspace's skills directory — from the next session it appears
+as its own skill. In this session, run it through the shim command the builder
+prints.
+
+## Rules
+
+- Pass the user's own words through unchanged; do not rephrase the request.
+- If the build is rejected or the model is unreachable, report the printed
+  reason and stop; do not write the script yourself instead — a skill from
+  this pipeline has been tested and installed under integrity checks, and an
+  improvised one has not.
+- Never edit anything under Jarvis's own skills directory by hand.
