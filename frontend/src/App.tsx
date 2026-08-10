@@ -6,6 +6,7 @@ import { ApprovalCard } from "./components/ApprovalCard";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { AbilitiesView } from "./components/AbilitiesView";
 import { InboxView } from "./components/InboxView";
+import { MemoryView } from "./components/MemoryView";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
 import { useWakeWord } from "./hooks/useWakeWord";
@@ -26,6 +27,16 @@ function App() {
     brief,
     requestBrief,
     markNoticesSeen,
+    memory,
+    wipePreview,
+    requestMemory,
+    addMemory,
+    removeMemories,
+    pinMemory,
+    previewWipe,
+    clearWipePreview,
+    wipeAllMemory,
+    setIncognito,
     wakeMode,
     setWakeMode,
     sendBinary,
@@ -42,11 +53,16 @@ function App() {
   const services = useServices();
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
-  const [view, setView] = useState<"chat" | "abilities" | "inbox">("chat");
+  const [view, setView] = useState<"chat" | "abilities" | "inbox" | "memory">("chat");
 
   useEffect(() => {
     invoke("ensure_screen_access").catch(() => {});
   }, []);
+
+  // The menu-bar dot mirrors the one state that opens the microphone.
+  useEffect(() => {
+    invoke("set_wake_indicator", { listening: listening && wakeMode }).catch(() => {});
+  }, [listening, wakeMode]);
 
   const handleStart = async () => {
     await startRecording();
@@ -100,6 +116,13 @@ function App() {
             )}
           </button>
           <button
+            className={`activity-toggle ${view === "memory" ? "activity-toggle--on" : ""}`}
+            onClick={() => setView((v) => (v === "memory" ? "chat" : "memory"))}
+          >
+            Memory
+            {memory?.incognito && <span className="memory-badge">◐</span>}
+          </button>
+          <button
             className={`activity-toggle ${view === "abilities" ? "activity-toggle--on" : ""}`}
             onClick={() => setView((v) => (v === "abilities" ? "chat" : "abilities"))}
           >
@@ -140,6 +163,20 @@ function App() {
               onRefresh={requestBrief}
               onDecision={sendDecision}
               onMarkSeen={markNoticesSeen}
+            />
+          )}
+          {view === "memory" && (
+            <MemoryView
+              memory={memory}
+              wipePreview={wipePreview}
+              onRefresh={requestMemory}
+              onAdd={addMemory}
+              onRemove={removeMemories}
+              onPin={pinMemory}
+              onPreviewWipe={previewWipe}
+              onClearWipePreview={clearWipePreview}
+              onWipeAll={wipeAllMemory}
+              onSetIncognito={setIncognito}
             />
           )}
           {view === "abilities" && (

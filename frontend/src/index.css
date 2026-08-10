@@ -1237,6 +1237,81 @@ body {
   text-align: center;
 }
 
+/* Memory */
+
+.memory-badge {
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--teal);
+  font-size: 11px;
+}
+
+.memory-incognito--on {
+  color: #05261f;
+  background: var(--teal);
+  border-color: transparent;
+}
+
+.memory-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.memory-add .chat-input {
+  flex: 1;
+}
+
+.memory-filters {
+  display: flex;
+  gap: 6px;
+}
+
+.memory-filter--on {
+  color: #05261f;
+  background: var(--teal);
+  border-color: transparent;
+}
+
+.memory-fact-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.memory-fact-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.memory-pin {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.memory-pin--on {
+  color: var(--teal);
+}
+
+.memory-wipe-review {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-wipe-candidate {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* Wake word */
 
 .wake-toggle--live {

@@ -110,6 +110,30 @@ export interface BriefData {
   approvals: BriefApproval[];
 }
 
+export interface MemoryFact {
+  id: string;
+  text: string;
+  status: string;
+  pinned: boolean;
+  source: string;
+  created_at: number;
+  last_recalled_at: number | null;
+}
+
+export interface MemoryData {
+  facts: MemoryFact[];
+  incognito: boolean;
+  active: number;
+  archived: number;
+  superseded: number;
+  secure_delete: boolean;
+}
+
+export interface WipePreview {
+  term: string;
+  candidates: MemoryFact[];
+}
+
 interface UseWebSocketReturn {
   connected: boolean;
   openclawConnected: boolean;
@@ -123,6 +147,16 @@ interface UseWebSocketReturn {
   brief: BriefData | null;
   requestBrief: () => void;
   markNoticesSeen: (ids: number[]) => void;
+  memory: MemoryData | null;
+  wipePreview: WipePreview | null;
+  requestMemory: (status?: string) => void;
+  addMemory: (text: string) => void;
+  removeMemories: (ids: string[]) => void;
+  pinMemory: (id: string, pinned: boolean) => void;
+  previewWipe: (term: string) => void;
+  clearWipePreview: () => void;
+  wipeAllMemory: () => void;
+  setIncognito: (on: boolean) => void;
   wakeMode: boolean;
   setWakeMode: (on: boolean) => void;
   sendBinary: (data: ArrayBuffer) => void;
@@ -191,9 +225,12 @@ export function useWebSocket(): UseWebSocketReturn {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [settingsResult, setSettingsResult] = useState<SettingsResult | null>(null);
   const [brief, setBrief] = useState<BriefData | null>(null);
+  const [memory, setMemory] = useState<MemoryData | null>(null);
+  const [wipePreview, setWipePreview] = useState<WipePreview | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
+  const memoryStatusRef = useRef<string | undefined>(undefined);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const addMessage = useCallback(
@@ -291,6 +328,47 @@ export function useWebSocket(): UseWebSocketReturn {
           return;
         }
         if (msg.type === "notices_seen_result") {
+          return;
+        }
+        if (msg.type === "memory_result") {
+          const { type: _ignored, ...data } = msg;
+          setMemory(data as MemoryData);
+          return;
+        }
+        if (msg.type === "memory_add_result") {
+          if (msg.status === "refused" && msg.response) {
+            addMessage("system", msg.response);
+          }
+          wsRef.current?.send(
+            JSON.stringify({ type: "memory", status: memoryStatusRef.current })
+          );
+          return;
+        }
+        if (msg.type === "memory_remove_result" || msg.type === "memory_wipe_all_result") {
+          setWipePreview(null);
+          wsRef.current?.send(
+            JSON.stringify({ type: "memory", status: memoryStatusRef.current })
+          );
+          return;
+        }
+        if (msg.type === "memory_pin_result") {
+          const fact = msg.fact as MemoryFact | null;
+          if (fact) {
+            setMemory((prev) =>
+              prev
+                ? { ...prev, facts: prev.facts.map((f) => (f.id === fact.id ? fact : f)) }
+                : prev
+            );
+          }
+          return;
+        }
+        if (msg.type === "memory_wipe_result") {
+          setWipePreview({ term: msg.term, candidates: msg.candidates ?? [] });
+          return;
+        }
+        if (msg.type === "incognito_result") {
+          const { type: _ignored, ...counts } = msg;
+          setMemory((prev) => (prev ? { ...prev, ...counts } : prev));
           return;
         }
         if (msg.type === "wake_mode_result") {
@@ -407,6 +485,53 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const requestMemory = useCallback((status?: string) => {
+    memoryStatusRef.current = status;
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "memory", ...(status ? { status } : {}) }));
+    }
+  }, []);
+
+  const addMemory = useCallback((text: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && text.trim()) {
+      wsRef.current.send(JSON.stringify({ type: "memory_add", text: text.trim() }));
+    }
+  }, []);
+
+  const removeMemories = useCallback((ids: string[]) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && ids.length) {
+      wsRef.current.send(JSON.stringify({ type: "memory_remove", ids }));
+    }
+  }, []);
+
+  const pinMemory = useCallback((id: string, pinned: boolean) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "memory_pin", id, pinned }));
+    }
+  }, []);
+
+  const previewWipe = useCallback((term: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && term.trim()) {
+      wsRef.current.send(JSON.stringify({ type: "memory_wipe", term: term.trim() }));
+    }
+  }, []);
+
+  const clearWipePreview = useCallback(() => {
+    setWipePreview(null);
+  }, []);
+
+  const wipeAllMemory = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "memory_wipe_all", confirm: true }));
+    }
+  }, []);
+
+  const setIncognito = useCallback((on: boolean) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "incognito", on }));
+    }
+  }, []);
+
   const markNoticesSeen = useCallback((ids: number[]) => {
     if (wsRef.current?.readyState === WebSocket.OPEN && ids.length) {
       wsRef.current.send(JSON.stringify({ type: "notices_seen", ids }));
@@ -451,6 +576,16 @@ export function useWebSocket(): UseWebSocketReturn {
     brief,
     requestBrief,
     markNoticesSeen,
+    memory,
+    wipePreview,
+    requestMemory,
+    addMemory,
+    removeMemories,
+    pinMemory,
+    previewWipe,
+    clearWipePreview,
+    wipeAllMemory,
+    setIncognito,
     wakeMode,
     setWakeMode,
     sendBinary,
