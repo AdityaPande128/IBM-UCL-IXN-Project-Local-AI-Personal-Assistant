@@ -223,6 +223,8 @@ module.exports = {
     handleIncomingAudio,
     chunkTextDynamically,
     speakableSummary,
+    transcribeAudio,
+    synthesizeChunk,
     MAX_TTS_CHUNKS,
     MAX_SPOKEN_CHARS
 };

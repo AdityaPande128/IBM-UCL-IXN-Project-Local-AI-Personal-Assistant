@@ -20,6 +20,7 @@ const settings = require('./services/settings');
 const availability = require('./services/availability');
 const watchers = require('./services/watchers');
 const morningBrief = require('./services/morningBrief');
+const channelAdapter = require('./services/channelAdapter');
 const configReader = require('./utils/configReader');
 
 verifySandboxInitialized();
@@ -369,6 +370,20 @@ async function boot() {
         watchers.start();
         morningBrief.start({
             browse: goal => intentQueue.submit(() => webAgent.browse(String(goal))).result
+        });
+        channelAdapter.start({
+            execute: text => intentQueue.submit(({ signal }) =>
+                openclawBridge.executeIntent(String(text), { interactive: true, signal })).result,
+            answer: (id, decision) =>
+                openclawBridge.answerProposal(id, decision === 'yes' ? 'yes' : 'no'),
+            transcribe: async filePath => {
+                const audio = await channelAdapter.downloadFile(filePath);
+                return audio ? aiPipeline.transcribeAudio(audio) : null;
+            },
+            speak: async (chatId, text) => {
+                const wav = await aiPipeline.synthesizeChunk(aiPipeline.speakableSummary(text), 0);
+                if (wav) await channelAdapter.sendVoiceNote(chatId, wav);
+            }
         });
     } catch (err) {
         console.warn(`[Jarvis] Availability startup failed: ${err.message}`);
