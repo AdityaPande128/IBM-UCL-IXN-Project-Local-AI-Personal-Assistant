@@ -9,6 +9,7 @@ const classifier = require('../security/classifier');
 const securityLabels = require('../security/labels');
 const securityStore = require('../security/store');
 const fileIndex = require('./fileIndex');
+const documentExtract = require('./documentExtract');
 
 const TEXT_EXTENSIONS = new Set([
     '.txt', '.md', '.markdown', '.rst', '.org',
@@ -171,11 +172,18 @@ function recordsForFile(file, { kind = 'document' } = {}) {
     });
     if (!classification.readable) return [];
 
+    const extension = path.extname(file).toLowerCase();
+
     let raw;
-    try {
-        raw = fs.readFileSync(file, 'utf8');
-    } catch {
-        return [];
+    if (documentExtract.EXTRACTORS[extension]) {
+        raw = documentExtract.extract(file, extension);
+        if (!raw) return [];
+    } else {
+        try {
+            raw = fs.readFileSync(file, 'utf8');
+        } catch {
+            return [];
+        }
     }
 
     const label = securityLabels.serialise(classification.label);
@@ -240,7 +248,9 @@ async function build({ name, roots, kind = 'document', extensions, dir,
         existing.set(meta.hash, collection.vectors.slice(row * vectorIndex.DIM, (row + 1) * vectorIndex.DIM));
     }
 
-    const fileExtensions = extensions || (kind === 'mail' ? new Set(['.emlx']) : TEXT_EXTENSIONS);
+    const fileExtensions = extensions || (kind === 'mail'
+        ? new Set(['.emlx'])
+        : new Set([...TEXT_EXTENSIONS, ...documentExtract.supported()]));
 
     const files = [];
     for (const root of roots) files.push(...discover(root, { extensions: fileExtensions }));

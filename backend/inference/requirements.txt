@@ -12,3 +12,5 @@ spacy
 phonemizer-fork
 espeakng-loader
 mlx-embeddings>=0.1.0
+# PDF text extraction for corpus ingestion (called from the node backend)
+pypdf>=5.0.0

@@ -156,10 +156,12 @@ const fileSource = {
     fallback: true,
     matches: () => true,
     async retrieve(query) {
+        const readable = new Set([...corpusIndexer.TEXT_EXTENSIONS,
+            ...require('./documentExtract').supported()]);
         const candidates = fileIndex.search({ text: query, limit: 8 })
             .filter(file => !file.content_indexed)
             .filter(file => file.size > 0 && file.size <= MAX_ONDEMAND_BYTES)
-            .filter(file => corpusIndexer.TEXT_EXTENSIONS.has(file.ext || ''))
+            .filter(file => readable.has(file.ext || ''))
             .filter(file => securityStore.isWithinGrantedRoot(file.path, 'documents'))
             .slice(0, MAX_ONDEMAND_FILES);
 
