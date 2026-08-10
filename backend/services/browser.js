@@ -82,7 +82,9 @@ async function attach() {
     context = await chromium.launchPersistentContext(linkedBrowser.PROFILE_DIR, {
         executablePath: source.binary,
         headless: HEADLESS,
-        acceptDownloads: false,
+        // Accepted downloads sit in Playwright's temporary area and die with
+        // the context; only the web loop's policy gate can move one to disk.
+        acceptDownloads: true,
         viewport: { width: 1280, height: 900 },
         ignoreDefaultArgs: ['--use-mock-keychain', '--password-store=basic'],
         args: [
@@ -125,7 +127,7 @@ async function launch() {
         context = await browser.newContext({
             userAgent: USER_AGENT,
             viewport: { width: 1280, height: 900 },
-            acceptDownloads: false,
+            acceptDownloads: true,
             permissions: [],
             javaScriptEnabled: true
         });

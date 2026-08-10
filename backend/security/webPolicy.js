@@ -17,7 +17,9 @@ const REFUSAL = {
     CREDENTIAL: 'credential-field',
     IRREVERSIBLE: 'irreversible-action',
     STALE: 'element-gone',
-    UNGRANTED: 'site-not-granted'
+    UNGRANTED: 'site-not-granted',
+    UNREQUESTED: 'unrequested-file',
+    RUNNABLE: 'runnable-file'
 };
 
 
@@ -261,7 +263,15 @@ const MANDATES = [
     { kind: 'spend', pattern: /\b(buy|purchase|pay|checkout|subscribe|donate)\b/i },
     { kind: 'spend', pattern: /\b(order|book)\b/i, notAfter: AS_NOUN },
     { kind: 'delete', pattern: /\b(delete|remove|erase|unsubscribe|clear out|throw away)\b/i },
-    { kind: 'agree', pattern: /\b(accept|agree|consent|opt in)\b/i }
+    { kind: 'agree', pattern: /\b(accept|agree|consent|opt in)\b/i },
+    // Both file mandates need an object: "save the event" grants no download,
+    // "send an email" hands over no file. "attachment" does not match
+    // \battach\b — asking to save one is not asking to attach one.
+    { kind: 'save',
+      pattern: /\b(save|download)\b[^.]{0,60}\b(attachment|attached|file|pdf|invoice|receipt|ticket|document|paper|photo|picture|image|cv|resume)\b/i },
+    { kind: 'attach', pattern: /\battach(?:ing|ed)?\b/i },
+    { kind: 'attach',
+      pattern: /\b(send|email|forward)\b[^.]{0,60}\b(file|pdf|spreadsheet|document|photo|picture|image|cv|resume|report)\b/i }
 ];
 
 const INTENT_MANDATE = {
@@ -269,6 +279,7 @@ const INTENT_MANDATE = {
     compose: ['compose'],
     send: ['compose', 'send'],
     book: ['compose', 'book'],
+    save: ['save'],
     spend: [],
     delete: [],
     agree: []
@@ -304,6 +315,68 @@ function mandateFrom(text, label) {
         for (const kind of expanded || [entry.kind]) asked.add(kind);
     }
     return asked;
+}
+
+// What arrives runnable is never fetched — no mandate reaches past this.
+const RUNNABLE = new Set(['.app', '.exe', '.dmg', '.pkg', '.msi', '.bat', '.cmd', '.com',
+    '.sh', '.command', '.scpt', '.jar', '.apk', '.js', '.vbs', '.ps1']);
+
+function sanitizeFilename(name) {
+    const bare = String(name || '').split(/[\\/]/).pop()
+        .replace(/[\u0000-\u001f]/g, "")
+        .replace(/^\.+/, '')
+        .trim()
+        .slice(0, 120);
+    return bare || 'download';
+}
+
+// The one gate bytes from the web pass on their way to disk: nothing lands
+// unless the user's own words asked for a file to be saved, and programs
+// never land at all. A page cannot mandate its own download.
+function checkDownload({ filename, mandate } = {}) {
+    const name = sanitizeFilename(filename);
+    const extension = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+
+    if (RUNNABLE.has(extension)) {
+        return refuse(REFUSAL.RUNNABLE,
+            `"${name}" arrives runnable, and the assistant does not fetch programs — `
+            + 'download it yourself if you trust where it came from');
+    }
+    if (!mandate || !mandate.has || !mandate.has('save')) {
+        return refuse(REFUSAL.UNREQUESTED,
+            `the page offered "${name}", and nothing in the request asked for a file to be saved`);
+    }
+    return { allowed: true, reason: 'the request asked for this file to be saved',
+             refusal: null, approvalId: null, filename: name };
+}
+
+// The mirror gate for bytes leaving: a local file goes into a page only when
+// the user's own words asked for one to be attached. Which file it is was
+// settled before any page was observed, so a page cannot choose it either.
+function checkAttach({ path, mandate, label, destination } = {}) {
+    const name = String(path || '').split(/[\\/]/).pop();
+
+    if (!mandate || !mandate.has || !mandate.has('attach')) {
+        return refuse(REFUSAL.UNREQUESTED,
+            `nothing in the request asks for a file to be attached, so "${name}" stays on this machine`);
+    }
+    if (labels.isSecret(label || labels.UNKNOWN)) {
+        return refuse(REFUSAL.CREDENTIAL,
+            'credential material must never be transmitted; no approval can authorise this');
+    }
+
+    egress.guard({
+        channel: egress.CHANNEL.NETWORK,
+        action: 'web.attach',
+        inputs: [label],
+        destination,
+        summary: `hand "${name}" to ${destination || 'the page'} — the request asked for this`,
+        preview: name,
+        policy: () => ({ decision: egress.DECISION.ALLOW, reason: 'the request named this file' })
+    });
+
+    return { allowed: true, reason: `"${name}" is the file the request names`,
+             refusal: null, approvalId: null };
 }
 
 function checkClick({ element, label, destination, mandate, home } = {}) {
@@ -376,6 +449,9 @@ module.exports = {
     checkNavigation,
     checkFill,
     checkClick,
+    checkDownload,
+    checkAttach,
+    sanitizeFilename,
     mandateFrom,
     mandateFromIntent,
     INTENT_MANDATE,

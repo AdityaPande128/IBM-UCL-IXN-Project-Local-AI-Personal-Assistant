@@ -5,6 +5,7 @@ const perception = require('./pagePerception');
 const domSurface = require('./domSurface');
 const chromeSurface = require('./chromeSurface');
 const webIntent = require('./webIntent');
+const attachments = require('./attachments');
 const axBridge = require('./axBridge');
 const traceStore = require('./traceStore');
 const webPolicy = require('../security/webPolicy');
@@ -1064,6 +1065,31 @@ async function browse(goal, options = {}) {
         if (stated) pending.unshift(stated);
     }
 
+    // Which file may leave this machine is settled here, from the user's own
+    // words, before any page has been observed — no page gets a say in it.
+    let outgoing = null;
+    if (mandate.has('attach')) {
+        const sought = intent.file || goal;
+        const found = await attachments.resolveOutgoing(sought);
+        if (found && found.file) {
+            outgoing = found.file;
+        } else {
+            const reason = found && found.candidates
+                ? `several files could be "${intent.file || 'the one named'}": `
+                  + found.candidates.slice(0, 4).map(entry => entry.name).join(', ')
+                  + ' — say which, by more of its name or its path'
+                : found && found.missing
+                    ? `the request names ${found.missing}, and there is no such file`
+                    : `no file on this machine matches "${intent.file || sought}" — `
+                      + 'name it by its path or a word from its name';
+            return {
+                status: 'gap', goal, answer: null, reason, refusal: 'no-file',
+                approvalId: null, actions: [], url: null, passages: [], planId: null,
+                run_ms: Date.now() - startedAt
+            };
+        }
+    }
+
     const typed = [];
     const filled = [];
     const written = [];
@@ -1174,6 +1200,79 @@ async function browse(goal, options = {}) {
         performed.delete('book');
         history.push(`Save was pressed, but the calendar does not show "${title}" — `
             + 'the event has not landed, and this is not done until it is visible');
+        return false;
+    };
+
+    // Every download the browser produced passes the policy gate here: what
+    // was asked for lands in the download folder, everything else is cancelled
+    // where it sits. A page cannot put bytes on this machine by offering them.
+    const savedFiles = [];
+    const admitDownloads = async () => {
+        if (typeof surface.takeDownloads !== 'function') return;
+        let queued = surface.takeDownloads();
+        if (!queued.length && mandate.has('save') && !performed.has('save')) {
+            await new Promise(beat => setTimeout(beat, 300));
+            queued = surface.takeDownloads();
+        }
+        for (const download of queued) {
+            const taken = await attachments.admit(download, { mandate,
+                dir: options.downloadDir });
+            if (taken.saved) {
+                performed.add('save');
+                savedFiles.push(taken.saved);
+                actions.push({ action: 'download', ok: true,
+                    detail: `saved ${taken.saved.name}` });
+                history.push(`the file "${taken.saved.name}" is saved at ${taken.saved.path}`);
+            } else {
+                actions.push({ action: 'download', ok: false,
+                    detail: taken.reason, refusal: taken.refusal });
+                history.push(`a download was not kept: ${taken.reason}`);
+            }
+        }
+    };
+
+    const ATTACH_CONTROL = /\b(attach|upload|add file|insert file|choose file)\b/i;
+
+    const attachOutgoing = async () => {
+        if (!outgoing || performed.has('attach')) return false;
+        if (typeof surface.attachFiles !== 'function') return false;
+
+        const control = ((observation && observation.elements) || []).find(element =>
+            !element.disabled
+            && String(element.name || '').length <= 60
+            && ATTACH_CONTROL.test(element.name || ''));
+        if (!control) return false;
+
+        const verdict = webPolicy.checkAttach({
+            path: outgoing.path, mandate, label: inputLabel,
+            destination: safeOrigin(observation.url)
+        });
+        if (!verdict.allowed) {
+            actions.push({ action: 'attach', ok: false, detail: verdict.reason,
+                refusal: verdict.refusal });
+            history.push(`attach was refused: ${verdict.reason}`);
+            return false;
+        }
+
+        const held = await surface.resolve(control.ref, anchorFor(control, observation))
+            .catch(() => null);
+        if (!held || !held.handle) return false;
+
+        const put = await surface.attachFiles(held.handle, outgoing.path);
+        observation = await surface.observe();
+        contextLabel = labels.join(contextLabel, observation.label);
+
+        // Attached means the page shows the file, not that a chooser closed.
+        const shown = (`${observation.text || ''} ${((observation.elements || [])
+            .map(el => el.name || '').join(' '))}`).toLowerCase();
+        if (put.ok && shown.includes(outgoing.name.toLowerCase())) {
+            performed.add('attach');
+            actions.push({ action: 'attach', ok: true,
+                detail: `attached ${outgoing.name}` });
+            history.push(`attach: "${outgoing.name}" is on the message`);
+            return true;
+        }
+        history.push(`attach did not land: the page does not show "${outgoing.name}"`);
         return false;
     };
 
@@ -1311,7 +1410,7 @@ async function browse(goal, options = {}) {
             }
 
             if (searched && !openedNewest && !asksWhetherReplied(goal)
-                && (!mandate.size || replying(goal))) {
+                && (!mandate.size || replying(goal) || mandate.has('save'))) {
                 openedNewest = true;
                 const row = topRow(observation);
                 if (row) {
@@ -1448,7 +1547,11 @@ async function browse(goal, options = {}) {
                 }
             }
 
+            if (outgoing) await attachOutgoing();
+
+            // Nothing goes out while the file the request names is not on it.
             if (mandate.has('send') && !outstanding().unsaid.length && filled.length
+                && (!outgoing || performed.has('attach'))
                 && (addressedIt || !unaddressed(observation))) {
                 const sender = sendControl(observation);
                 if (sender) {
@@ -1467,6 +1570,7 @@ async function browse(goal, options = {}) {
         };
 
         await carryOut();
+        await admitDownloads();
 
         if (status === 'success' && answer) {
         }
@@ -1486,6 +1590,7 @@ async function browse(goal, options = {}) {
             const stepStartedAt = Date.now();
 
             await carryOut();
+            await admitDownloads();
             if (complete() && await bookingLanded()) {
                 status = 'success';
                 answer = intent.completes
@@ -1564,6 +1669,14 @@ async function browse(goal, options = {}) {
                     why = 'not done: the calendar does not show the event, so the save has not '
                         + 'landed. If an editor or a dialog is still open, complete it and press '
                         + 'its Save; do not claim this is done until the event is visible.';
+                } else if (undone.includes('save')) {
+                    why = 'not done: no file has been kept on this machine. Open the message '
+                        + 'and press the control that downloads its attachment; only a file '
+                        + 'that lands finishes this.';
+                } else if (undone.includes('attach')) {
+                    why = `not done: the message does not show "${outgoing ? outgoing.name
+                        : 'the file the request names'}" attached to it, and it may not go `
+                        + 'out without it.';
                 } else {
                     why = 'not done: nothing has been sent. Pressing Enter in a message body starts a '
                         + 'new line; only the Send control sends. Find it and press it.';
@@ -1799,6 +1912,8 @@ async function browse(goal, options = {}) {
                 options
             ).catch(err => ({ ok: false, detail: err.message }));
 
+            await admitDownloads();
+
             if (outcome.ok && decision.action === 'fill' && decision.text) {
                 if (mandate.has('compose')) performed.add('compose');
                 typed.push(String(decision.text).toLowerCase());
@@ -1978,6 +2093,8 @@ async function browse(goal, options = {}) {
             }
         }
 
+        await admitDownloads();
+
         if (status === 'exhausted') {
             failure = failure || `stopped after ${budget} actions without reaching the goal`;
 
@@ -2018,6 +2135,7 @@ async function browse(goal, options = {}) {
         passages: conclusionPassages(answer, observation),
         label: contextLabel,
         written,
+        files: savedFiles,
         approval,
         approvalId: approval ? approval.id : null,
         planId,

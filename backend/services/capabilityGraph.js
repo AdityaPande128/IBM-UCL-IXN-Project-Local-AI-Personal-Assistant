@@ -419,7 +419,8 @@ function builtins() {
             outputs: {
                 text: { type: 'string', description: 'what it found' },
                 passages: { type: 'passage[]', description: 'the final page, in citable chunks' },
-                url: { type: 'string', description: 'where it ended up' }
+                url: { type: 'string', description: 'where it ended up' },
+                files: { type: 'file[]', description: 'files it was asked to save, now on disk' }
             },
             effects: [EFFECT.NETWORK],
             produces: labels.label(ORIGIN.WEB, SENSITIVITY.PERSONAL),
@@ -436,7 +437,8 @@ function builtins() {
                 });
 
                 if (result.status === 'success') {
-                    return { text: result.answer, passages: result.passages, url: result.url };
+                    return { text: result.answer, passages: result.passages, url: result.url,
+                             files: result.files || [] };
                 }
                 throw new Error(result.reason || `browsing ${result.status}`);
             }

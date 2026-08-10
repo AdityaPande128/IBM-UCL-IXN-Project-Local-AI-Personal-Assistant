@@ -8,6 +8,12 @@ let page = null;
 let mode = browser.MODE.EPHEMERAL;
 let consentCheckedFor = null;
 
+// Downloads queue here untouched — still in the browser's temporary area —
+// until the loop drains them through the policy gate. This surface never
+// decides whether one is kept.
+let downloads = [];
+let hookedPage = null;
+
 async function ready() {
     return true;
 }
@@ -19,7 +25,37 @@ function grantedOnly() {
 async function start(options = {}) {
     mode = options.mode || browser.MODE.EPHEMERAL;
     page = await browser.current({ mode });
+    if (page !== hookedPage) {
+        hookedPage = page;
+        downloads = [];
+        page.on('download', download => { downloads.push(download); });
+    }
     return { app: 'the assistant\'s browser' };
+}
+
+function takeDownloads() {
+    const held = downloads;
+    downloads = [];
+    return held;
+}
+
+async function attachFiles(handle, filePath) {
+    try {
+        const isFileInput = await handle.evaluate(el =>
+            el.tagName === 'INPUT' && el.type === 'file').catch(() => false);
+        if (isFileInput) {
+            await handle.setInputFiles(filePath);
+        } else {
+            const chooser = page.waitForEvent('filechooser',
+                { timeout: browser.ACTION_TIMEOUT_MS });
+            await handle.click({ timeout: browser.ACTION_TIMEOUT_MS });
+            await (await chooser).setFiles(filePath);
+        }
+    } catch (err) {
+        return { ok: false, why: err.message };
+    }
+    await browser.settle(page);
+    return { ok: true, detail: 'attached' };
 }
 
 const MAX_SELECTOR_LABEL = 60;
@@ -107,10 +143,13 @@ function touch() {
 
 async function close() {
     page = null;
+    hookedPage = null;
+    downloads = [];
     return browser.close();
 }
 
 module.exports = {
     ready, start, observe, resolve, navigate, back, click, fill, submit, settle, touch, close,
+    takeDownloads, attachFiles,
     grantedOnly, TIER, name: 'dom'
 };

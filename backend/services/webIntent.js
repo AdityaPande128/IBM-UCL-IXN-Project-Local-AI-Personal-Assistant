@@ -10,12 +10,12 @@ const TIER = webConfig.intent_tier || webConfig.tier || 'engine';
 const TIMEOUT_MS = webConfig.intent_timeout_ms ?? 20000;
 const MAX_TOKENS = 400;
 
-const ACTS = new Set(['read', 'compose', 'send', 'book', 'spend', 'delete', 'agree']);
+const ACTS = new Set(['read', 'compose', 'send', 'book', 'save', 'spend', 'delete', 'agree']);
 
 const SYSTEM_PROMPT = `You read a user's request and work out what it is asking for, before any website is opened.
 
 Respond with ONLY a JSON object, no markdown fences and no commentary:
-{"query":"<what to type in the site's search box, or null>","write":["<text to type>"],"act":"<read|compose|send|book|spend|delete|agree>","completes":"<short phrase: what will be true when this is done>"}
+{"query":"<what to type in the site's search box, or null>","write":["<text to type>"],"file":"<the user's own file to go with the message, or null>","act":"<read|compose|send|book|save|spend|delete|agree>","completes":"<short phrase: what will be true when this is done>"}
 
 THE FIELDS
 
@@ -57,6 +57,12 @@ write   The exact text to be typed, in the order it should be typed, as a list.
         body — list them in that order, one entry each.
         Empty list if nothing is to be typed. A question is never typed.
 
+file    The user's OWN file, when the request says one should go WITH the
+        message: "attach the report", "email Sam the plan.pdf". Copy the words
+        that name it — a path if one was written, otherwise the name as given.
+        null when no local file is named. An attachment inside a RECEIVED
+        email is not this field; finding that is what query is for.
+
 act     What the user is asking to have HAPPEN, not what words appear:
           read     find something out and tell them. Changes nothing. This is
                    the answer for every question, INCLUDING questions about
@@ -71,6 +77,9 @@ act     What the user is asking to have HAPPEN, not what words appear:
           book     put something on the user's calendar: "book a meeting",
                    "schedule a call", "add it to my calendar". An event is
                    made, but no money moves and no message goes to anyone.
+          save     keep a file that arrived on the web: "save the attachment",
+                   "download the invoice". The file lands on this machine and
+                   nothing else changes; no message goes to anyone.
           spend    buy, order, pay — money changes hands. Booking a flight,
                    a hotel or a table is spend, not book.
           delete   delete, remove, unsubscribe.
@@ -107,7 +116,13 @@ EXAMPLES
 {"query":"sam","write":["I'm running about twenty minutes late, sorry."],"act":"send","completes":"the message has been sent"}
 
 "put lunch with Sam on my calendar for Friday at 1pm"
-{"query":null,"write":["Lunch with Sam"],"act":"book","completes":"the event is on the calendar"}`;
+{"query":null,"write":["Lunch with Sam"],"file":null,"act":"book","completes":"the event is on the calendar"}
+
+"save the attachment from Nadia's email"
+{"query":"from:nadia","write":[],"file":null,"act":"save","completes":"the attachment is saved on this machine"}
+
+"email sam@example.com the quarterly report pdf saying \\"here it is\\""
+{"query":null,"write":["sam@example.com","here it is"],"file":"quarterly report pdf","act":"send","completes":"the message and its file have gone"}`;
 
 async function read(goal, options = {}) {
     const words = String(goal || '').trim();
@@ -139,12 +154,19 @@ async function read(goal, options = {}) {
         if (better && !copied(words, better)) write = better;
     }
 
+    const file = text(parsed.file);
+    const mandate = webPolicy.mandateFromIntent(act, options.label);
+    // Naming a file to go with a message asks for it to be attached — but only
+    // where compose itself was granted, so a web-tainted label still voids it.
+    if (file && mandate.has('compose')) mandate.add('attach');
+
     return {
         query: text(parsed.query),
         write,
+        file,
         act,
         completes: text(parsed.completes),
-        mandate: webPolicy.mandateFromIntent(act, options.label),
+        mandate,
         source: 'model'
     };
 }
@@ -184,10 +206,12 @@ function fallback(goal, label, why) {
     const quoted = (words.match(/["“”'‘’]([^"“”'‘’]{2,200})["“”'‘’]/g) || [])
         .map(phrase => phrase.slice(1, -1).trim())
         .filter(Boolean);
+    const written = (words.match(/(?:~\/|\/)[\w.\-/ ]*\.[A-Za-z0-9]{1,8}/) || [])[0];
 
     return {
         query: address ? `from:${address}` : null,
         write: quoted,
+        file: written ? written.trim() : null,
         act: null,
         completes: null,
         mandate: webPolicy.mandateFrom(goal, label),

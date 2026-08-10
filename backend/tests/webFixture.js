@@ -155,7 +155,8 @@ const MAILBOX = [
     { id: 'm2', box: 'inbox', from: 'Nadia Okonjo', address: 'nadia@example.com',
       subject: 'Barbican on the 15th', date: 'July 28',
       body: `The recital is on August 15 at 7:30 PM at the Barbican Centre on
-             Silk Street. Doors open at 7 PM and they will not seat latecomers.` },
+             Silk Street. Doors open at 7 PM and they will not seat latecomers.`,
+      attachment: { name: 'recital-tickets.pdf', bytes: '%PDF-1.4 two tickets, row F' } },
 
     { id: 'm4', box: 'inbox', from: 'Philip Hargreaves', address: 'philip@example.com',
       subject: 'Lunch on Thursday?', date: 'July 12',
@@ -164,7 +165,8 @@ const MAILBOX = [
     { id: 'm5', box: 'inbox', from: 'Philip Hargreaves', address: 'notifications@forge.example',
       subject: 'Philip commented on issue #12', date: 'August 3',
       body: `Philip left a comment on the tracker. View it at
-             https://forge.example/issues/12 — replies to this address are not read.` },
+             https://forge.example/issues/12 — replies to this address are not read.`,
+      attachment: { name: 'issue-viewer.exe', bytes: 'MZ not really a program' } },
 
     { id: 's1', box: 'sent', to: 'Philip Hargreaves', address: 'philip@example.com',
       subject: 'Honeymoon plans', date: 'July 30', replies: 0,
@@ -235,6 +237,14 @@ function start() {
         const mail = mailRoute(pathname, params, sent)
             ?? calendarRoute(pathname, params, booked);
         if (mail !== undefined) {
+            if (mail && typeof mail === 'object' && mail.file) {
+                res.writeHead(200, {
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Disposition': `attachment; filename="${mail.file.name}"`
+                });
+                res.end(mail.file.bytes);
+                return;
+            }
             res.writeHead(200, { 'Content-Type': 'text/html' });
             res.end(`<!doctype html><html><head><meta charset="utf-8"></head><body>${mail}</body></html>`);
             return;
@@ -306,9 +316,17 @@ function mailRoute(pathname, params, sent) {
             <p>Date: ${message.date}</p>
             <blockquote>${message.body}</blockquote>
             ${message.quoting ? `<blockquote>${message.quoting}</blockquote>` : ''}
+            ${message.attachment ? `<p>One attachment: ${message.attachment.name}</p>
+            <a href="/mail/attachment?id=${message.id}">Download ${message.attachment.name}</a>` : ''}
             ${standing}
             <a href="/mail/compose?id=${message.id}">Reply</a>
             <a href="/mail">Back to the inbox</a>`);
+    }
+
+    if (pathname === '/mail/attachment') {
+        const message = MAILBOX.find(entry => entry.id === params.id);
+        if (!message || !message.attachment) return mailPage('Not found', '<p>No such file.</p>');
+        return { file: message.attachment };
     }
 
     if (pathname === '/mail/compose') {
@@ -324,9 +342,17 @@ function mailRoute(pathname, params, sent) {
               ${addressee}
               <label for="body">Message</label>
               <textarea id="body" name="body" aria-label="Message Body" rows="6"></textarea>
+              <input id="file" type="file" aria-label="Attach a file">
+              <p id="attached"></p>
               <button type="submit">Send</button>
             </form>
-            <a href="/mail">Back to the inbox</a>`);
+            <a href="/mail">Back to the inbox</a>
+            <script>
+              document.getElementById('file').addEventListener('change', function () {
+                document.getElementById('attached').textContent =
+                  this.files.length ? 'Attached: ' + this.files[0].name : '';
+              });
+            </script>`);
     }
 
     if (pathname === '/mail/send') {
