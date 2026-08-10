@@ -285,6 +285,13 @@ const INTENT_MANDATE = {
     agree: []
 };
 
+// "draft", "don't send" and the like ask for a message to be written, not
+// sent. The send verb inside such a request ("draft a reply", "write back but
+// leave it unsent") is describing the message, not authorising its dispatch —
+// so the send mandate is withdrawn, matching what the model path (act
+// "compose") and the recipe guard both already do.
+const DRAFT_INTENT = /\b(draft|drafts|drafting|don'?t send|do not send|without sending|leave it unsent)\b/i;
+
 function safeHost(url) {
     try { return new URL(String(url)).host; } catch { return String(url || ''); }
 }
@@ -313,6 +320,12 @@ function mandateFrom(text, label) {
     for (const entry of MANDATES.filter(asks)) {
         const expanded = INTENT_MANDATE[entry.kind];
         for (const kind of expanded || [entry.kind]) asked.add(kind);
+    }
+    // A drafting request keeps compose but never send: the message is written,
+    // not dispatched, however the send verb was phrased.
+    if (asked.has('send') && DRAFT_INTENT.test(words)) {
+        asked.delete('send');
+        asked.add('compose');
     }
     return asked;
 }
@@ -470,6 +483,7 @@ module.exports = {
     mandateFrom,
     mandateFromIntent,
     INTENT_MANDATE,
+    DRAFT_INTENT,
     isPrivateHost,
     IRREVERSIBLE,
     MANDATES,

@@ -566,6 +566,19 @@ test('opening a reply is not sending it, and a request to draft cannot send', ()
         const refused = webPolicy.checkClick({ element: send, label: USER, mandate: drafting });
         assert.strictEqual(refused.allowed, false);
         assert.strictEqual(refused.refusal, webPolicy.REFUSAL.IRREVERSIBLE);
+
+        // "reply" is a send verb, but "draft a reply" withdraws the send: the
+        // request is to write the message, not dispatch it. The word order
+        // must not be able to smuggle a send mandate past the draft intent.
+        const draftReply = webPolicy.mandateFrom('draft a reply to Sam saying hello', USER);
+        assert.deepStrictEqual([...draftReply], ['compose'],
+            'a drafted reply grants compose, never send');
+        assert.strictEqual(
+            webPolicy.checkClick({ element: send, label: USER, mandate: draftReply }).allowed, false,
+            'the Send button stays refused for a draft, however the send verb was phrased');
+
+        const unsent = webPolicy.mandateFrom('write back to Sam but leave it unsent', USER);
+        assert.ok(!unsent.has('send'), '"leave it unsent" cannot carry a send mandate');
     } finally {
         scope.cleanup();
     }
