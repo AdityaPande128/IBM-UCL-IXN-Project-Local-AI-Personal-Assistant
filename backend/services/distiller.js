@@ -298,10 +298,25 @@ function distil({ limit = 200, surface = null, dryRun = false } = {}) {
             continue;
         }
 
+        const shape = signature(group.runs[0].actions);
+
+        // Traces from before a drift describe steps a replacement already
+        // buried; they must not come back as a new recipe.
+        const buried = procedureStore.all().find(procedure =>
+            procedure.surface === group.surface
+            && (procedure.superseded_signatures || []).includes(shape));
+        if (buried) {
+            skipped.push({
+                surface: group.surface, plans: group.runs.map(run => run.id),
+                why: `an earlier shape of "${buried.name}", already re-learned past`
+            });
+            continue;
+        }
+
         const existing = procedureStore.all().find(procedure =>
             procedure.surface === group.surface
             && procedure.start_url === group.startUrl
-            && signatureOf(procedure) === signature(group.runs[0].actions));
+            && signatureOf(procedure) === shape);
 
         if (existing) {
             // The same steps proved out again after retirement: the failures
@@ -331,7 +346,8 @@ function distil({ limit = 200, surface = null, dryRun = false } = {}) {
         if (displaced) {
             learned.push(dryRun
                 ? { ...result.procedure, name: displaced.name }
-                : procedureStore.replace(displaced.name, result.procedure));
+                : procedureStore.replace(displaced.name, result.procedure,
+                    { supersededSignature: signatureOf(displaced) }));
             continue;
         }
 

@@ -1006,3 +1006,37 @@ test('failures from before a re-learn do not block the rebuilt recipe', async ()
             'the record starts over at the re-learn');
     } finally { world.cleanup(); }
 });
+
+test('traces from before the drift do not resurrect the buried steps', () => {
+    const world = scratch();
+    try {
+        TWO_GOALS.forEach(searchRun);
+        const [first] = distiller.distil({}).learned;
+        procedureStore.recordReplay(first.name, { ok: false, error: 'element gone' });
+        procedureStore.recordReplay(first.name, { ok: false, error: 'element gone' });
+
+        const drifted = ({ goal, typed }) => searchRun({
+            goal, typed,
+            steps: [
+                { capability: 'web.fill', status: 'success',
+                  inputs: { role: 'searchbox', name: 'Search books', ref: 'e1', text: typed } },
+                { capability: 'web.click', status: 'success',
+                  inputs: { role: 'button', name: 'Go', ref: 'e2' } },
+                { capability: 'web.done', status: 'success', summary: 'found it' }
+            ]
+        });
+        TWO_GOALS.forEach(drifted);
+
+        const healed = distiller.distil({});
+        assert.strictEqual(healed.learned.length, 1);
+        assert.strictEqual(healed.learned[0].name, first.name);
+
+        // The pre-drift traces are still in the window; another pass must not
+        // bring the old steps back as a new recipe.
+        const again = distiller.distil({});
+        assert.strictEqual(again.learned.length, 0);
+        assert.strictEqual(again.revived.length, 0);
+        assert.ok(again.skipped.some(entry => /earlier shape/.test(entry.why)));
+        assert.strictEqual(procedureStore.all().length, 1);
+    } finally { world.cleanup(); }
+});

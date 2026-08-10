@@ -1066,12 +1066,29 @@ async function browse(goal, options = {}) {
     }
 
     // Which file may leave this machine is settled here, from the user's own
-    // words, before any page has been observed — no page gets a say in it.
+    // words, before any page has been observed — no page gets a say in it,
+    // and neither does the model: a file the reading names that the request
+    // never did is discarded in favour of the request's own words.
     let outgoing = null;
     if (mandate.has('attach')) {
-        const sought = intent.file || goal;
+        const sought = intent.file && webPolicy.drawnFrom(intent.file, goal)
+            ? intent.file
+            : goal;
         const found = await attachments.resolveOutgoing(sought);
         if (found && found.file) {
+            // Even a file the user named by its full path is refused when the
+            // path itself says credential — before any page is opened.
+            const secret = require('../security/classifier').secretCheck(found.file.path);
+            if (secret.secret) {
+                return {
+                    status: 'blocked', goal, answer: null,
+                    reason: `"${found.file.name}" is credential material (${secret.reason}); `
+                        + 'it never leaves this machine',
+                    refusal: webPolicy.REFUSAL.CREDENTIAL,
+                    approvalId: null, actions: [], url: null, passages: [], planId: null,
+                    run_ms: Date.now() - startedAt
+                };
+            }
             outgoing = found.file;
         } else {
             const reason = found && found.candidates
@@ -1214,9 +1231,14 @@ async function browse(goal, options = {}) {
             await new Promise(beat => setTimeout(beat, 300));
             queued = surface.takeDownloads();
         }
+        // The gate's evidence: what is on screen, plus the request itself. A
+        // file neither of them names is not the one that was asked for.
+        const evidence = `${goal} ${(observation && observation.text) || ''} `
+            + (((observation && observation.elements) || [])
+                .map(el => el.name || '').join(' '));
         for (const download of queued) {
             const taken = await attachments.admit(download, { mandate,
-                dir: options.downloadDir });
+                dir: options.downloadDir, evidence });
             if (taken.saved) {
                 performed.add('save');
                 savedFiles.push(taken.saved);
@@ -1236,6 +1258,9 @@ async function browse(goal, options = {}) {
     const attachOutgoing = async () => {
         if (!outgoing || performed.has('attach')) return false;
         if (typeof surface.attachFiles !== 'function') return false;
+        // The file rides the message: without a message body on screen, an
+        // upload control is some other feature of the site, not this attach.
+        if (!hasBody(observation)) return false;
 
         const control = ((observation && observation.elements) || []).find(element =>
             !element.disabled

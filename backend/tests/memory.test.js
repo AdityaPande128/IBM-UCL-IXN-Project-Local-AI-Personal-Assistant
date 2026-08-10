@@ -61,9 +61,9 @@ test('hard deletion is secure deletion', () => {
 test('recall prefers relevance, adds a recency nudge, and marks the recall', () => {
     const scope = scratch();
     try {
-        const now = Date.now();
         memoryStore.remember({ text: 'coffee order is a flat white', vector: toyVector('coffee order flat white') });
         memoryStore.remember({ text: 'sister lives in Pune', vector: toyVector('sister lives pune') });
+        const now = Date.now();
 
         const hits = memoryStore.search(toyVector('coffee order flat white'), { topK: 1, now });
 

@@ -197,8 +197,10 @@ function revive(name) {
 }
 
 // Re-learning keeps the name: the capability id, the family and the place in
-// plans all survive the site having moved underneath the old steps.
-function replace(name, next) {
+// plans all survive the site having moved underneath the old steps. The old
+// shape is remembered, so traces from before the drift cannot re-distil the
+// dead steps as though they were a new discovery.
+function replace(name, next, { supersededSignature = null } = {}) {
     const old = get(name);
     if (!old) return save(next);
 
@@ -208,6 +210,10 @@ function replace(name, next) {
         record.family = old.family;
         record.action = old.action;
     }
+    record.superseded_signatures = [
+        ...(old.superseded_signatures || []),
+        supersededSignature
+    ].filter(Boolean);
     return save(record);
 }
 

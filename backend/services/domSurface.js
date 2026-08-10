@@ -29,6 +29,12 @@ async function start(options = {}) {
         hookedPage = page;
         downloads = [];
         page.on('download', download => { downloads.push(download); });
+    } else {
+        // A new run owns nothing an earlier one left queued: a mandate covers
+        // its own request, never bytes another request abandoned.
+        for (const stray of downloads.splice(0)) {
+            if (typeof stray.cancel === 'function') stray.cancel().catch(() => {});
+        }
     }
     return { app: 'the assistant\'s browser' };
 }

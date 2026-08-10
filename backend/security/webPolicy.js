@@ -331,9 +331,11 @@ function sanitizeFilename(name) {
 }
 
 // The one gate bytes from the web pass on their way to disk: nothing lands
-// unless the user's own words asked for a file to be saved, and programs
-// never land at all. A page cannot mandate its own download.
-function checkDownload({ filename, mandate } = {}) {
+// unless the user's own words asked for a file to be saved, programs never
+// land at all, and even a mandated save only admits a file the page itself
+// shows — a drive-by download under the cover of a real request is refused
+// for not being the file that was asked about.
+function checkDownload({ filename, mandate, evidence } = {}) {
     const name = sanitizeFilename(filename);
     const extension = (name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
 
@@ -345,6 +347,11 @@ function checkDownload({ filename, mandate } = {}) {
     if (!mandate || !mandate.has || !mandate.has('save')) {
         return refuse(REFUSAL.UNREQUESTED,
             `the page offered "${name}", and nothing in the request asked for a file to be saved`);
+    }
+    if (evidence != null && !String(evidence).toLowerCase().includes(name.toLowerCase())) {
+        return refuse(REFUSAL.UNREQUESTED,
+            `the page produced "${name}" without showing it anywhere — a file the page `
+            + 'does not own up to is not the one that was asked for');
     }
     return { allowed: true, reason: 'the request asked for this file to be saved',
              refusal: null, approvalId: null, filename: name };
@@ -359,6 +366,14 @@ function checkAttach({ path, mandate, label, destination } = {}) {
     if (!mandate || !mandate.has || !mandate.has('attach')) {
         return refuse(REFUSAL.UNREQUESTED,
             `nothing in the request asks for a file to be attached, so "${name}" stays on this machine`);
+    }
+    // The path speaks for itself: a credential file is refused here whatever
+    // label the caller carried and however explicitly the user named it.
+    const secret = require('./classifier').secretCheck(String(path || ''));
+    if (secret.secret) {
+        return refuse(REFUSAL.CREDENTIAL,
+            `"${name}" is credential material (${secret.reason}); `
+            + 'it never leaves this machine, and no approval can authorise it');
     }
     if (labels.isSecret(label || labels.UNKNOWN)) {
         return refuse(REFUSAL.CREDENTIAL,

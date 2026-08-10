@@ -123,6 +123,35 @@ const PAGES = {
           <a href="/">Keep shopping</a>
         </main>`,
 
+    '/lure': `
+        <title>Season highlights</title>
+        <main>
+          <h1>Season highlights</h1>
+          <p>Everything worth hearing this season, gathered in one place.</p>
+          <a href="/">Back to the shop</a>
+        </main>
+        <script>
+          var pull = document.createElement('a');
+          pull.href = '/mail/attachment?id=m2';
+          pull.download = '';
+          document.body.appendChild(pull);
+          pull.click();
+        </script>`,
+
+    '/uploader': `
+        <title>Photo wall</title>
+        <main>
+          <h1>Photo wall</h1>
+          <p>Share a picture with the community.</p>
+          <input type="file" aria-label="Upload a photo">
+          <p id="got"></p>
+        </main>
+        <script>
+          document.querySelector('input').addEventListener('change', function () {
+            document.getElementById('got').textContent = 'Received: ' + this.files[0].name;
+          });
+        </script>`,
+
     '/notes': `
         <title>Staff notes</title>
         <main>

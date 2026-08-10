@@ -31,12 +31,12 @@ function landing(dir, name) {
 // Every download the browser produces passes through here exactly once.
 // Unmandated or runnable, it is cancelled where it sits — in the browser's
 // temporary area — and never reaches anywhere the user looks.
-async function admit(download, { mandate, dir } = {}) {
+async function admit(download, { mandate, dir, evidence } = {}) {
     const offered = typeof download.suggestedFilename === 'function'
         ? download.suggestedFilename()
         : 'download';
 
-    const verdict = webPolicy.checkDownload({ filename: offered, mandate });
+    const verdict = webPolicy.checkDownload({ filename: offered, mandate, evidence });
     if (!verdict.allowed) {
         if (typeof download.cancel === 'function') {
             await download.cancel().catch(() => {});
@@ -56,7 +56,20 @@ async function admit(download, { mandate, dir } = {}) {
              reason: verdict.reason, refusal: null };
 }
 
+// Two readings of "a path was written": with an extension it may carry
+// spaces; without one (id_rsa, Makefile) it ends at the first space. The
+// longer capture wins.
 const PATHISH = /(?:~\/|\/)[\w.\-/ ]*\.[A-Za-z0-9]{1,8}/;
+const BARE_PATH = /(?:~\/|\/)[\w.\-/]+/;
+
+function writtenPath(words) {
+    const found = [
+        (words.match(PATHISH) || [])[0],
+        (words.match(BARE_PATH) || [])[0]
+    ].filter(Boolean);
+    if (!found.length) return null;
+    return found.sort((a, b) => b.length - a.length)[0].trim();
+}
 
 const FILLER = new Set(['attach', 'attached', 'attaching', 'file', 'the', 'my', 'a', 'an',
     'to', 'and', 'of', 'in', 'it', 'that', 'this', 'send', 'email', 'mail', 'forward',
@@ -69,16 +82,16 @@ async function resolveOutgoing(reference, { roots } = {}) {
     const words = String(reference || '').trim();
     if (!words) return null;
 
-    const written = (words.match(PATHISH) || [])[0];
+    const written = writtenPath(words);
     if (written) {
-        const full = path.resolve(expandHome(written.trim()));
+        const full = path.resolve(expandHome(written));
         try {
             const stat = fs.statSync(full);
             if (stat.isFile()) {
                 return { file: { path: full, name: path.basename(full), bytes: stat.size } };
             }
         } catch { }
-        return { missing: written.trim() };
+        return { missing: written };
     }
 
     const fileIndex = require('./fileIndex');
