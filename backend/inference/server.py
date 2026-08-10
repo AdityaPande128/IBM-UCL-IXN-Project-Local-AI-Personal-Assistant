@@ -108,6 +108,50 @@ RESIDENCY = ResidencyManager(
 
 llm_loaded = False
 
+# Efficiency ladder rung 2: the KV cache of the shared prompt prefix survives
+# between calls. One cache, the most recent model's; anything doubtful runs cold.
+PREFIX_SETTINGS = MODELS_CONFIG.get("prefix_cache") or {}
+PREFIX_CACHE = None
+if PREFIX_SETTINGS.get("enabled", True):
+    try:
+        from prefixcache import PrefixCache
+        PREFIX_CACHE = PrefixCache(
+            max_tokens=int(PREFIX_SETTINGS.get("max_tokens", 2048)),
+            min_prefix=int(PREFIX_SETTINGS.get("min_prefix", 64)),
+            log=lambda msg: print(msg, flush=True),
+        )
+    except Exception as _e:
+        print(f"[Inference] Prefix cache unavailable: {_e}", flush=True)
+
+# Efficiency ladder rung 3: speculative decoding, plumbed but OFF until a
+# draft model is named in config — adoption is gated on measurement.
+SPECULATIVE = MODELS_CONFIG.get("speculative") or {}
+_DRAFT = {"id": None, "model": None}
+
+
+def _draft_model():
+    wanted = SPECULATIVE.get("draft")
+    if not wanted:
+        return None
+    if _DRAFT["id"] != wanted:
+        try:
+            from mlx_lm import load
+            print(f"[Inference] Loading draft model: {wanted}", flush=True)
+            _DRAFT["model"], _ = load(wanted)
+            _DRAFT["id"] = wanted
+        except Exception as e:
+            print(f"[Inference] Draft model unavailable ({e}); "
+                  f"decoding without speculation.", flush=True)
+            SPECULATIVE["draft"] = None
+            return None
+    return _DRAFT["model"]
+
+
+def _encode_prompt(tokenizer, prompt):
+    """Tokenize exactly the way stream_generate would, so prefixes compare equal."""
+    add_special = tokenizer.bos_token is None or not prompt.startswith(tokenizer.bos_token)
+    return tokenizer.encode(prompt, add_special_tokens=add_special)
+
 
 _LLM_WORKER = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="llm")
 _FAST_WORKER = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="fast")
@@ -336,8 +380,41 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
         except ImportError:
             print("[Inference] make_sampler unavailable; falling back to default sampling.", flush=True)
 
-    response = generate(target_model, target_tokenizer, prompt=prompt,
-                        **generate_kwargs)
+    # Speculation and the prefix cache are exclusive for now: the speculative
+    # path interleaves draft and target caches, and a constrained call stays
+    # on the plain path because the constraint walks one token at a time.
+    draft = None
+    if "logits_processors" not in generate_kwargs:
+        draft = _draft_model()
+    if draft is not None:
+        generate_kwargs["draft_model"] = draft
+        generate_kwargs["num_draft_tokens"] = int(SPECULATIVE.get("num_draft_tokens", 3))
+
+    prompt_arg = prompt
+    prompt_tokens = None
+    cache_key = None
+    if PREFIX_CACHE is not None and draft is None:
+        try:
+            prompt_tokens = _encode_prompt(target_tokenizer, prompt)
+            cache_key = id(target_model)
+            cache, feed, reused = PREFIX_CACHE.begin(cache_key, target_model, prompt_tokens)
+            if cache is not None:
+                generate_kwargs["prompt_cache"] = cache
+                prompt_arg = feed
+                if reused:
+                    print(f"[PrefixCache] reused {reused} of {len(prompt_tokens)} "
+                          f"prompt tokens", flush=True)
+        except Exception as e:
+            print(f"[PrefixCache] cold call: {e}", flush=True)
+            prompt_arg = prompt
+            prompt_tokens = None
+
+    try:
+        response = generate(target_model, target_tokenizer, prompt=prompt_arg,
+                            **generate_kwargs)
+    finally:
+        if PREFIX_CACHE is not None and prompt_tokens is not None:
+            PREFIX_CACHE.end(cache_key, prompt_tokens)
 
     response = _strip_thinking(response)
 
@@ -856,6 +933,8 @@ async def health():
             "budget_gb": state["budget_gb"],
             "used_gb": state["used_gb"],
             "free_gb": state["free_gb"],
+            "prefix_cache": PREFIX_CACHE.state() if PREFIX_CACHE else None,
+            "speculative": SPECULATIVE.get("draft") or None,
         }
     }
 
