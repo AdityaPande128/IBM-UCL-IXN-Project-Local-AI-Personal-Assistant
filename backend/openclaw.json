@@ -23,5 +23,11 @@
   "security": {
     "sandboxRoot": "~/Jarvis_Sandbox",
     "blockFileOpsOutsideSandbox": true
+  },
+  "channels": {
+    "telegram": {
+      "enabled": false,
+      "managedBy": "jarvis"
+    }
   }
 }
