@@ -28,6 +28,50 @@
       "mlx-community/Qwen3-4B-Instruct-2507-4bit": 2.109,
       "mlx-community/granite-4.1-8b-4bit": 4.879,
       "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit": 7.739
+    },
+    "hardware_defaults": {
+      "8": {
+        "guard": {
+          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+          "policy": "pinned"
+        },
+        "engine": {
+          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+          "policy": "pinned"
+        },
+        "smith": {
+          "model": "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+          "policy": "transient"
+        }
+      },
+      "16": {
+        "guard": {
+          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+          "policy": "pinned"
+        },
+        "engine": {
+          "model": "mlx-community/granite-4.1-8b-4bit",
+          "policy": "resident"
+        },
+        "smith": {
+          "model": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
+          "policy": "transient"
+        }
+      },
+      "24": {
+        "guard": {
+          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+          "policy": "pinned"
+        },
+        "engine": {
+          "model": "mlx-community/granite-4.1-8b-4bit",
+          "policy": "resident"
+        },
+        "smith": {
+          "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+          "policy": "transient"
+        }
+      }
     }
   },
   "router": {

@@ -62,6 +62,7 @@ stt_loaded = False
 tts_loaded = False
 
 from residency import ResidencyManager, ResidencyError, GB
+from hardware import tiers_for
 
 DEFAULT_MODEL_PATH = CONFIG.get("model_id", "mlx-community/granite-4.1-8b-4bit")
 ROUTER_MODEL_PATH = (CONFIG.get("router") or {}).get("model") or DEFAULT_MODEL_PATH
@@ -69,10 +70,13 @@ GENERATION_MODEL_PATH = (CONFIG.get("generation") or {}).get("model") or DEFAULT
 
 MODELS_CONFIG = CONFIG.get("models") or {}
 
-TIERS = MODELS_CONFIG.get("tiers") or {
-    "guard": {"model": ROUTER_MODEL_PATH, "policy": "pinned"},
-    "smith": {"model": GENERATION_MODEL_PATH, "policy": "transient"},
-}
+TIERS = (MODELS_CONFIG.get("tiers")
+         or tiers_for(MODELS_CONFIG.get("hardware_defaults"),
+                      log=lambda msg: print(msg, flush=True))
+         or {
+             "guard": {"model": ROUTER_MODEL_PATH, "policy": "pinned"},
+             "smith": {"model": GENERATION_MODEL_PATH, "policy": "transient"},
+         })
 
 GUARD_MODEL_PATH = (TIERS.get("guard") or {}).get("model") or ROUTER_MODEL_PATH
 

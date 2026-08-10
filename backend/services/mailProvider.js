@@ -1,7 +1,9 @@
 // The mail loop is provider-agnostic: recipes, mandate rules and the browser
 // lanes work on whatever mailbox the linked browser is signed in to. The only
 // thing that names a provider is the URL the planner steers to, and it lives
-// here.
+// here. With config.mail.accounts a user can hold several mailboxes at once
+// ("personal": "gmail", "work": "outlook-work") and steer by name: a request
+// that says "work mail" goes to the work account, anything else to the default.
 
 const PROVIDERS = {
     gmail: { label: 'Gmail', url: 'https://mail.google.com' },
@@ -15,4 +17,29 @@ function current(config) {
     return { name, ...PROVIDERS[name] };
 }
 
-module.exports = { PROVIDERS, current };
+function accounts(config) {
+    const named = (config.mail && config.mail.accounts) || {};
+    const list = [];
+    for (const [account, provider] of Object.entries(named)) {
+        if (!PROVIDERS[provider]) continue;
+        list.push({ account, name: provider, ...PROVIDERS[provider] });
+    }
+    return list;
+}
+
+// Steering is deliberately narrow: the account name must qualify a mail word
+// ("work mail", "uni inbox", "the personal account"). A bare mention steers
+// nothing — "tell my work colleague" is about a colleague, not a mailbox —
+// and a miss lands on the default account, never on a wrong action.
+function forRequest(text, config) {
+    const request = String(text || '');
+    for (const acct of accounts(config)) {
+        const name = acct.account.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const qualifies = new RegExp(
+            `\\b${name}\\s+(mail|e-?mail|inbox|mailbox|account)s?\\b`, 'i');
+        if (qualifies.test(request)) return acct;
+    }
+    return current(config);
+}
+
+module.exports = { PROVIDERS, current, accounts, forRequest };

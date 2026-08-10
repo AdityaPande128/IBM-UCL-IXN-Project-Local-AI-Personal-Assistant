@@ -754,6 +754,44 @@ test('the plan prompt steers mail at the configured provider, not a hardcoded on
     assert.ok(!prompt.includes('${MAIL_URL}'), 'the template token must be substituted');
 });
 
+test('a named account steers the request to its own mailbox', () => {
+    const config = {
+        mail: {
+            provider: 'gmail',
+            accounts: { personal: 'gmail', work: 'outlook-work' }
+        }
+    };
+
+    // The account name must qualify a mail word to steer.
+    assert.strictEqual(mailProvider.forRequest('check my work mail', config).url,
+        'https://outlook.office.com/mail');
+    assert.strictEqual(mailProvider.forRequest('anything new in the work inbox?', config).url,
+        'https://outlook.office.com/mail');
+    assert.strictEqual(mailProvider.forRequest('open my work email', config).url,
+        'https://outlook.office.com/mail');
+    assert.strictEqual(mailProvider.forRequest('check my personal mailbox', config).url,
+        'https://mail.google.com');
+
+    // A bare mention of the word is not a steer: the default account holds.
+    assert.strictEqual(mailProvider.forRequest('tell my work colleague I am late', config).url,
+        'https://mail.google.com');
+    assert.strictEqual(mailProvider.forRequest('reply to Sam saying hi', config).url,
+        'https://mail.google.com');
+    assert.strictEqual(mailProvider.forRequest('', config).url,
+        'https://mail.google.com');
+
+    // An account naming a provider that does not exist is ignored, not served.
+    const broken = { mail: { accounts: { work: 'compuserve' } } };
+    assert.strictEqual(mailProvider.forRequest('check my work mail', broken).url,
+        'https://mail.google.com');
+    assert.deepStrictEqual(mailProvider.accounts(broken), []);
+
+    // And the plan prompt for a steered request carries the steered mailbox.
+    const prompt = planner.buildPlanPrompt([], mailProvider.forRequest('check my work mail', config).url);
+    assert.ok(prompt.includes('https://outlook.office.com/mail'),
+        'the steered mailbox address must appear in the prompt');
+});
+
 const failureTaxonomy = require('../services/failureTaxonomy');
 const negativeMemory = require('../services/negativeMemory');
 

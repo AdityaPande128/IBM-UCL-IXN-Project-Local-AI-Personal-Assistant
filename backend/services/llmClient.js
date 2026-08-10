@@ -1,5 +1,6 @@
 const http = require('http');
 const configReader = require('../utils/configReader');
+const modelTiers = require('./modelTiers');
 
 const config = configReader.readConfig();
 
@@ -10,7 +11,7 @@ const TIER_SETTINGS = {
 };
 
 function modelForTier(tier) {
-    return ((config.models || {}).tiers || {})[tier]?.model || null;
+    return modelTiers.effective(config)[tier]?.model || null;
 }
 
 function complete(messages, opts = {}) {

@@ -17,6 +17,7 @@ const generationLog = require('./services/generationLog');
 const webAgent = require('./services/webAgent');
 const diagnostics = require('./services/diagnostics');
 const settings = require('./services/settings');
+const modelTiers = require('./services/modelTiers');
 const availability = require('./services/availability');
 const watchers = require('./services/watchers');
 const morningBrief = require('./services/morningBrief');
@@ -222,7 +223,7 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'abilities') {
-                const tiers = (config.models && config.models.tiers) || {};
+                const tiers = modelTiers.effective(config);
                 ws.send(JSON.stringify({
                     type: 'abilities_result',
                     skills: skillRegistry.list().map(s => ({

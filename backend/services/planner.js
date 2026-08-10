@@ -11,6 +11,13 @@ const plannerConfig = config.planner || {};
 
 const MAIL_URL = mailProvider.current(config).url;
 
+// When the user holds more than one mailbox, the request itself picks the
+// account ("work mail" goes to the work account); everything else lands on
+// the default. The chosen URL is what the prompt below steers messages at.
+function mailUrlFor(request) {
+    return mailProvider.forRequest(request, config).url;
+}
+
 const TIER = 'engine';
 const TEMPERATURE = plannerConfig.temperature ?? 0.0;
 const MAX_TOKENS = plannerConfig.max_tokens ?? 700;
@@ -44,7 +51,7 @@ function today() {
         { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function buildPlanPrompt(capabilities) {
+function buildPlanPrompt(capabilities, mailUrl = MAIL_URL) {
     return `You are the planner for a local macOS assistant. You are given a request and the complete list of operations this machine can perform. You produce a plan: an ordered list of steps that carries the request out.
 
 WHO IS ASKING: the person making this request owns this Mac and is its only user.
@@ -147,7 +154,7 @@ RULES
    replied", "did he get back to me", "any response from ..." are all web.browse
    on the signed-in mail site, whatever recipes are on offer.
 7c. Saying something to a person is a message, and a message is web.browse on the
-   signed-in site that carries the user's mail — ${MAIL_URL}. "Tell Ingrid ...", "let Sam
+   signed-in site that carries the user's mail — ${mailUrl}. "Tell Ingrid ...", "let Sam
    know ...", "reply to ...", "respond to ...", "write back to ...", "draft a
    reply to ..." are all that one shape, whoever is named and whatever verb is
    used. Two wrong answers to avoid, both measured:
@@ -202,7 +209,7 @@ EXAMPLES
   "tell Ingrid to meet me at Primrose Hill at 9 PM"
   -> {"goal":"Tell Ingrid to meet at Primrose Hill at 9 PM",
       "steps":[
-        {"id":"s1","capability":"web.browse","inputs":{"goal":"tell Ingrid to meet me at Primrose Hill at 9 PM","url":"${MAIL_URL}"},"reason":"write to Ingrid from the user's mail"}],
+        {"id":"s1","capability":"web.browse","inputs":{"goal":"tell Ingrid to meet me at Primrose Hill at 9 PM","url":"${mailUrl}"},"reason":"write to Ingrid from the user's mail"}],
       "missing":[]}
      (not "missing": the browser is signed in to the user's mail, and that is
       where one person writes to another.)
@@ -210,7 +217,7 @@ EXAMPLES
   "draft a reply to Ingrid saying \\"Sounds good to me\\""
   -> {"goal":"Draft a reply to Ingrid saying \\"Sounds good to me\\"",
       "steps":[
-        {"id":"s1","capability":"web.browse","inputs":{"goal":"draft a reply to Ingrid saying \\"Sounds good to me\\"","url":"${MAIL_URL}"},"reason":"open the reply and write it"}],
+        {"id":"s1","capability":"web.browse","inputs":{"goal":"draft a reply to Ingrid saying \\"Sounds good to me\\"","url":"${mailUrl}"},"reason":"open the reply and write it"}],
       "missing":[]}
      (not "answer": the words go into the mailbox, not into a reply to the user.)
 
@@ -451,7 +458,7 @@ async function plan(request, options = {}) {
 
     const { capabilities, retrieved } = await selectCapabilities(request, options);
     const conversation = [
-        { role: 'system', content: buildPlanPrompt(capabilities) },
+        { role: 'system', content: buildPlanPrompt(capabilities, mailUrlFor(request)) },
         { role: 'user', content: String(request) }
     ];
 
