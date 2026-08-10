@@ -93,6 +93,33 @@ function parseWithRepair(source) {
     return { value: null, repaired: false, error: lastError.message };
 }
 
+// The first complete { ... } object, tracked by brace depth so it ends at its
+// own closing brace rather than the last one in the string. A stray brace
+// after the object — a second object, or prose like "(see {details})" — no
+// longer drags the greedy match past the real end and defeats extraction.
+// String contents are skipped so a brace inside a value never miscounts.
+function firstBalancedObject(text) {
+    const start = text.indexOf('{');
+    if (start === -1) return null;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+        const char = text[i];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (char === '\\') escaped = true;
+            else if (char === '"') inString = false;
+            continue;
+        }
+        if (char === '"') inString = true;
+        else if (char === '{') depth++;
+        else if (char === '}' && --depth === 0) return text.slice(start, i + 1);
+    }
+    return null;
+}
+
 function extractJson(raw) {
     const trimmed = String(raw || '').trim();
     const candidates = [];
@@ -100,6 +127,12 @@ function extractJson(raw) {
     const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenced) candidates.push(fenced[1].trim());
 
+    const balanced = firstBalancedObject(trimmed);
+    if (balanced) candidates.push(balanced);
+
+    // The greedy span stays as a last resort: it catches an object whose own
+    // braces are unbalanced only because a value holds a bare brace the scan
+    // above would trip on.
     const braced = trimmed.match(/\{[\s\S]*\}/);
     if (braced) candidates.push(braced[0]);
 
@@ -113,5 +146,6 @@ function extractJson(raw) {
 }
 
 module.exports = {
-    repairEscapes, stripLineComments, parseWithRepair, extractJson, VALID_ESCAPES
+    repairEscapes, stripLineComments, parseWithRepair, extractJson,
+    firstBalancedObject, VALID_ESCAPES
 };

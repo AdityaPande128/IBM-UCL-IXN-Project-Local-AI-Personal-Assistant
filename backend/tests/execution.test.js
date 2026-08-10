@@ -74,6 +74,18 @@ test('the message is passed as a single argument even when it contains spaces an
 });
 
 
+test('substitution fills declared parameters and leaves everything else literal', () => {
+    assert.strictEqual(
+        skillExecutor.substitute('greet {{name}}', { name: 'Sam' }, '/dir'),
+        'greet Sam');
+    // An inherited property name is not a declared parameter, so the token
+    // must stay literal rather than resolve to a prototype function.
+    assert.strictEqual(
+        skillExecutor.substitute('{{toString}} {{name}}', { name: 'Sam' }, '/dir'),
+        '{{toString}} Sam');
+    assert.strictEqual(skillExecutor.substitute('in {{__dir__}}', {}, '/skills/x'), 'in /skills/x');
+});
+
 function makeSkill(argv, timeoutMs = 10000) {
     return {
         name: 'output-probe',

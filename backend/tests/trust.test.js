@@ -69,6 +69,13 @@ test('the audit digest reports what actually happened, from the stores that enfo
     const empty = auditView.digest(Date.now() + 60 * 1000);
     assert.strictEqual(empty.summary.plans, 0);
     assert.strictEqual(empty.summary.decisions, 0);
+
+    // A corrupted "since" past the largest representable date must not throw
+    // (new Date(9e18).toISOString() does); it falls back to the default window.
+    const recovered = auditView.digest(9e18);
+    assert.strictEqual(recovered.summary.plans, 2);
+    assert.strictEqual(auditView.digest(NaN).summary.plans, 2);
+    assert.strictEqual(auditView.digest(-5).summary.plans, 2);
 });
 
 test('the permissions dashboard reads every grant from the store that enforces it', () => {

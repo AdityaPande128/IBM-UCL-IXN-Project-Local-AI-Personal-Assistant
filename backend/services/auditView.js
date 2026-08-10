@@ -64,9 +64,17 @@ function noticeLine(row) {
     };
 }
 
+// The largest instant a JS Date can hold; past it, toISOString throws.
+const MAX_DATE_MS = 8.64e15;
+
 function digest(since) {
-    const sinceMs = Number.isFinite(Number(since)) && Number(since) > 0
-        ? Number(since)
+    // A since from the client is untrusted. A corrupted "last seen" could be
+    // negative, NaN, or past the largest representable date — those fall back
+    // to the default window. A valid future timestamp is kept as-is: nothing
+    // is newer than it, so the window is simply empty.
+    const parsed = Number(since);
+    const sinceMs = Number.isFinite(parsed) && parsed > 0 && parsed <= MAX_DATE_MS
+        ? parsed
         : Date.now() - DEFAULT_WINDOW_MS;
     const sinceIso = new Date(sinceMs).toISOString();
 

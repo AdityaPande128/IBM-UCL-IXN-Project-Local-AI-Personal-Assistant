@@ -10,11 +10,15 @@ const skillPins = require('./skillPins');
 const ENFORCE_MODE = (configReader.readConfig().security || {}).enforce_capabilities || 'generated';
 
 
+function has(object, key) {
+    return Object.prototype.hasOwnProperty.call(object, key);
+}
+
 function findValue(canonicalName, spec, supplied) {
-    if (canonicalName in supplied) return supplied[canonicalName];
+    if (has(supplied, canonicalName)) return supplied[canonicalName];
 
     for (const alias of spec.aliases || []) {
-        if (alias in supplied) return supplied[alias];
+        if (has(supplied, alias)) return supplied[alias];
     }
 
     const target = canonicalName.toLowerCase();
@@ -136,7 +140,10 @@ function formatValue(value, filter) {
 function substitute(template, parameters, skillDir) {
     return String(template).replace(TOKEN, (match, name, filter) => {
         if (name === '__dir__') return skillDir;
-        if (name in parameters) return formatValue(parameters[name], filter);
+        // Only a declared parameter substitutes — never an inherited property,
+        // so a token like {{toString}} stays literal instead of resolving to a
+        // prototype function.
+        if (has(parameters, name)) return formatValue(parameters[name], filter);
         return match;
     });
 }
