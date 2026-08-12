@@ -258,7 +258,7 @@ const IRREVERSIBLE = [
       pattern: /\b(delete|remove account|deactivate|close account|erase|permanently)\b/i,
       what: 'deletes something' },
     { kind: 'send',
-      pattern: /\b(send|post|publish|submit application|tweet|reply all)\b/i,
+      pattern: /\b(send|post|publish|submit application|tweet)\b/i,
       what: 'sends something to other people' },
     { kind: 'book',
       pattern: /\bsave\b|\b(create|add|schedule) event\b/i,

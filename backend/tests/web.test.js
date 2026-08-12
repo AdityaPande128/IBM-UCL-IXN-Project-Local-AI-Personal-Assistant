@@ -245,6 +245,23 @@ test('a message is not begun on the user\'s behalf, even though beginning one se
             },
             label: USER
         }).allowed, true);
+
+        // Opening the editor is not the send: "Reply all" earns the compose
+        // credit, and only the Send control discharges the send mandate.
+        const mandate = new Set(['send', 'compose']);
+        const opened = webPolicy.checkClick({
+            element: { ref: 'e3', role: 'button', name: 'Reply all' },
+            label: USER, mandate
+        });
+        assert.strictEqual(opened.allowed, true);
+        assert.strictEqual(opened.advisory, 'mandated: compose');
+
+        const sent = webPolicy.checkClick({
+            element: { ref: 'e4', role: 'button', name: 'Send' },
+            label: USER, mandate
+        });
+        assert.strictEqual(sent.allowed, true);
+        assert.strictEqual(sent.advisory, 'mandated: send');
     } finally {
         scope.cleanup();
     }

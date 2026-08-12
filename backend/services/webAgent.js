@@ -901,6 +901,14 @@ function unaddressed(observation, fresh = false) {
         return false;
     }
 
+    // A committed recipient is a pill, not field text: the mailbox turns the
+    // typed address into a small control and empties the box it was typed in.
+    if (elements.some(element => !holdsText(element)
+        && String(element.name || '').length <= 60
+        && /[\w.+-]+@[\w.-]+\.\w{2,}/.test(element.name || ''))) {
+        return false;
+    }
+
     if (elements.some(element => recipient(element) && !String(element.value || '').trim())) {
         return true;
     }
@@ -1013,12 +1021,17 @@ function dictatedFields(goal) {
     return values.length >= 2 ? values.length : 0;
 }
 
-async function chooseSurface(url, options) {
+async function chooseSurface(url, options, mandate = null) {
     const wanted = options.surface || webConfig.surface || 'auto';
     if (wanted === 'dom' || options.allowPrivate) return domSurface;
     if (wanted === 'desktop') return desktopOrExplain(url);
 
     if (url && securityStore.isGrantedSite(url)) {
+        // A mutation runs where the loop can read the editor back: the
+        // attached profile's DOM. The pixels lane cannot see a web editor's
+        // value, which means typing blind and claiming a send nobody
+        // verified — watching it happen live is not worth that.
+        if (mandate && mandate.size && await browser.attachAvailable()) return domSurface;
         if (await chromeSurface.ready()) return chromeSurface;
         return await browser.attachAvailable() ? domSurface : desktopOrExplain(url);
     }
@@ -1335,7 +1348,7 @@ async function browse(goal, options = {}) {
 
     let surface;
     try {
-        surface = await chooseSurface(options.url, options);
+        surface = await chooseSurface(options.url, options, mandate);
     } catch (err) {
         return {
             status: 'blocked', goal, answer: null, reason: err.message, refusal: 'no-session',
