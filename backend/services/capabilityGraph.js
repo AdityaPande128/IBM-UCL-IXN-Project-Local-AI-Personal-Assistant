@@ -66,7 +66,8 @@ function define(spec) {
         run: spec.run,
         dispatch: spec.dispatch || null,
         source: spec.source || null,
-        family: spec.family || null
+        family: spec.family || null,
+        surfaces: Object.freeze([...(spec.surfaces || [])])
     });
 }
 
@@ -135,8 +136,17 @@ async function descend(procedure, bound, context, why) {
     const browse = ensureBuilt().get('web.browse');
     if (!browse) throw why;
 
+    // A declined mail recipe must not hand browsing its own start page: the
+    // recipe belongs to the site it was learned on, while the browse goes to
+    // whatever mailbox the request steers to.
+    const mailProvider = require('./mailProvider');
+    const url = mailProvider.MAIL_HOSTS.has(procedure.surface)
+        ? mailProvider.forRequest(context.request || '',
+            require('../utils/configReader').readConfig()).url
+        : procedure.start_url;
+
     const goal = context.request || require('./procedureRunner').renderGoal(procedure, bound);
-    const result = await browse.run({ goal, url: procedure.start_url }, context);
+    const result = await browse.run({ goal, url }, context);
 
     return { passages: result.passages, url: result.url, title: null, text: result.text };
 }
@@ -168,6 +178,7 @@ function fromProcedure(procedure) {
             require('../security/webPolicy').mayLeaveUnattended(label, channel),
         source: procedure.name,
         family: procedure.family || null,
+        surfaces: procedure.surface ? [procedure.surface] : [],
         async run(bound, context = {}) {
             const procedureRunner = require('./procedureRunner');
 
@@ -243,6 +254,7 @@ function fromFamily(family, procedures) {
         produces: first.produces,
         disclosurePolicy: first.disclosurePolicy,
         source: family,
+        surfaces: [...new Set(procedures.map(p => p.surface).filter(Boolean))],
         dispatch: chosen,
         async run(bound, context = {}) {
             const member = chosen(bound);

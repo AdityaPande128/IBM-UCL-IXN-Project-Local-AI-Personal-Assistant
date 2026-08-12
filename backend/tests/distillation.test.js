@@ -676,6 +676,50 @@ test('a name is not a correspondent', async () => {
     } finally { world.cleanup(); }
 });
 
+test('a recipe learned on Gmail declines when the mail lives on Outlook', async () => {
+    const world = scratch();
+    const configPath = path.join(world.dir, 'config.json');
+    fs.writeFileSync(configPath, JSON.stringify({ mail: { provider: 'outlook' } }));
+    const hadPath = process.env.JARVIS_CONFIG_PATH;
+    process.env.JARVIS_CONFIG_PATH = configPath;
+    try {
+        const recipe = procedureStore.save({
+            name: 'mail-read-latest', surface: 'mail.google.com',
+            start_url: 'https://mail.google.com/mail/u/0/#inbox',
+            description: 'read the latest message', parameters: {},
+            steps: [{ action: 'navigate', url: 'https://mail.google.com/mail/u/0/#inbox' }]
+        });
+
+        await assert.rejects(
+            () => procedureRunner.replay(recipe, {}, {
+                label: USER, trace: false,
+                request: 'what did Sandhya ask me about in her latest email?'
+            }),
+            err => err.notApplicable && /learned on mail\.google\.com/.test(err.message));
+    } finally {
+        if (hadPath === undefined) delete process.env.JARVIS_CONFIG_PATH;
+        else process.env.JARVIS_CONFIG_PATH = hadPath;
+        world.cleanup();
+    }
+});
+
+test('a capability remembers the surfaces its recipes were learned on', () => {
+    const world = scratch();
+    try {
+        procedureStore.save(member('post-read', 'read',
+            [{ action: 'navigate', url: 'https://mail.example/in' }]));
+        procedureStore.save(member('post-send', 'send',
+            [{ action: 'fill', name: 'Body', slot: 'words' }],
+            { words: { type: 'string', required: true, description: 'what to say' } }));
+
+        capabilityGraph.reset();
+        assert.deepStrictEqual([...capabilityGraph.get('procedure.post').surfaces],
+            ['mail.example']);
+        assert.deepStrictEqual([...capabilityGraph.get('procedure.post-read').surfaces],
+            ['mail.example']);
+    } finally { capabilityGraph.reset(); world.cleanup(); }
+});
+
 test('an address the user never said is refused even though it is well formed', async () => {
     const world = scratch();
     try {

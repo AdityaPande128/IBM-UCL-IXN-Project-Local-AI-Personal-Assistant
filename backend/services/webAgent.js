@@ -719,6 +719,8 @@ function stamps(text) {
     return [...found];
 }
 
+const GROUNDED_CHARS = 5;
+
 function substantive(text) {
     return String(text || '')
         .replace(/[^\p{L}\p{N}\s]+/gu, ' ')

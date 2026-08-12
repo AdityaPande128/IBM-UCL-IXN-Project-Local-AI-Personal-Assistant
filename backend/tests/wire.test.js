@@ -16,6 +16,15 @@ fs.mkdirSync(process.env.JARVIS_LOGS_DIR, { recursive: true });
 fs.writeFileSync(path.join(process.env.JARVIS_LOGS_DIR, 'backend.log'), 'boot ok\n');
 process.env.JARVIS_CONFIG_PATH = path.join(scratch, 'config.json');
 fs.copyFileSync(path.resolve(__dirname, '../../config.json'), process.env.JARVIS_CONFIG_PATH);
+{
+    // The fixture must not inherit this machine's live choices: the mail
+    // provider test asserts the default, and the budget test assumes the
+    // hardware-default tiers, not whatever engine is currently selected.
+    const seeded = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
+    delete seeded.mail;
+    if (seeded.models) delete seeded.models.tiers;
+    fs.writeFileSync(process.env.JARVIS_CONFIG_PATH, JSON.stringify(seeded, null, 2));
+}
 process.env.JARVIS_SETTINGS_RESTART = 'off';
 process.env.JARVIS_CHECKPOINTS_DIR = path.join(scratch, 'checkpoints');
 process.env.JARVIS_DOWNLOADS_PATH = path.join(scratch, 'downloads.json');

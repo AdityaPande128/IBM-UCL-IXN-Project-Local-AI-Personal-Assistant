@@ -1,4 +1,6 @@
 const browser = require('./browser');
+const configReader = require('../utils/configReader');
+const mailProvider = require('./mailProvider');
 const perception = require('./pagePerception');
 const procedureStore = require('./procedureStore');
 const traceStore = require('./traceStore');
@@ -78,6 +80,13 @@ async function replay(target, args = {}, options = {}) {
 
     if (options.request && SAYS_DRAFT.test(options.request) && pressesSend(procedure)) {
         throw decline(`${procedure.name} sends, and the request asked for a draft`);
+    }
+
+    const config = configReader.readConfig();
+    if (!mailProvider.surfaceApplies(procedure.surface, options.request || '', config)) {
+        const chosen = mailProvider.forRequest(options.request || '', config);
+        throw decline(`${procedure.name} was learned on ${procedure.surface}, `
+            + `and this request's mail lives on ${chosen.label}`);
     }
 
     const mandate = webPolicy.mandateFrom(options.request || '', label);

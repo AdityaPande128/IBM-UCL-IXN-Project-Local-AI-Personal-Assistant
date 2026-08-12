@@ -434,8 +434,14 @@ async function selectCapabilities(request, options = {}) {
 
     const everyProcedure = all.filter(c => c.kind === 'procedure');
     const ids = new Set(everyProcedure.map(c => c.id));
+    // A recipe learned on one mail provider is not on offer when the request
+    // steers to another; with no recipes for the chosen mailbox, mail routes
+    // through web.browse the way it did before recipes existed.
     const procedures = negativeMemory.offerable(
-        everyProcedure.filter(c => !(c.family && ids.has(`procedure.${c.family}`))));
+        everyProcedure
+            .filter(c => !(c.family && ids.has(`procedure.${c.family}`)))
+            .filter(c => !(c.surfaces || []).length
+                || c.surfaces.some(s => mailProvider.surfaceApplies(s, request, config))));
 
     const skillRegistry = require('./skillRegistry');
     const manifests = skills

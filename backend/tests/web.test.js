@@ -361,6 +361,24 @@ test("a forwarded message's own headers are not this message's", () => {
         'what did Sandhya ask about?'), null);
 });
 
+test("words quoted back below a wrote: line are not this message's", () => {
+    const PAGE = {
+        text: 'Aditya Pande <aditya.pande.128@gmail.com>  12 Aug 2026, 17:38  to me\n'
+            + 'Haha, thanks!\n'
+            + 'On Wed, 12 Aug, 2026, 17:37 Aditya Pande, <aditya.pande.909@outlook.com> wrote:\n'
+            + 'Yo\nHere is the itinerary for Lisbon you wanted\nThere u go adi'
+    };
+    const ASKED = 'what did aditya.pande.128@gmail.com say in their latest email?';
+
+    const borrowed = webAgent.ungrounded(
+        'They sent you the itinerary for Lisbon.', PAGE, ASKED);
+    assert.match(String(borrowed), /wrote:/);
+    assert.match(String(borrowed), /itinerary|lisbon/);
+
+    assert.strictEqual(webAgent.ungrounded(
+        'They said "Haha, thanks!" and nothing more.', PAGE, ASKED), null);
+});
+
 test('a machine that sends in someone\'s name is not replied to', () => {
     assert.strictEqual(webAgent.automated({
         text: 'drive-shares-dm-noreply@google.com to me — Share a document? '

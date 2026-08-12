@@ -27,6 +27,21 @@ function accounts(config) {
     return list;
 }
 
+function hostOf(url) {
+    try { return new URL(url).hostname; } catch { return null; }
+}
+
+const MAIL_HOSTS = new Set(Object.values(PROVIDERS).map(p => hostOf(p.url)));
+
+// A recipe is only as portable as the mailbox it was learned on. A procedure
+// surfaced on one provider's host neither replays nor gets offered when the
+// request steers to a different provider; the work falls back to browsing
+// the mailbox the user actually chose.
+function surfaceApplies(surface, request, config) {
+    if (!MAIL_HOSTS.has(surface)) return true;
+    return surface === hostOf(forRequest(request, config).url);
+}
+
 // Steering is deliberately narrow: the account name must qualify a mail word
 // ("work mail", "uni inbox", "the personal account"). A bare mention steers
 // nothing — "tell my work colleague" is about a colleague, not a mailbox —
@@ -42,4 +57,4 @@ function forRequest(text, config) {
     return current(config);
 }
 
-module.exports = { PROVIDERS, current, accounts, forRequest };
+module.exports = { PROVIDERS, MAIL_HOSTS, current, accounts, forRequest, surfaceApplies };

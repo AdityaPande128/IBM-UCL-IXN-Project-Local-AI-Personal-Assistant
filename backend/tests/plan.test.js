@@ -792,6 +792,23 @@ test('a named account steers the request to its own mailbox', () => {
         'the steered mailbox address must appear in the prompt');
 });
 
+test('a recipe surface applies only to the mailbox the request steers to', () => {
+    const outlook = { mail: { provider: 'outlook' } };
+    assert.ok(mailProvider.surfaceApplies('mail.google.com', '', {}));
+    assert.ok(!mailProvider.surfaceApplies('mail.google.com', '', outlook));
+    assert.ok(mailProvider.surfaceApplies('outlook.live.com', '', outlook));
+
+    // A surface that is not a mailbox never participates.
+    assert.ok(mailProvider.surfaceApplies('calendar.google.com', '', outlook));
+    assert.ok(mailProvider.surfaceApplies(undefined, '', outlook));
+
+    // Account steering decides applicability per request, not per config.
+    const steered = { mail: { provider: 'gmail', accounts: { work: 'outlook-work' } } };
+    assert.ok(!mailProvider.surfaceApplies('mail.google.com', 'check my work mail', steered));
+    assert.ok(mailProvider.surfaceApplies('outlook.office.com', 'check my work mail', steered));
+    assert.ok(mailProvider.surfaceApplies('mail.google.com', 'reply to Sam saying hi', steered));
+});
+
 const failureTaxonomy = require('../services/failureTaxonomy');
 const negativeMemory = require('../services/negativeMemory');
 
