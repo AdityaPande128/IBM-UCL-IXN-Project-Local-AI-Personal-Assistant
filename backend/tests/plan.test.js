@@ -792,6 +792,65 @@ test('a named account steers the request to its own mailbox', () => {
         'the steered mailbox address must appear in the prompt');
 });
 
+test('a plan that stops at gathered passages gets its answer step appended', () => {
+    const graph = fakeGraph({
+        answer: {
+            tier: 1,
+            description: 'answer a question from passages',
+            inputs: {
+                question: { type: 'string', required: true },
+                passages: { type: 'passage[]', required: false }
+            },
+            outputs: { text: { type: 'string' } },
+            produces: labels.label(ORIGIN.GENERATED, SENSITIVITY.PUBLIC),
+            run: async () => ({ text: 'ok' })
+        }
+    });
+
+    const plan = { goal: 'what does the file say?', steps: [
+        { id: 's1', capability: 'read', inputs: { paths: ['/tmp/a.md'] } }
+    ] };
+    const check = planner.validatePlan(plan, { graph, question: 'what does the file say?' });
+    assert.ok(check.valid, JSON.stringify(check.errors));
+    assert.ok(check.repairs.includes('appended_answer'));
+    assert.strictEqual(plan.steps.length, 2);
+    assert.strictEqual(plan.steps[1].capability, 'answer');
+    assert.strictEqual(plan.steps[1].inputs.passages, '$s1.passages');
+    assert.strictEqual(plan.steps[1].inputs.question, 'what does the file say?');
+
+    // With no question there is nothing to append, and the plan stays invalid.
+    const bare = { goal: 'what does the file say?', steps: [
+        { id: 's1', capability: 'read', inputs: { paths: ['/tmp/a.md'] } }
+    ] };
+    assert.ok(!planner.validatePlan(bare, { graph }).valid);
+});
+
+test('each mailbox spells its own search URL', () => {
+    assert.strictEqual(
+        mailProvider.searchUrl('https://mail.google.com/mail/u/0/#inbox', 'from:x@y.com'),
+        'https://mail.google.com/mail/u/0/#search/from%3Ax%40y.com');
+    assert.strictEqual(
+        mailProvider.searchUrl('https://outlook.live.com/mail/', 'from:x@y.com'),
+        'https://outlook.live.com/mail/0/search?q=from%3Ax%40y.com');
+    assert.strictEqual(
+        mailProvider.searchUrl('https://outlook.office.com/mail/', 'to:x@y.com'),
+        'https://outlook.office.com/mail/search?q=to%3Ax%40y.com');
+
+    // Outlook cannot tell from: and to: apart in a plain search — the sent
+    // side scopes to the Sent Items folder. Gmail needs no folder.
+    assert.strictEqual(
+        mailProvider.searchUrl('https://outlook.live.com/mail/', 'to:x@y.com', 'sent'),
+        'https://outlook.live.com/mail/0/sentitems?q=to%3Ax%40y.com');
+    assert.strictEqual(
+        mailProvider.searchUrl('https://mail.google.com/mail/u/0/', 'to:x@y.com', 'sent'),
+        'https://mail.google.com/mail/u/0/#search/to%3Ax%40y.com');
+
+    // An unnamed host gets no URL: the loop searches through the page's own
+    // box instead of navigating to a guessed shape that renders nothing.
+    assert.strictEqual(mailProvider.searchUrl('https://mail.example/inbox', 'x'), null);
+    assert.strictEqual(mailProvider.searchUrl('not a url', 'x'), null);
+});
+
 test('a recipe surface applies only to the mailbox the request steers to', () => {
     const outlook = { mail: { provider: 'outlook' } };
     assert.ok(mailProvider.surfaceApplies('mail.google.com', '', {}));

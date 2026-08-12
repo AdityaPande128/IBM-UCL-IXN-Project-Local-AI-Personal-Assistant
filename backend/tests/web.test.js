@@ -361,6 +361,25 @@ test("a forwarded message's own headers are not this message's", () => {
         'what did Sandhya ask about?'), null);
 });
 
+test('dictated words land in the message body, not the first empty box', () => {
+    const compose = { elements: [
+        { ref: 'a1', role: 'textbox', name: 'To', value: 'x@y.com' },
+        { ref: 'a2', role: 'textbox', name: 'Add a subject', value: '' },
+        { ref: 'a3', role: 'textbox', name: 'Message body', value: '' }
+    ] };
+    const box = webAgent.boxFor(compose, 'Could we meet at Primrose Hill at 9 PM?', true);
+    assert.strictEqual(box.ref, 'a3');
+
+    // An address still goes to the recipients box, and a page with no body
+    // box keeps the old first-empty behaviour.
+    const empty = { elements: [
+        { ref: 'a2', role: 'textbox', name: 'Add a subject', value: '' },
+        { ref: 'a4', role: 'textbox', name: 'To', value: '' }
+    ] };
+    assert.strictEqual(webAgent.boxFor(empty, 'x@y.com', false).ref, 'a4');
+    assert.strictEqual(webAgent.boxFor(empty, 'hello there my friend', false).ref, 'a2');
+});
+
 test("words quoted back below a wrote: line are not this message's", () => {
     const PAGE = {
         text: 'Aditya Pande <aditya.pande.128@gmail.com>  12 Aug 2026, 17:38  to me\n'

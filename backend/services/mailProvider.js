@@ -33,6 +33,36 @@ function hostOf(url) {
 
 const MAIL_HOSTS = new Set(Object.values(PROVIDERS).map(p => hostOf(p.url)));
 
+// Each mailbox spells a search URL its own way; the query syntax (from:, to:)
+// is common to both. A host not named here gets no URL — guessing a shape
+// navigates to a dead page and burns the loop's budget, while the ladder
+// search through the page's own box already handles an unknown mailbox.
+//
+// The 'sent' scope exists because Outlook searches conversations: from: and
+// to: return the same threads, and only the Sent Items folder isolates what
+// the user themselves sent. Gmail search is message-scoped and needs no
+// folder.
+const SEARCH_URLS = {
+    'mail.google.com': (origin, query) =>
+        `${origin}/mail/u/0/#search/${encodeURIComponent(query)}`,
+    'outlook.live.com': (origin, query, scope) =>
+        `${origin}/mail/0/${scope === 'sent' ? 'sentitems' : 'search'}`
+        + `?q=${encodeURIComponent(query)}`,
+    'outlook.office.com': (origin, query, scope) =>
+        `${origin}/mail/${scope === 'sent' ? 'sentitems' : 'search'}`
+        + `?q=${encodeURIComponent(query)}`
+};
+
+function searchUrl(pageUrl, query, scope) {
+    try {
+        const url = new URL(pageUrl);
+        const build = SEARCH_URLS[url.hostname];
+        return build ? build(url.origin, query, scope) : null;
+    } catch {
+        return null;
+    }
+}
+
 // A recipe is only as portable as the mailbox it was learned on. A procedure
 // surfaced on one provider's host neither replays nor gets offered when the
 // request steers to a different provider; the work falls back to browsing
@@ -57,4 +87,7 @@ function forRequest(text, config) {
     return current(config);
 }
 
-module.exports = { PROVIDERS, MAIL_HOSTS, current, accounts, forRequest, surfaceApplies };
+module.exports = {
+    PROVIDERS, MAIL_HOSTS,
+    current, accounts, forRequest, surfaceApplies, searchUrl
+};

@@ -869,6 +869,14 @@ function boxFor(observation, value, isLast) {
             && !String(element.value || '').trim());
         if (recipient) return recipient;
     }
+    // Dictated words go into the message body, not into whichever empty box
+    // the tree offers first — on some mailboxes that is the subject line.
+    const body = ((observation && observation.elements) || []).find(element =>
+        holdsText(element) && !element.disabled && !element.sensitive
+        && A_BODY.test(element.name || '')
+        && !ASSISTANT_BOX.test(element.name || '')
+        && !String(element.value || '').trim());
+    if (body) return body;
     return writableFor(observation, isLast);
 }
 
@@ -970,7 +978,7 @@ function asksWhetherReplied(goal) {
     return ASKS_REPLIED.test(String(goal || ''));
 }
 
-const ROW_DATE = /\b(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2}\s*(?:AM|PM)|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2})\b/i;
+const ROW_DATE = /\b(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}:\d{2}(?:\s*(?:AM|PM))?|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2})\b/i;
 
 function newestDate(observation) {
     const text = String((observation && observation.text) || '');
@@ -1222,6 +1230,28 @@ async function browse(goal, options = {}) {
         return false;
     };
 
+    // A message is not sent because Send was pressed; it is sent when the
+    // compose is gone. A Send control still on the page, or a row that says a
+    // draft is being edited, means the click did not land — the message is a
+    // draft, whatever the click reported. Field values are not consulted: the
+    // pixels lane cannot read a web editor's value out of the AX tree.
+    const sendLanded = async () => {
+        if (!mandate.has('send') || !performed.has('send')) return true;
+
+        const seen = await surface.observe();
+        contextLabel = labels.join(contextLabel, seen.label);
+        const elements = (seen.elements || []);
+        const composing = elements.some(sends)
+            || elements.some(element => /^editing\b/i.test(String(element.name || '')));
+        if (!composing) return true;
+
+        performed.delete('send');
+        history.push('Send was pressed, but the compose is still on the page — the message '
+            + 'has not gone, it is sitting as a draft. Press its Send control; do not '
+            + 'claim this is done while an editor is still open.');
+        return false;
+    };
+
     // Every download the browser produced passes the policy gate here: what
     // was asked for lands in the download folder, everything else is cancelled
     // where it sits. A page cannot put bytes on this machine by offering them.
@@ -1462,16 +1492,17 @@ async function browse(goal, options = {}) {
         if (asksWhetherReplied(goal) && !mandate.size && intent.query) {
             const who = (intent.query.match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
                 || intent.query.replace(/^\w+:/, '').trim();
-            const look = async query => {
-                await surface.navigate(`${safeOrigin(observation.url)}/mail/u/0/#search/`
-                    + encodeURIComponent(query));
+            const look = async (query, scope) => {
+                const target = require('./mailProvider').searchUrl(observation.url, query, scope);
+                if (!target) throw new Error('no search URL for this mailbox');
+                await surface.navigate(target);
                 await surface.settle().catch(() => null);
                 return surface.observe();
             };
 
             try {
                 const theirs = await look(`from:${who}`);
-                const mine = await look(`to:${who}`);
+                const mine = await look(`to:${who}`, 'sent');
                 const back = newestDate(theirs);
                 const sent = newestDate(mine);
 
@@ -1602,7 +1633,7 @@ async function browse(goal, options = {}) {
         if (status === 'success' && answer) {
         }
 
-        if (complete() && await bookingLanded()) {
+        if (complete() && await bookingLanded() && await sendLanded()) {
             status = 'success';
             answer = intent.completes
                 || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
@@ -1618,7 +1649,7 @@ async function browse(goal, options = {}) {
 
             await carryOut();
             await admitDownloads();
-            if (complete() && await bookingLanded()) {
+            if (complete() && await bookingLanded() && await sendLanded()) {
                 status = 'success';
                 answer = intent.completes
                     || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
@@ -1664,7 +1695,7 @@ async function browse(goal, options = {}) {
 
             const finished = complete()
                 && (decision.action === 'give_up' || decision.action === 'done'
-                    ? await bookingLanded() : true);
+                    ? await bookingLanded() && await sendLanded() : true);
 
             const { undone, short } = outstanding();
 
@@ -1955,7 +1986,8 @@ async function browse(goal, options = {}) {
 
             const actedMs = Date.now() - stepStartedAt;
 
-            if (outcome.ok && outcome.mandated && complete() && await bookingLanded()) {
+            if (outcome.ok && outcome.mandated && complete()
+                && await bookingLanded() && await sendLanded()) {
                 status = 'success';
                 answer = `Done: ${[...performed].join(', ')}`
                     + (filled.length ? ` — ${filled.join(', ')} filled.` : '.');
@@ -2111,7 +2143,7 @@ async function browse(goal, options = {}) {
 
             // The loop must never exit on a completion nobody verified: claim
             // it if it stands up, or withdraw the unlanded part and carry on.
-            if (complete() && await bookingLanded()) {
+            if (complete() && await bookingLanded() && await sendLanded()) {
                 status = 'success';
                 answer = intent.completes
                     || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;

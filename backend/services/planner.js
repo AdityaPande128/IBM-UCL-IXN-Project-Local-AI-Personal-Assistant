@@ -255,7 +255,7 @@ function referencesIn(value, found = []) {
     return found;
 }
 
-function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS } = {}) {
+function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, question = '' } = {}) {
     const errors = [];
     const repairs = [];
     const missing = [];
@@ -357,6 +357,7 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS } 
         seen.set(step.id, capability);
     });
 
+    const unused = [];
     parsed.steps.forEach((step, index) => {
         const capability = seen.get(step.id);
         if (!capability) return;
@@ -367,14 +368,36 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS } 
             || consumed.has(step.id)
             || (isLast && 'text' in capability.outputs);
 
-        if (!useful) {
-            errors.push(
-                `steps[${index}]: ${step.id} (${capability.id}) produces ` +
-                `${Object.keys(capability.outputs).join(', ')} that nothing uses` +
-                (isLast ? ' and does not end the plan with an answer' : '')
-            );
-        }
+        if (!useful) unused.push({ index, step, capability, isLast });
     });
+
+    // A plan that stops at gathered passages is completed, not rejected: the
+    // answer step it forgot is appended deterministically, the way a stronger
+    // planner ends the same plan unprompted.
+    const tail = unused[unused.length - 1];
+    if (unused.length === 1 && tail.isLast
+        && 'passages' in (tail.capability.outputs || {})
+        && String(question).trim()
+        && graph.resolveId('answer')
+        && parsed.steps.length < maxSteps) {
+        let id = `s${parsed.steps.length + 1}`;
+        while (seen.has(id)) id = `${id}a`;
+        parsed.steps.push({
+            id, capability: 'answer',
+            inputs: { question: String(question).trim(), passages: `$${tail.step.id}.passages` },
+            reason: 'read the answer out of what was gathered'
+        });
+        repairs.push('appended_answer');
+        unused.pop();
+    }
+
+    for (const entry of unused) {
+        errors.push(
+            `steps[${entry.index}]: ${entry.step.id} (${entry.capability.id}) produces ` +
+            `${Object.keys(entry.capability.outputs).join(', ')} that nothing uses` +
+            (entry.isLast ? ' and does not end the plan with an answer' : '')
+        );
+    }
 
     if (parsed.steps.length === 0 && declaredMissing.length === 0) {
         errors.push('empty_plan');
@@ -492,7 +515,7 @@ async function plan(request, options = {}) {
             lastErrors = ['json_parse_error'];
             console.warn(`[Planner] Attempt ${attempt}: response was not parseable JSON.`);
         } else {
-            const check = validatePlan(parsed, { graph });
+            const check = validatePlan(parsed, { graph, question: request });
 
             lastMissing = [...check.missing, ...check.declaredMissing];
 
