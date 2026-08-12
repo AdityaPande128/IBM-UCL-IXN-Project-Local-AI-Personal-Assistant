@@ -9,11 +9,16 @@
   },
   "models": {
     "budget_gb": 14,
+    "budget_by_class": {
+      "8": 4.5,
+      "16": 9,
+      "24": 14
+    },
     "voice_reserve_gb": 1.83,
     "tiers": {
       "guard": {
-        "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-        "policy": "pinned"
+        "model": "mlx-community/granite-4.1-8b-4bit",
+        "policy": "resident"
       },
       "engine": {
         "model": "mlx-community/granite-4.1-8b-4bit",
@@ -29,15 +34,68 @@
       "mlx-community/granite-4.1-8b-4bit": 4.879,
       "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit": 7.739
     },
+    "catalog": {
+      "engine": [
+        {
+          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+          "label": "Qwen3 4B",
+          "ram_gb": 2.1,
+          "disk_gb": 2.3,
+          "blurb": "Fast and light; runs comfortably on any supported Mac."
+        },
+        {
+          "model": "mlx-community/granite-4.1-8b-4bit",
+          "label": "Granite 8B",
+          "ram_gb": 4.9,
+          "disk_gb": 4.6,
+          "blurb": "A stronger all-round assistant for machines with room to spare."
+        }
+      ],
+      "smith": [
+        {
+          "model": "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
+          "label": "Qwen Coder 3B",
+          "ram_gb": 1.9,
+          "disk_gb": 1.8,
+          "blurb": "The lightest improver; fine for simple skills."
+        },
+        {
+          "model": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
+          "label": "Qwen Coder 7B",
+          "ram_gb": 4.4,
+          "disk_gb": 4.3,
+          "blurb": "A balanced improver for mid-sized machines."
+        },
+        {
+          "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+          "label": "Qwen Coder 14B",
+          "ram_gb": 7.8,
+          "disk_gb": 8.1,
+          "blurb": "The most capable improver; builds the most reliable skills."
+        }
+      ]
+    },
+    "voice": {
+      "stt": {
+        "model": "mlx-community/whisper-large-v3-turbo",
+        "label": "Whisper Large v3 Turbo",
+        "disk_gb": 1.62
+      },
+      "tts": {
+        "model": "mlx-community/Kokoro-82M-bf16",
+        "label": "Kokoro",
+        "disk_gb": 0.35
+      }
+    },
     "hardware_defaults": {
       "8": {
         "guard": {
           "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-          "policy": "pinned"
+          "policy": "resident"
         },
         "engine": {
           "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-          "policy": "pinned"
+          "policy": "resident"
         },
         "smith": {
           "model": "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
@@ -46,8 +104,8 @@
       },
       "16": {
         "guard": {
-          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-          "policy": "pinned"
+          "model": "mlx-community/granite-4.1-8b-4bit",
+          "policy": "resident"
         },
         "engine": {
           "model": "mlx-community/granite-4.1-8b-4bit",
@@ -60,8 +118,8 @@
       },
       "24": {
         "guard": {
-          "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-          "policy": "pinned"
+          "model": "mlx-community/granite-4.1-8b-4bit",
+          "policy": "resident"
         },
         "engine": {
           "model": "mlx-community/granite-4.1-8b-4bit",

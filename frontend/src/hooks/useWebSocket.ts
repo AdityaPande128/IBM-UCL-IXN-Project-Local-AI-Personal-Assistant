@@ -62,6 +62,8 @@ export interface AbilitiesData {
     voice_reserve_gb: number | null;
     measured_gb: Record<string, number>;
   };
+  catalog?: CatalogData;
+  profile?: ProfileData;
 }
 
 export interface SettingsUpdate {
@@ -193,6 +195,86 @@ export interface PermissionsData {
   sandbox_root: string;
 }
 
+export interface ProfileData {
+  name: string;
+  mode: "jarvis" | "openclaw";
+  theme: "dark" | "light";
+  improvement: boolean;
+  voice: { enabled: boolean; tts: boolean };
+  onboarded: boolean;
+}
+
+export interface CatalogModel {
+  model: string;
+  label: string;
+  ram_gb: number;
+  disk_gb: number;
+  blurb?: string;
+  downloaded: boolean;
+  recommended: boolean;
+}
+
+export interface VoiceModel {
+  model: string;
+  label: string;
+  disk_gb: number;
+  downloaded: boolean;
+}
+
+export interface CatalogData {
+  machine: { total_gb: number; class: number | null; free_disk_gb: number | null };
+  budget_gb: number | null;
+  voice_reserve_gb: number | null;
+  engines: CatalogModel[];
+  smiths: CatalogModel[];
+  voice: { stt: VoiceModel | null; tts: VoiceModel | null };
+}
+
+export interface DownloadJob {
+  model: string;
+  kind: string;
+  status: "queued" | "downloading" | "done" | "stopped" | "error";
+  received_bytes: number;
+  total_bytes: number | null;
+  error: string | null;
+}
+
+export interface DownloadsData {
+  active: string | null;
+  queue: DownloadJob[];
+}
+
+export interface OnboardingData {
+  profile: ProfileData;
+  catalog: CatalogData;
+  downloads: DownloadsData;
+  voice_ready: boolean;
+}
+
+export interface OnboardingApplyPayload {
+  name: string;
+  theme: "dark" | "light";
+  mode: "jarvis" | "openclaw";
+  improvement: boolean;
+  engine: string;
+  smith?: string | null;
+  voice: { enabled: boolean; tts: boolean };
+}
+
+export interface OnboardingApplyResult {
+  status: string;
+  error?: string;
+  restarting?: boolean;
+}
+
+export interface ProfileUpdate {
+  name?: string;
+  mode?: "jarvis" | "openclaw";
+  theme?: "dark" | "light";
+  improvement?: boolean;
+  voice?: { enabled?: boolean; tts?: boolean };
+}
+
 export interface CheckpointEntry {
   name: string;
   createdAt: string;
@@ -260,6 +342,15 @@ interface UseWebSocketReturn {
   bundleResult: BundleResult | null;
   exportBundle: () => void;
   importBundle: (path: string) => void;
+  onboarding: OnboardingData | null;
+  downloads: DownloadsData | null;
+  voiceReady: boolean;
+  onboardingApply: OnboardingApplyResult | null;
+  requestOnboarding: () => void;
+  applyOnboarding: (payload: OnboardingApplyPayload) => void;
+  completeOnboarding: () => void;
+  updateProfile: (update: ProfileUpdate) => void;
+  downloadAction: (action: "start" | "stop" | "status", model?: string) => void;
 }
 
 import { config } from "../config";
@@ -324,6 +415,10 @@ export function useWebSocket(): UseWebSocketReturn {
   const [permissions, setPermissions] = useState<PermissionsData | null>(null);
   const [checkpointResult, setCheckpointResult] = useState<CheckpointResult | null>(null);
   const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
+  const [onboarding, setOnboarding] = useState<OnboardingData | null>(null);
+  const [downloads, setDownloads] = useState<DownloadsData | null>(null);
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [onboardingApply, setOnboardingApply] = useState<OnboardingApplyResult | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
@@ -353,7 +448,11 @@ export function useWebSocket(): UseWebSocketReturn {
           path: config.security?.socket_token_path ?? "",
         });
       } catch {
-        token = null;
+        // Outside the Tauri shell (dev preview) the token file is unreachable;
+        // a dev build may carry the token through the environment instead.
+        token = import.meta.env.DEV
+          ? ((import.meta.env.VITE_SOCKET_TOKEN as string | undefined) ?? null)
+          : null;
       }
       if (token && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "auth", token }));
@@ -373,7 +472,53 @@ export function useWebSocket(): UseWebSocketReturn {
           setConnected(true);
           setOpenclawConnected(msg.openclaw || false);
           setSettingsResult(null);
+          // The profile decides whether the app opens into onboarding, so it
+          // is fetched on every (re)connect rather than on demand.
+          ws.send(JSON.stringify({ type: "onboarding" }));
           addMessage("system", msg.message);
+          return;
+        }
+        if (msg.type === "onboarding_result") {
+          const { type: _ignored, ...data } = msg;
+          setOnboarding(data as OnboardingData);
+          setDownloads((data as OnboardingData).downloads);
+          setVoiceReady(Boolean(msg.voice_ready));
+          return;
+        }
+        if (msg.type === "onboarding_apply_result") {
+          setOnboardingApply({
+            status: msg.status,
+            error: msg.error,
+            restarting: msg.restarting,
+          });
+          return;
+        }
+        if (msg.type === "onboarding_complete_result" || msg.type === "profile_update_result") {
+          if (msg.status === "applied" && msg.profile) {
+            setOnboarding((prev) =>
+              prev ? { ...prev, profile: msg.profile as ProfileData } : prev
+            );
+          }
+          return;
+        }
+        if (msg.type === "download_status") {
+          setDownloads({ active: msg.active ?? null, queue: msg.queue ?? [] });
+          setVoiceReady(Boolean(msg.voice_ready));
+          return;
+        }
+        if (msg.type === "download_progress" && msg.job) {
+          const job = msg.job as DownloadJob;
+          setDownloads((prev) => {
+            const queue = prev?.queue ?? [];
+            const known = queue.some((j) => j.model === job.model);
+            return {
+              active: job.status === "downloading" ? job.model
+                : prev?.active === job.model ? null : prev?.active ?? null,
+              queue: known
+                ? queue.map((j) => (j.model === job.model ? job : j))
+                : [...queue, job],
+            };
+          });
           return;
         }
         if (msg.type === "activity") {
@@ -726,6 +871,42 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const requestOnboarding = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "onboarding" }));
+    }
+  }, []);
+
+  const applyOnboarding = useCallback((payload: OnboardingApplyPayload) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      setOnboardingApply({ status: "applying" });
+      wsRef.current.send(JSON.stringify({ type: "onboarding_apply", ...payload }));
+    }
+  }, []);
+
+  const completeOnboarding = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "onboarding_complete" }));
+    }
+  }, []);
+
+  const updateProfile = useCallback((update: ProfileUpdate) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "profile_update", ...update }));
+    }
+  }, []);
+
+  const downloadAction = useCallback(
+    (action: "start" | "stop" | "status", model?: string) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({ type: "download", action, ...(model ? { model } : {}) })
+        );
+      }
+    },
+    []
+  );
+
   return {
     connected,
     openclawConnected,
@@ -770,5 +951,14 @@ export function useWebSocket(): UseWebSocketReturn {
     bundleResult,
     exportBundle,
     importBundle,
+    onboarding,
+    downloads,
+    voiceReady,
+    onboardingApply,
+    requestOnboarding,
+    applyOnboarding,
+    completeOnboarding,
+    updateProfile,
+    downloadAction,
   };
 }

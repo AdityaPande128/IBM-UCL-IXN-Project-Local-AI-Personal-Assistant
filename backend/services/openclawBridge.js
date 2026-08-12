@@ -10,6 +10,7 @@ const traceStore = require('./traceStore');
 const routerTraces = require('./routerTraces');
 const proposals = require('./proposals');
 const activityBus = require('./activityBus');
+const profile = require('./profile');
 
 const OPENCLAW_TIMEOUT_MS = 900000;
 const MAX_OPENCLAW_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -326,6 +327,17 @@ async function executeIntent(intentText, options = {}) {
         }
 
         case router.ACTIONS.GENERATE:
+            // The improvement loop is the user's choice, made at onboarding
+            // and changeable in settings; off means no new skills, ever.
+            if (!profile.improvementEnabled()) {
+                outcome = {
+                    status: 'refused',
+                    response: 'Building new skills is switched off. Turn on '
+                        + 'self-improvement in settings if you want me to learn this.',
+                    action: 'generation_off'
+                };
+                break;
+            }
             outcome = await composeThenGenerate(intentText, options);
             break;
 

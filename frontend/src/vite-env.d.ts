@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 declare const __JARVIS_CONFIG__: {
   model_id: string;
   stt_model: string;

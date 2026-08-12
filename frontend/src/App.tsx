@@ -9,10 +9,17 @@ import { InboxView } from "./components/InboxView";
 import { MemoryView } from "./components/MemoryView";
 import { AuditView } from "./components/AuditView";
 import { PermissionsView } from "./components/PermissionsView";
+import { Onboarding } from "./components/Onboarding";
+import {
+  DownloadsPanel,
+  downloadsPending,
+  downloadsPercent,
+} from "./components/DownloadsPanel";
 import { useWebSocket } from "./hooks/useWebSocket";
 import { useAudioRecorder } from "./hooks/useAudioRecorder";
 import { useWakeWord } from "./hooks/useWakeWord";
 import { useServices, serviceBanner } from "./hooks/useServices";
+import { applyTheme } from "./theme";
 import "./index.css";
 
 function App() {
@@ -60,26 +67,72 @@ function App() {
     bundleResult,
     exportBundle,
     importBundle,
+    onboarding,
+    downloads,
+    voiceReady,
+    onboardingApply,
+    applyOnboarding,
+    completeOnboarding,
+    updateProfile,
+    downloadAction,
   } = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
   const { listening, startListening, stopListening } = useWakeWord(sendBinary);
   const services = useServices();
   const banner = serviceBanner(services);
   const [showActivity, setShowActivity] = useState(true);
+  const [showDownloads, setShowDownloads] = useState(false);
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const [wizardActive, setWizardActive] = useState(false);
   const [view, setView] = useState<
     "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions"
   >("chat");
 
+  const profile = onboarding?.profile ?? null;
+  // Before a profile exists nothing is gated; a recorded choice is what
+  // turns voice off.
+  const voiceEnabled = profile ? profile.voice.enabled : true;
+
   useEffect(() => {
     invoke("ensure_screen_access").catch(() => {});
   }, []);
+
+  // The wizard owns the screen from the moment a profile is missing until
+  // its hello animation has played — not merely until onboarded flips.
+  useEffect(() => {
+    if (onboarding && !onboarding.profile.onboarded) setWizardActive(true);
+  }, [onboarding]);
+
+  // The profile's theme is the durable copy; once onboarded it wins over
+  // whatever localStorage last saw.
+  useEffect(() => {
+    if (profile?.onboarded) applyTheme(profile.theme);
+  }, [profile?.onboarded, profile?.theme]);
 
   // The menu-bar dot mirrors the one state that opens the microphone.
   useEffect(() => {
     invoke("set_wake_indicator", { listening: listening && wakeMode }).catch(() => {});
   }, [listening, wakeMode]);
 
+  useEffect(() => {
+    if (!voiceNotice) return;
+    const timer = setTimeout(() => setVoiceNotice(null), 6000);
+    return () => clearTimeout(timer);
+  }, [voiceNotice]);
+
+  const voiceNotReady = () => {
+    setVoiceNotice(
+      "Voice isn't ready just yet — the speech models are still downloading. "
+      + "The mic lights up as soon as they finish."
+    );
+    downloadAction("status");
+  };
+
   const handleStart = async () => {
+    if (!voiceReady && profile) {
+      voiceNotReady();
+      return;
+    }
     await startRecording();
   };
 
@@ -97,10 +150,43 @@ function App() {
       setWakeMode(false);
       return;
     }
+    if (!voiceReady && profile) {
+      voiceNotReady();
+      return;
+    }
     if (await startListening()) {
       setWakeMode(true);
     }
   };
+
+  if (onboarding === null) {
+    return (
+      <div className="app">
+        <div className="splash">
+          <span className="chat-empty-orb" />
+          <div className="chat-empty-title">Jarvis</div>
+          <div className="chat-empty-hint">{banner ?? "Starting up…"}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (wizardActive) {
+    return (
+      <div className="app">
+        <Onboarding
+          connected={connected}
+          data={onboarding}
+          downloads={downloads}
+          applyResult={onboardingApply}
+          onApply={applyOnboarding}
+          onComplete={completeOnboarding}
+          onDownloadAction={downloadAction}
+          onFinished={() => setWizardActive(false)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -110,15 +196,29 @@ function App() {
           <span className="app-logo-text">Jarvis</span>
         </div>
         <div className="app-status">
-          <button
-            className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
-            onClick={toggleWake}
-            title={listening
-              ? "Listening for “Hey Jarvis” — click to close the microphone"
-              : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
-          >
-            {listening && wakeMode ? "● Listening" : "Hey Jarvis"}
-          </button>
+          {voiceEnabled && (
+            <button
+              className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
+              onClick={toggleWake}
+              title={listening
+                ? "Listening for “Hey Jarvis” — click to close the microphone"
+                : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
+            >
+              {listening && wakeMode ? "● Listening" : "Hey Jarvis"}
+            </button>
+          )}
+          {downloadsPending(downloads) && (
+            <button
+              className={`activity-toggle ${showDownloads ? "activity-toggle--on" : ""}`}
+              onClick={() => {
+                setShowDownloads((visible) => !visible);
+                downloadAction("status");
+              }}
+            >
+              Downloads
+              {downloadsPercent(downloads) !== null && ` ${downloadsPercent(downloads)}%`}
+            </button>
+          )}
           <button
             className={`activity-toggle ${view === "inbox" ? "activity-toggle--on" : ""}`}
             onClick={() => setView((v) => (v === "inbox" ? "chat" : "inbox"))}
@@ -165,16 +265,27 @@ function App() {
             <span className="status-chip-dot" />
             {connected ? "Online" : "Offline"}
           </span>
-          {connected && openclawConnected && (
+          {connected && (profile?.mode === "openclaw" || openclawConnected) && (
             <span className="status-chip status-chip--openclaw">
               <span className="status-chip-dot" />
-              OpenClaw
+              {profile?.mode === "openclaw" ? "OpenClaw mode" : "OpenClaw"}
             </span>
           )}
         </div>
       </header>
 
       {banner && <div className="service-banner">{banner}</div>}
+      {voiceNotice && <div className="service-banner">{voiceNotice}</div>}
+      {showDownloads && downloads && (
+        <DownloadsPanel
+          downloads={downloads}
+          onAction={downloadAction}
+          onChangeModel={() => {
+            setShowDownloads(false);
+            setView("abilities");
+          }}
+        />
+      )}
 
       <div className="app-body">
         <main className="app-main">
@@ -212,10 +323,16 @@ function App() {
               abilities={abilities}
               diagnostics={diagnostics}
               settingsResult={settingsResult}
+              profile={profile}
+              downloads={downloads}
+              incognito={memory?.incognito ?? false}
               onRefresh={requestAbilities}
               onRemoveSkill={removeSkill}
               onSaveDiagnostics={saveDiagnostics}
               onUpdateSettings={updateSettings}
+              onUpdateProfile={updateProfile}
+              onSetIncognito={setIncognito}
+              onDownloadAction={downloadAction}
             />
           )}
           {view === "audit" && (
@@ -262,12 +379,14 @@ function App() {
               Stop
             </button>
           )}
-          <PushToTalk
-            recording={recording}
-            disabled={!connected}
-            onStart={handleStart}
-            onStop={handleStop}
-          />
+          {voiceEnabled && (
+            <PushToTalk
+              recording={recording}
+              disabled={!connected}
+              onStart={handleStart}
+              onStop={handleStop}
+            />
+          )}
         </div>
       </footer>
     </div>

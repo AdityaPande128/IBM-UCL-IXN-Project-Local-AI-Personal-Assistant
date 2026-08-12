@@ -54,17 +54,18 @@ test('the shipped config resolves to a usable tier table on this machine', () =>
         path.resolve(__dirname, '../../config.json'), 'utf8'));
     const tiers = modelTiers.effective(shipped);
     assert.ok(tiers.guard && tiers.guard.model, 'a guard tier is always named');
-    assert.strictEqual(tiers.guard.policy, 'pinned', 'the guard stays pinned');
+    assert.deepStrictEqual(tiers.guard, tiers.engine,
+        'the guard runs on the engine\'s weights');
 
     // And with the explicit assignment removed, every hardware class the
-    // table advertises still names a pinned guard — the gate survives the
-    // fallback on any machine.
+    // table advertises keeps the guard on the engine's own model — one set
+    // of weights, never a third.
     const models = { ...shipped.models };
     delete models.tiers;
     for (const gb of Object.keys(models.hardware_defaults).map(Number)) {
         const chosen = modelTiers.effective({ models }, gb * GB);
-        assert.strictEqual(chosen.guard.policy, 'pinned',
-            `the ${gb} GB defaults pin the guard`);
+        assert.deepStrictEqual(chosen.guard, chosen.engine,
+            `the ${gb} GB defaults keep the guard on the engine`);
         assert.ok(chosen.smith && chosen.smith.policy === 'transient',
             `the ${gb} GB defaults keep the smith transient`);
     }
@@ -86,13 +87,14 @@ test('editing a tier materializes the hardware defaults into config', () => {
         const settings = require('../services/settings');
 
         const result = settings.apply({
-            tiers: { guard: { model: 'mlx-community/Qwen3-4B-Instruct-2507-4bit' } }
+            tiers: { engine: { model: 'mlx-community/Qwen3-4B-Instruct-2507-4bit' } }
         });
         assert.strictEqual(result.status, 'applied');
 
         const written = JSON.parse(fs.readFileSync(configPath, 'utf8'));
         assert.ok(written.models.tiers, 'the effective table was pinned into config');
-        assert.strictEqual(written.models.tiers.guard.policy, 'pinned');
+        assert.deepStrictEqual(written.models.tiers.guard, written.models.tiers.engine,
+            'the guard follows the engine edit');
         assert.ok(written.models.tiers.smith, 'untouched tiers came along');
     } finally {
         if (previous === undefined) delete process.env.JARVIS_CONFIG_PATH;

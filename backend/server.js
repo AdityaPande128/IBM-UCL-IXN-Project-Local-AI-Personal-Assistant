@@ -32,6 +32,9 @@ const auditView = require('./services/auditView');
 const permissionsView = require('./services/permissionsView');
 const checkpoints = require('./services/checkpoints');
 const stateBundle = require('./services/stateBundle');
+const profile = require('./services/profile');
+const modelCatalog = require('./services/modelCatalog');
+const modelDownloads = require('./services/modelDownloads');
 
 verifySandboxInitialized();
 
@@ -81,6 +84,68 @@ function syncOpenClawConfig() {
     } catch (e) {
         console.error("[Jarvis Boot] Failed to synchronize openclaw.json:", e);
     }
+}
+
+function voiceReady() {
+    const chosen = profile.current();
+    if (!chosen.voice.enabled) return false;
+    const voice = (configReader.readConfig().models || {}).voice || {};
+    if (!voice.stt || !modelCatalog.downloaded(voice.stt.model)) return false;
+    if (chosen.voice.tts && voice.tts && !modelCatalog.downloaded(voice.tts.model)) return false;
+    return true;
+}
+
+// One atomic act: the profile, the tier table and the download queue are all
+// written before the restart, so whichever daemon wakes up next finds a
+// consistent picture and simply starts downloading.
+function applyOnboarding(parsed) {
+    const current = configReader.readConfig();
+    const improvement = parsed.improvement === true;
+    const selection = {
+        engine: String(parsed.engine || ''),
+        smith: improvement ? String(parsed.smith || '') : null,
+        voice: !!(parsed.voice && parsed.voice.enabled),
+        tts: !!(parsed.voice && parsed.voice.tts)
+    };
+
+    const checked = modelCatalog.checkSelection(current, selection);
+    if (!checked.ok) return { status: 'invalid', error: checked.error };
+
+    const applied = profile.apply({
+        name: parsed.name,
+        theme: parsed.theme,
+        mode: parsed.mode,
+        improvement,
+        voice: { enabled: selection.voice, tts: selection.tts }
+    });
+    if (applied.status !== 'applied') return applied;
+
+    const cfg = configReader.readConfig();
+    // Without improvement no smith was chosen, but the tier keeps a value —
+    // the class default — so enabling improvement later starts from a sane
+    // table. Generation is gated on the profile, not on the tier's absence.
+    const defaults = modelTiers.effective({
+        models: { hardware_defaults: (cfg.models || {}).hardware_defaults }
+    });
+    const smith = selection.smith || (defaults.smith && defaults.smith.model) || null;
+    cfg.models = cfg.models || {};
+    cfg.models.tiers = modelCatalog.tiersFor({ engine: selection.engine, smith });
+    fs.writeFileSync(configReader.configPath(), JSON.stringify(cfg, null, 2) + '\n');
+
+    const voiceModels = (cfg.models || {}).voice || {};
+    const items = [{ model: selection.engine, kind: 'engine' }];
+    if (selection.voice && voiceModels.stt) {
+        items.push({ model: voiceModels.stt.model, kind: 'voice' });
+        if (selection.tts && voiceModels.tts) {
+            items.push({ model: voiceModels.tts.model, kind: 'voice' });
+        }
+    }
+    if (improvement && selection.smith) {
+        items.push({ model: selection.smith, kind: 'smith' });
+    }
+    modelDownloads.manager.enqueue(items, { defer: true });
+
+    return { status: 'applied', restarting: true };
 }
 
 const server = http.createServer((req, res) => {
@@ -173,9 +238,15 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'intent' && parsed.text) {
+                // The executor follows the profile's mode at the moment the
+                // intent arrives, so switching modes never needs a restart.
+                const mode = profile.current().mode;
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
-                        openclawBridge.executeIntent(parsed.text, { interactive: true, signal })));
+                        openclawBridge.executeIntent(parsed.text, {
+                            interactive: true, signal,
+                            ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
+                        })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));
 
                 const result = await job.result;
@@ -268,6 +339,17 @@ wss.on('connection', (ws) => {
                     mail_provider: parsed.mail_provider
                 });
                 if (result.status === 'applied') {
+                    // A newly chosen model may not be on disk yet; queue it
+                    // for the daemon that comes back after the restart.
+                    if (parsed.tiers) {
+                        const wanted = Object.values(parsed.tiers)
+                            .map(spec => spec && spec.model)
+                            .filter(model => model && !modelCatalog.downloaded(model))
+                            .map(model => ({ model, kind: 'model' }));
+                        if (wanted.length) {
+                            modelDownloads.manager.enqueue(wanted, { defer: true });
+                        }
+                    }
                     activityBus.publish('daemon', 'settings_applied', {});
                     ws.send(JSON.stringify({ type: 'settings_update_result',
                         status: 'applied', restarting: true }));
@@ -536,6 +618,73 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'onboarding') {
+                const current = configReader.readConfig();
+                ws.send(JSON.stringify({
+                    type: 'onboarding_result',
+                    profile: profile.read(current),
+                    catalog: modelCatalog.describe(current),
+                    downloads: modelDownloads.manager.status(),
+                    voice_ready: voiceReady()
+                }));
+                return;
+            }
+
+            if (parsed.type === 'onboarding_apply') {
+                const result = applyOnboarding(parsed);
+                ws.send(JSON.stringify({ type: 'onboarding_apply_result', ...result }));
+                if (result.status === 'applied'
+                    && process.env.JARVIS_SETTINGS_RESTART !== 'off') {
+                    // The restart reloads the tier table everywhere; the
+                    // download queue was persisted and resumes on boot.
+                    setTimeout(() => process.exit(0), 400);
+                }
+                return;
+            }
+
+            if (parsed.type === 'onboarding_complete') {
+                const applied = profile.apply({ onboarded: true });
+                activityBus.publish('daemon', 'onboarded', {});
+                ws.send(JSON.stringify({ type: 'onboarding_complete_result', ...applied }));
+                return;
+            }
+
+            if (parsed.type === 'profile_update') {
+                const applied = profile.apply({
+                    name: parsed.name,
+                    mode: parsed.mode,
+                    theme: parsed.theme,
+                    improvement: parsed.improvement,
+                    voice: parsed.voice
+                });
+                if (applied.status === 'applied') {
+                    activityBus.publish('daemon', 'profile_updated', {});
+                }
+                ws.send(JSON.stringify({ type: 'profile_update_result', ...applied }));
+                return;
+            }
+
+            if (parsed.type === 'download') {
+                if (parsed.action === 'stop' && parsed.model) {
+                    modelDownloads.manager.stop(String(parsed.model));
+                }
+                if (parsed.action === 'start' && parsed.model) {
+                    const model = String(parsed.model);
+                    const known = modelDownloads.manager.status().queue
+                        .some(job => job.model === model);
+                    // Starting a model the queue has never seen enqueues it —
+                    // how settings kick off a download for a late choice.
+                    if (known) modelDownloads.manager.start(model);
+                    else modelDownloads.manager.enqueue([{ model, kind: 'model' }]);
+                }
+                ws.send(JSON.stringify({
+                    type: 'download_status',
+                    ...modelDownloads.manager.status(),
+                    voice_ready: voiceReady()
+                }));
+                return;
+            }
+
         } catch (err) {
             console.error(`[Jarvis] Message handling failed: ${err.message}`);
             if (ws.readyState === WebSocket.OPEN) {
@@ -556,6 +705,10 @@ wss.on('connection', (ws) => {
 
 async function boot() {
     syncOpenClawConfig();
+
+    modelDownloads.manager.subscribe(job =>
+        broadcast({ type: 'download_progress', job }));
+    modelDownloads.manager.resume();
 
     try {
         const interrupted = traceStore.reconcileInterrupted();

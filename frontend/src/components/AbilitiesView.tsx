@@ -2,19 +2,30 @@ import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   AbilitiesData,
+  CatalogModel,
   DiagnosticsResult,
+  DownloadsData,
+  ProfileData,
+  ProfileUpdate,
   SettingsResult,
   SettingsUpdate,
 } from "../hooks/useWebSocket";
+import { applyTheme } from "../theme";
 
 interface AbilitiesViewProps {
   abilities: AbilitiesData | null;
   diagnostics: DiagnosticsResult | null;
   settingsResult: SettingsResult | null;
+  profile: ProfileData | null;
+  downloads: DownloadsData | null;
+  incognito: boolean;
   onRefresh: () => void;
   onRemoveSkill: (name: string) => void;
   onSaveDiagnostics: () => void;
   onUpdateSettings: (update: SettingsUpdate) => void;
+  onUpdateProfile: (update: ProfileUpdate) => void;
+  onSetIncognito: (on: boolean) => void;
+  onDownloadAction: (action: "start" | "stop" | "status", model?: string) => void;
 }
 
 const POLICIES = ["pinned", "resident", "transient"];
@@ -25,10 +36,16 @@ export function AbilitiesView({
   abilities,
   diagnostics,
   settingsResult,
+  profile,
+  downloads,
+  incognito,
   onRefresh,
   onRemoveSkill,
   onSaveDiagnostics,
   onUpdateSettings,
+  onUpdateProfile,
+  onSetIncognito,
+  onDownloadAction,
 }: AbilitiesViewProps) {
   const [confirming, setConfirming] = useState<string | null>(null);
   const [doorOpen, setDoorOpen] = useState(false);
@@ -37,6 +54,7 @@ export function AbilitiesView({
   >({});
   const [browserEdit, setBrowserEdit] = useState<string | null>(null);
   const [mailEdit, setMailEdit] = useState<string | null>(null);
+  const [nameEdit, setNameEdit] = useState<string | null>(null);
 
   useEffect(() => {
     onRefresh();
@@ -72,8 +90,116 @@ export function AbilitiesView({
     openDashboard();
   };
 
+  const smithModel = abilities.tiers.find((t) => t.tier === "smith")?.model;
+  const smithDownloaded = downloads?.queue.some(
+    (j) => j.model === smithModel && j.status === "done")
+    || abilities.catalog?.smiths.find((e) => e.model === smithModel)?.downloaded;
+
   return (
     <div className="abilities">
+      {profile && (
+        <section className="abilities-section">
+          <h2>Profile</h2>
+          <div className="build-list">
+            <div className="build-row">
+              <span className="tier-name">name</span>
+              <input
+                className="settings-input"
+                value={nameEdit ?? profile.name}
+                maxLength={80}
+                onChange={(e) => setNameEdit(e.target.value)}
+                onBlur={() => {
+                  const trimmed = (nameEdit ?? "").trim();
+                  if (nameEdit !== null && trimmed && trimmed !== profile.name) {
+                    onUpdateProfile({ name: trimmed });
+                  }
+                  setNameEdit(null);
+                }}
+              />
+            </div>
+            <div className="build-row">
+              <span className="tier-name">mode</span>
+              <select
+                className="settings-select"
+                value={profile.mode}
+                onChange={(e) =>
+                  onUpdateProfile({ mode: e.target.value as "jarvis" | "openclaw" })
+                }
+              >
+                <option value="jarvis">Jarvis — checked and verified</option>
+                <option value="openclaw">OpenClaw with Jarvis enhancements</option>
+              </select>
+            </div>
+            <div className="build-row">
+              <span className="tier-name">theme</span>
+              <select
+                className="settings-select"
+                value={profile.theme}
+                onChange={(e) => {
+                  const theme = e.target.value as "dark" | "light";
+                  applyTheme(theme);
+                  onUpdateProfile({ theme });
+                }}
+              >
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
+            <div className="build-row">
+              <span className="tier-name">private mode</span>
+              <label className="ob-check">
+                <input
+                  type="checkbox"
+                  checked={incognito}
+                  onChange={(e) => onSetIncognito(e.target.checked)}
+                />
+                Nothing from this session is remembered
+              </label>
+            </div>
+            <div className="build-row">
+              <span className="tier-name">improvement</span>
+              <label className="ob-check">
+                <input
+                  type="checkbox"
+                  checked={profile.improvement}
+                  onChange={(e) => onUpdateProfile({ improvement: e.target.checked })}
+                />
+                Jarvis may build and test new skills for itself
+              </label>
+              {profile.improvement && smithModel && !smithDownloaded && (
+                <button
+                  className="ob-mini-button"
+                  onClick={() => onDownloadAction("start", smithModel)}
+                >
+                  Download the improver
+                </button>
+              )}
+            </div>
+            <div className="build-row">
+              <span className="tier-name">voice</span>
+              <label className="ob-check">
+                <input
+                  type="checkbox"
+                  checked={profile.voice.enabled}
+                  onChange={(e) => onUpdateProfile({ voice: { enabled: e.target.checked } })}
+                />
+                Voice on
+              </label>
+              {profile.voice.enabled && (
+                <label className="ob-check">
+                  <input
+                    type="checkbox"
+                    checked={profile.voice.tts}
+                    onChange={(e) => onUpdateProfile({ voice: { tts: e.target.checked } })}
+                  />
+                  Jarvis speaks back
+                </label>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="abilities-section">
         <h2>Skills</h2>
         <div className="ability-grid">
@@ -191,45 +317,79 @@ export function AbilitiesView({
           </div>
         )}
         <div className="build-list">
-          {abilities.tiers.map((tier) => {
-            const edit = tierEdits[tier.tier] ?? {};
-            const model = edit.model ?? tier.model;
-            const measured = abilities.budget.measured_gb[model];
-            return (
-              <div key={tier.tier} className="build-row">
-                <span className="tier-name">{tier.tier}</span>
-                <input
-                  className="settings-input"
-                  value={model}
-                  onChange={(e) =>
-                    setTierEdits((prev) => ({
-                      ...prev,
-                      [tier.tier]: { ...prev[tier.tier], model: e.target.value },
-                    }))
-                  }
-                />
-                <select
-                  className="settings-select"
-                  value={edit.policy ?? tier.policy}
-                  onChange={(e) =>
-                    setTierEdits((prev) => ({
-                      ...prev,
-                      [tier.tier]: { ...prev[tier.tier], policy: e.target.value },
-                    }))
-                  }
-                >
-                  {POLICIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                <span className="build-meta">
-                  {measured !== undefined ? `${measured.toFixed(1)} GB` : "unmeasured"}
-                </span>
-              </div>
-            );
-          })}
+          {abilities.tiers
+            // The guard runs on the engine's weights; showing it as its own
+            // editable row would be a lie.
+            .filter((tier) => tier.tier !== "guard")
+            .map((tier) => {
+              const edit = tierEdits[tier.tier] ?? {};
+              const model = edit.model ?? tier.model;
+              const measured = abilities.budget.measured_gb[model];
+              const offered: CatalogModel[] | undefined =
+                tier.tier === "engine" ? abilities.catalog?.engines
+                : tier.tier === "smith" ? abilities.catalog?.smiths
+                : undefined;
+              return (
+                <div key={tier.tier} className="build-row">
+                  <span className="tier-name">
+                    {tier.tier === "engine" ? "engine (and guard)" : tier.tier}
+                  </span>
+                  {offered && offered.length ? (
+                    <select
+                      className="settings-select"
+                      value={model}
+                      onChange={(e) =>
+                        setTierEdits((prev) => ({
+                          ...prev,
+                          [tier.tier]: { ...prev[tier.tier], model: e.target.value },
+                        }))
+                      }
+                    >
+                      {!offered.some((entry) => entry.model === model) && (
+                        <option value={model}>{model}</option>
+                      )}
+                      {offered.map((entry) => (
+                        <option key={entry.model} value={entry.model}>
+                          {entry.label}
+                          {entry.recommended ? " (Recommended)" : ""} — {entry.ram_gb.toFixed(1)} GB memory · {entry.disk_gb.toFixed(1)} GB disk
+                          {entry.downloaded ? "" : " · needs download"}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      className="settings-input"
+                      value={model}
+                      onChange={(e) =>
+                        setTierEdits((prev) => ({
+                          ...prev,
+                          [tier.tier]: { ...prev[tier.tier], model: e.target.value },
+                        }))
+                      }
+                    />
+                  )}
+                  <select
+                    className="settings-select"
+                    value={edit.policy ?? tier.policy}
+                    onChange={(e) =>
+                      setTierEdits((prev) => ({
+                        ...prev,
+                        [tier.tier]: { ...prev[tier.tier], policy: e.target.value },
+                      }))
+                    }
+                  >
+                    {POLICIES.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="build-meta">
+                    {measured !== undefined ? `${measured.toFixed(1)} GB` : "unmeasured"}
+                  </span>
+                </div>
+              );
+            })}
         </div>
       </section>
 

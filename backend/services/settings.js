@@ -4,6 +4,8 @@ const path = require('path');
 const configReader = require('../utils/configReader');
 const mailProvider = require('./mailProvider');
 const modelTiers = require('./modelTiers');
+const modelCatalog = require('./modelCatalog');
+const profile = require('./profile');
 
 const POLICIES = ['pinned', 'resident', 'transient'];
 const KNOWN_BROWSERS = ['Google Chrome', 'Brave Browser', 'Microsoft Edge', 'Chromium'];
@@ -30,10 +32,12 @@ function describe(config) {
                 .map(({ account, name, label }) => ({ account, provider: name, label }))
         },
         budget: {
-            budget_gb: models.budget_gb ?? null,
+            budget_gb: modelCatalog.budgetGb(config),
             voice_reserve_gb: models.voice_reserve_gb ?? null,
             measured_gb: models.measured_gb || {}
-        }
+        },
+        catalog: modelCatalog.describe(config),
+        profile: profile.read(config)
     };
 }
 
@@ -46,39 +50,22 @@ function mergedTiers(config, update) {
             policy: edit.policy !== undefined ? edit.policy : spec.policy
         };
     }
+    // The guard is not its own model: it always runs on the engine's
+    // weights, so any engine edit carries the guard tier with it.
+    if (tiers.guard && tiers.engine) {
+        tiers.guard = { ...tiers.engine };
+    }
     return tiers;
 }
 
-function budgetError(config, tiers) {
-    const models = config.models || {};
-    if (typeof models.budget_gb !== 'number') return null;
-    const measured = models.measured_gb || {};
-    const available = models.budget_gb - (models.voice_reserve_gb || 0);
-    const size = model => measured[model];
-
-    let base = 0;
-    for (const spec of Object.values(tiers)) {
-        if (spec.policy !== 'transient' && size(spec.model) !== undefined) {
-            base += size(spec.model);
-        }
-    }
-    if (base > available) {
-        return `The always-loaded models need ${base.toFixed(1)} GB together `
-            + `but only ${available.toFixed(1)} GB is available for models.`;
-    }
-
-    let pinned = 0;
-    for (const spec of Object.values(tiers)) {
-        if (spec.policy === 'pinned' && size(spec.model) !== undefined) {
-            pinned += size(spec.model);
-        }
-    }
-    for (const [name, spec] of Object.entries(tiers)) {
-        if (spec.policy !== 'transient' || size(spec.model) === undefined) continue;
-        if (pinned + size(spec.model) > available) {
-            return `Loading the ${name} model alongside the pinned one needs `
-                + `${(pinned + size(spec.model)).toFixed(1)} GB but only `
-                + `${available.toFixed(1)} GB is available for models.`;
+function catalogError(config, update) {
+    const catalog = (config.models || {}).catalog || {};
+    const offered = { engine: catalog.engine, smith: catalog.smith };
+    for (const [name, list] of Object.entries(offered)) {
+        const edit = update.tiers[name];
+        if (!edit || edit.model === undefined || !Array.isArray(list) || !list.length) continue;
+        if (!list.some(entry => entry.model === edit.model)) {
+            return `"${edit.model}" is not one of the offered ${name} models.`;
         }
     }
     return null;
@@ -92,6 +79,9 @@ function validate(config, update) {
         const known = modelTiers.effective(config);
         for (const [name, spec] of Object.entries(update.tiers)) {
             if (!known[name]) return `There is no "${name}" model tier.`;
+            if (name === 'guard') {
+                return 'The guard runs on the engine model; change the engine instead.';
+            }
             if (spec.model !== undefined
                 && (typeof spec.model !== 'string' || !MODEL_ID.test(spec.model))) {
                 return `"${spec.model}" is not a valid model id.`;
@@ -100,7 +90,13 @@ function validate(config, update) {
                 return `"${spec.policy}" is not a loading policy (${POLICIES.join(', ')}).`;
             }
         }
-        const error = budgetError(config, mergedTiers(config, update));
+        const offered = catalogError(config, update);
+        if (offered) return offered;
+        // Until onboarding has recorded a choice, voice memory stays
+        // reserved — the looser budget needs an explicit opt-out.
+        const error = modelCatalog.budgetError(config, mergedTiers(config, update), {
+            voice: config.profile ? profile.read(config).voice.enabled : true
+        });
         if (error) return error;
     }
 
@@ -133,6 +129,9 @@ function apply(update) {
         for (const [name, spec] of Object.entries(update.tiers)) {
             if (spec.model !== undefined) config.models.tiers[name].model = spec.model;
             if (spec.policy !== undefined) config.models.tiers[name].policy = spec.policy;
+        }
+        if (config.models.tiers.guard && config.models.tiers.engine) {
+            config.models.tiers.guard = { ...config.models.tiers.engine };
         }
     }
     if (update.desktop_browser !== undefined) {

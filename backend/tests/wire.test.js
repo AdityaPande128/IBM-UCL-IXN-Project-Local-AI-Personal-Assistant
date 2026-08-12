@@ -18,6 +18,7 @@ process.env.JARVIS_CONFIG_PATH = path.join(scratch, 'config.json');
 fs.copyFileSync(path.resolve(__dirname, '../../config.json'), process.env.JARVIS_CONFIG_PATH);
 process.env.JARVIS_SETTINGS_RESTART = 'off';
 process.env.JARVIS_CHECKPOINTS_DIR = path.join(scratch, 'checkpoints');
+process.env.JARVIS_DOWNLOADS_PATH = path.join(scratch, 'downloads.json');
 
 const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
@@ -392,21 +393,19 @@ test('settings ride the abilities payload and edits land in config.json', async 
 });
 
 test('a settings update that breaks the memory budget is refused', async () => {
-    const big = 'mlx-community/Qwen2.5-Coder-14B-Instruct-4bit';
+    // Pinning the 14B smith next to the resident engine outgrows the
+    // budget; the guard tier itself can no longer be edited directly.
     const client = await authed();
     client.send({
         type: 'settings_update',
-        tiers: {
-            guard: { model: big, policy: 'pinned' },
-            engine: { model: big, policy: 'resident' }
-        }
+        tiers: { smith: { policy: 'pinned' } }
     });
     const refused = await client.next(m => m.type === 'settings_update_result');
     assert.strictEqual(refused.status, 'invalid');
     assert.match(refused.error, /GB/);
 
     const written = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
-    assert.notStrictEqual(written.models.tiers.guard.model, big);
+    assert.notStrictEqual((written.models.tiers || {}).smith?.policy, 'pinned');
     client.ws.close();
 });
 
@@ -621,4 +620,73 @@ test('wake mode gates binary audio: idle speech vanishes, the phrase wakes', asy
     } finally {
         openclawBridge.executeIntent = realExecute;
     }
+});
+
+test('onboarding round-trip: profile, tiers, queue and completion', async () => {
+    const client = await authed();
+    client.send({ type: 'onboarding' });
+    const state = await client.next(m => m.type === 'onboarding_result');
+    assert.strictEqual(state.profile.onboarded, false);
+    assert.ok(state.catalog.engines.length >= 2, 'the catalog offers engines');
+    assert.ok(state.catalog.smiths.length >= 2, 'the catalog offers improvers');
+
+    // The recommended pair is what the wizard pre-selects; by construction it
+    // fits whatever machine the test runs on.
+    const engine = state.catalog.engines.find(e => e.recommended)
+        ?? state.catalog.engines[0];
+    const smith = state.catalog.smiths.find(e => e.recommended)
+        ?? state.catalog.smiths[0];
+
+    client.send({
+        type: 'onboarding_apply',
+        name: 'Wire Tester', theme: 'light', mode: 'jarvis',
+        improvement: true, engine: engine.model, smith: smith.model,
+        voice: { enabled: true, tts: true }
+    });
+    const applied = await client.next(m => m.type === 'onboarding_apply_result');
+    assert.strictEqual(applied.status, 'applied', applied.error);
+
+    const written = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
+    assert.strictEqual(written.profile.name, 'Wire Tester');
+    assert.strictEqual(written.profile.theme, 'light');
+    assert.strictEqual(written.models.tiers.engine.model, engine.model);
+    assert.deepStrictEqual(written.models.tiers.guard, written.models.tiers.engine,
+        'the guard rides the chosen engine');
+
+    // The queue was persisted for the next boot, base model ahead of the
+    // improver.
+    const queue = JSON.parse(
+        fs.readFileSync(process.env.JARVIS_DOWNLOADS_PATH, 'utf8')).queue;
+    const kinds = queue.map(entry => entry.kind);
+    assert.ok(kinds.includes('engine'));
+    if (kinds.includes('smith')) {
+        assert.ok(kinds.indexOf('engine') < kinds.indexOf('smith'));
+    }
+
+    client.send({ type: 'download', action: 'status' });
+    const status = await client.next(m => m.type === 'download_status');
+    assert.ok(Array.isArray(status.queue) && status.queue.length >= 1);
+
+    client.send({ type: 'onboarding_complete' });
+    const done = await client.next(m => m.type === 'onboarding_complete_result');
+    assert.strictEqual(done.status, 'applied');
+    assert.strictEqual(done.profile.onboarded, true);
+    client.ws.close();
+});
+
+test('a rejected onboarding selection reports why and writes nothing', async () => {
+    const before = fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8');
+    const client = await authed();
+    client.send({
+        type: 'onboarding_apply',
+        name: 'X', theme: 'dark', mode: 'jarvis',
+        improvement: false, engine: 'mlx-community/NotInTheCatalog-70B',
+        voice: { enabled: false, tts: false }
+    });
+    const refused = await client.next(m => m.type === 'onboarding_apply_result');
+    assert.strictEqual(refused.status, 'invalid');
+    assert.match(refused.error, /not one of the offered/);
+    assert.strictEqual(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'), before,
+        'a refused apply must not touch the config');
+    client.ws.close();
 });
