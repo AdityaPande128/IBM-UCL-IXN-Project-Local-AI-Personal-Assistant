@@ -461,6 +461,13 @@ function builtins() {
                     return { text: result.answer, passages: result.passages, url: result.url,
                              files: result.files || [] };
                 }
+                // A browse that stopped to offer a card is not a failure —
+                // the card rides up so the executor can hold the plan on it.
+                if (result.status === 'needs_approval' && result.proposal) {
+                    const held = new Error(result.reason || 'this needs your approval first');
+                    held.proposal = result.proposal;
+                    throw held;
+                }
                 throw new Error(result.reason || `browsing ${result.status}`);
             }
         }),

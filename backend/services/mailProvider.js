@@ -6,12 +6,15 @@
 // that says "work mail" goes to the work account, anything else to the default.
 
 const PROVIDERS = {
+    // The Outlook calendars land on the full-week view: the default work week
+    // hides Saturday and Sunday, and a booking is only believed once its day
+    // is on screen.
     gmail: { label: 'Gmail', url: 'https://mail.google.com',
              calendar: 'https://calendar.google.com' },
     outlook: { label: 'Outlook (personal)', url: 'https://outlook.live.com/mail',
-               calendar: 'https://outlook.live.com/calendar' },
+               calendar: 'https://outlook.live.com/calendar/view/week' },
     'outlook-work': { label: 'Outlook (work or school)', url: 'https://outlook.office.com/mail',
-                      calendar: 'https://outlook.office.com/calendar' }
+                      calendar: 'https://outlook.office.com/calendar/view/week' }
 };
 
 function current(config) {

@@ -203,7 +203,11 @@ const MAILBOX = [
 
     { id: 's2', box: 'sent', to: 'Nadia Okonjo', address: 'nadia@example.com',
       subject: 'Re: Barbican on the 15th', date: 'July 29', replies: 1,
-      body: `Wonderful, I'll be there.` }
+      body: `Wonderful, I'll be there.` },
+
+    { id: 'm6', box: 'inbox', from: 'Sandhya Pandey', address: 'sandhya@example.com',
+      subject: 'Dinner — are you free on Saturday evening this week?', date: 'July 5',
+      body: `Let's do dinner Saturday 9pm at Alleycats in Westminster.` }
 ];
 
 const SEARCH_BOX = `
@@ -237,8 +241,8 @@ function search(query) {
 
     const needle = words.toLowerCase();
     return MAILBOX.filter(message =>
-        `${message.subject} ${message.body} ${message.from || ''} ${message.to || ''} `
-        + `${message.address} ${message.date}`.toLowerCase().includes(needle));
+        (`${message.subject} ${message.body} ${message.from || ''} ${message.to || ''} `
+        + `${message.address} ${message.date}`).toLowerCase().includes(needle));
 }
 
 function mailPage(title, inner, query = '') {

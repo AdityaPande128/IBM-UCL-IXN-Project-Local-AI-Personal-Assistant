@@ -150,6 +150,7 @@ async function composeThenGenerate(intentText, options = {}) {
             status: execution.status === 'success' ? 'success' : execution.status,
             response: execution.text,
             action: 'composed',
+            ...(execution.proposal ? { proposal: execution.proposal } : {}),
             plan: {
                 goal: execution.goal,
                 steps: execution.steps.map(s => ({

@@ -141,10 +141,10 @@ RULES
    what the user is doing, where they have to be or what time something is on a
    date starts at their calendar, and who wrote what starts at their mail.
    PUTTING something on the calendar — "book a meeting", "schedule a call",
-   "add it to my calendar" — starts at the user's calendar, ${calendarUrl},
-   one web.browse whose goal is the user's request carried through unchanged:
-   their exact words are what authorises saving the event, and a paraphrase
-   loses that authority. An
+   "add it to my calendar", even an event whose details sit in an email —
+   starts at the user's calendar, ${calendarUrl}, one web.browse whose goal is
+   the user's request carried through unchanged: their exact words are what
+   authorises saving the event, and a paraphrase loses that authority. An
    order, a delivery or a booking from a company starts at their MAIL too — the
    confirmation and the dispatch note were emailed to them — and not at that
    company's website, which nobody is signed in to and which the browser is
@@ -403,7 +403,14 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
         errors.push(
             `steps[${entry.index}]: ${entry.step.id} (${entry.capability.id}) produces ` +
             `${Object.keys(entry.capability.outputs).join(', ')} that nothing uses` +
-            (entry.isLast ? ' and does not end the plan with an answer' : '')
+            (entry.isLast ? ' and does not end the plan with an answer' : '') +
+            // Costs nothing on a valid plan; on retry it teaches the merge a
+            // find-then-act request needs.
+            (entry.capability.id === 'web.browse'
+                ? ' — if a later step was meant to act on what this one finds, merge them: '
+                  + 'one web.browse carries the whole request, reading one page and acting '
+                  + 'on another by itself'
+                : '')
         );
     }
 

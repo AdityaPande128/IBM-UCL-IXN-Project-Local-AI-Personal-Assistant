@@ -475,6 +475,37 @@ test('an empty result is not filed as a broken capability', async () => {
     cleanup(dir);
 });
 
+test('a step that offers a card holds the plan as needs_approval', async () => {
+    const dir = scratch();
+    const graph = fakeGraph({
+        offer: {
+            tier: 0, description: 'stops to ask',
+            inputs: {}, outputs: { text: { type: 'string' } },
+            produces: labels.label(ORIGIN.WEB, SENSITIVITY.PERSONAL),
+            run: async () => {
+                const held = new Error('this needs your go-ahead first');
+                held.proposal = { id: 'p-1', kind: 'book_from_mail', will: 'book it' };
+                throw held;
+            }
+        }
+    });
+
+    const result = await planExecutor.run({
+        goal: 'x',
+        steps: [{ id: 's1', capability: 'offer', inputs: {} }],
+        missing: []
+    }, { graph, request: 'x' });
+
+    assert.strictEqual(result.status, 'needs_approval',
+        'a card is a held plan, not a failed one');
+    assert.deepStrictEqual(result.proposal,
+        { id: 'p-1', kind: 'book_from_mail', will: 'book it' });
+    assert.strictEqual(result.text, 'this needs your go-ahead first');
+    assert.strictEqual(result.steps[0].status, 'needs_approval');
+
+    cleanup(dir);
+});
+
 test('SECURITY: the label follows the data across steps', async () => {
     const dir = scratch();
 
@@ -748,16 +779,16 @@ test('the mail provider maps names to mailbox addresses with a safe default', ()
 test('each provider carries its own calendar and the prompt steers bookings there', () => {
     assert.strictEqual(mailProvider.current({}).calendar, 'https://calendar.google.com');
     assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook' } }).calendar,
-        'https://outlook.live.com/calendar');
+        'https://outlook.live.com/calendar/view/week');
     assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook-work' } }).calendar,
-        'https://outlook.office.com/calendar');
+        'https://outlook.office.com/calendar/view/week');
 
     // "work calendar" steers like "work mail": the calendar rides the account.
     const config = {
         mail: { provider: 'gmail', accounts: { personal: 'gmail', work: 'outlook-work' } }
     };
     assert.strictEqual(mailProvider.forRequest('put the review on my work calendar', config).calendar,
-        'https://outlook.office.com/calendar');
+        'https://outlook.office.com/calendar/view/week');
     assert.strictEqual(mailProvider.forRequest('add lunch with Sam to my calendar', config).calendar,
         'https://calendar.google.com');
 

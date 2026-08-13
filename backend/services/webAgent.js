@@ -6,6 +6,7 @@ const domSurface = require('./domSurface');
 const chromeSurface = require('./chromeSurface');
 const webIntent = require('./webIntent');
 const attachments = require('./attachments');
+const proposals = require('./proposals');
 const axBridge = require('./axBridge');
 const traceStore = require('./traceStore');
 const webPolicy = require('../security/webPolicy');
@@ -1233,6 +1234,45 @@ function likeTime(shown, time) {
 // — and opens into the date and time fields when pressed.
 const TIME_RANGE = /\d{1,2}[:.]\d{2}\s*(?:AM|PM)?\s*[-–]\s*\d{1,2}[:.]\d{2}/i;
 
+// What the event is called: the dictated words when the request gave any,
+// else the thing the request asked to put on the calendar — "put the dinner
+// on my calendar" names it Dinner.
+function eventName(intent, goal) {
+    const dictated = (((intent && intent.write) || []).map(value => String(value).trim()))
+        .find(words => words && !AN_ADDRESS.test(words));
+    if (dictated) return dictated.slice(0, 60);
+
+    const named_ = String(goal || '').match(
+        /\b(?:put|add|book|schedule)\s+(?:the|a|an)?\s*([a-z][\w -]{1,40}?)\s+(?:on|onto|to|in)\s+my\s+calendar\b/i);
+    if (!named_) return null;
+    const words = named_[1].replace(/\s+(?:email|mail|message|invite)\b.*$/i, '').trim();
+    // "add it to my calendar" names nothing — the pronoun's referent lives
+    // in whatever wording the fallback consults next.
+    if (!words || /^(?:it|this|that|them|these|those|something|everything)$/i.test(words)) {
+        return null;
+    }
+    return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+// An approved card books through the same route a spoken request takes: the
+// words the user approved become the goal, and the calendar is read back
+// before success is claimed.
+async function bookAsApproved(plainGoal, options = {}) {
+    const target = options.calendarUrl
+        || require('./mailProvider').current(configReader.readConfig()).calendar;
+    const result = await browse(plainGoal, {
+        url: target,
+        request: plainGoal,
+        allowPrivate: options.allowPrivate,
+        maxActions: options.maxActions
+    });
+    return {
+        status: result.status === 'success' ? 'success' : result.status,
+        response: result.answer || result.reason || 'the booking did not complete',
+        action: 'booked_from_mail'
+    };
+}
+
 const ABOUT_SAVING = /\b(draft|options|settings|more|cancel|undo|copy|as)\b/i;
 
 function saves(element) {
@@ -1467,6 +1507,7 @@ async function browse(goal, options = {}) {
     };
 
     let approval = null;
+    let proposal = null;
 
     const outstanding = () => ({
         unsaid: quoted(goal).filter(phrase => !typed.some(entry => entry.includes(phrase))),
@@ -1718,11 +1759,20 @@ async function browse(goal, options = {}) {
 
         // A reply must find their thread even when the intent reading offers
         // no query — the goal itself names who the reply is for.
+        // A reply finds its thread by its correspondent; so does a booking
+        // whose details live in that correspondent's email — but only when
+        // the request points at the mail, or a plain booking with an address
+        // in it would take a detour through the mailbox. The goal is the
+        // planner's wording; where its paraphrase dropped something, the
+        // user's own request still holds it.
+        const asked = `${goal || ''} ${options.request || ''}`;
+        const detailsInMail = mandate.has('book')
+            && /\b(e-?mail\w*|mail\w*|inbox|message\w*)\b/i.test(asked);
         const looking = fromThem(
             intent.query
                 || (mandate.size
-                    ? (replying(goal)
-                        ? (String(goal).match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
+                    ? (replying(goal) || detailsInMail
+                        ? (String(asked).match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
                         : null)
                     : subject(goal)[0])
                 || null,
@@ -1790,7 +1840,7 @@ async function browse(goal, options = {}) {
             // is mandated — a mandated "reply to X" needs the row opened.
             if (searched && !openedNewest
                 && !(asksWhetherReplied(goal) && !mandate.size)
-                && (!mandate.size || replying(goal) || mandate.has('save'))) {
+                && (!mandate.size || replying(goal) || mandate.has('save') || detailsInMail)) {
                 let row = topRow(observation);
                 // A restored view re-runs its search after the submit and
                 // renders in bursts that fool DOM-quiet settling — wait for
@@ -1818,6 +1868,52 @@ async function browse(goal, options = {}) {
                         observation = await surface.observe();
                         contextLabel = labels.join(contextLabel, observation.label);
 
+                        // The details live in the message just opened: "put
+                        // the dinner on my calendar" books what the email
+                        // says. Nothing from the page is typed unseen — the
+                        // parsed slot comes back as a card, and the approved
+                        // card runs the plain booking the user has now read,
+                        // down the same route a spoken booking takes.
+                        if (detailsInMail && /^from:/i.test(looking)) {
+                            const address = looking.replace(/^from:/i, '');
+                            const said = latestFromThem(observation, address);
+                            const found = said ? whenFrom(said) : null;
+                            const title = eventName(intent, goal)
+                                || eventName(intent, options.request);
+                            if (said && found && title) {
+                                const day = found.date
+                                    ? ` for ${DAY_WORDS[found.date.getDay()]}` : '';
+                                let clock = '';
+                                if (found.time) {
+                                    const hours = found.time.hours % 12 || 12;
+                                    const minutes = String(found.time.minutes).padStart(2, '0');
+                                    clock = ` at ${hours}:${minutes} `
+                                        + (found.time.hours < 12 ? 'am' : 'pm');
+                                }
+                                const plainGoal = `add "${title}" to my calendar${day}${clock}`;
+                                const words = said.replace(/\s*\n\s*/g, ' ').slice(0, 200);
+                                proposal = proposals.create('book_from_mail', {
+                                    request: goal,
+                                    found: words,
+                                    will: `book "${title}"${day}${clock}, as the email from `
+                                        + `${address} says`
+                                }, () => bookAsApproved(plainGoal, options));
+                                status = 'needs_approval';
+                                failure = `The email from ${address} says: "${words}". `
+                                    + `I can book "${title}"${day}${clock} — approve and I `
+                                    + 'will put it on the calendar.';
+                                actions.push({ action: 'propose',
+                                    reason: 'the event details came from the email, so booking '
+                                        + 'them needs your word',
+                                    detail: plainGoal });
+                                record(0, {
+                                    capability: 'web.propose', status: 'blocked',
+                                    label: contextLabel, summary: failure,
+                                    durationMs: Date.now() - startedAt
+                                });
+                            }
+                        }
+
                         // Asked what they said, standing on their newest
                         // message, the answer is its words — read them out
                         // rather than leaving the extraction to the model.
@@ -1844,6 +1940,23 @@ async function browse(goal, options = {}) {
                     }
                 }
             }
+        }
+
+        // An offered card is where this run stops: nothing else may act
+        // until the user has answered it.
+        if (status === 'needs_approval') {
+            const runMs = Date.now() - startedAt;
+            if (tracing && planId !== null) {
+                traceStore.finishPlan(planId, { status, runMs, error: failure });
+            }
+            return {
+                status, goal, answer: null, reason: failure, actions,
+                url: observation ? observation.url : null,
+                title: observation ? observation.title : null,
+                passages: [], label: contextLabel, written, files: savedFiles,
+                approval: null, approvalId: null, proposal,
+                planId, run_ms: runMs
+            };
         }
 
         const carryOut = async () => {
@@ -2692,6 +2805,7 @@ module.exports = {
     likeTime,
     titleBox,
     saves,
+    eventName,
     topRow,
     automated,
     boxFor,

@@ -207,12 +207,16 @@ async function run(plan, options = {}) {
             });
         } catch (err) {
             const durationMs = Date.now() - stepStartedAt;
-            failure = { step: step.id, error: err.message };
-            record.push({ ...step, status: 'failed', error: err.message, durationMs });
+            // A step that stopped to offer a card holds the plan rather than
+            // failing it: the card carries its own continuation.
+            const held = err.proposal ? 'needs_approval' : 'failed';
+            failure = { step: step.id, error: err.message,
+                        ...(err.proposal ? { proposal: err.proposal } : {}) };
+            record.push({ ...step, status: held, error: err.message, durationMs });
             if (tracing) {
                 traceStore.recordStep(planId, {
                     ordinal, key: step.id, capability: capability.id, tier: capability.tier,
-                    status: 'failed', label: inputLabel, inputs: bound,
+                    status: held, label: inputLabel, inputs: bound,
                     error: err.message, durationMs
                 });
             }
@@ -240,7 +244,8 @@ async function run(plan, options = {}) {
     const last = [...environment.values()].pop() || null;
 
     const status = failure
-        ? (failure.blocked ? 'blocked' : failure.starved ? 'empty' : 'failed')
+        ? (failure.proposal ? 'needs_approval'
+            : failure.blocked ? 'blocked' : failure.starved ? 'empty' : 'failed')
         : 'success';
 
     if (tracing) {
@@ -255,7 +260,8 @@ async function run(plan, options = {}) {
         status,
         planId,
         goal: plan.goal || null,
-        text: render(plan, record, failure),
+        text: failure && failure.proposal ? failure.error : render(plan, record, failure),
+        ...(failure && failure.proposal ? { proposal: failure.proposal } : {}),
         steps: record,
         label: last ? last.label : baseLabel(),
         completed: record.filter(s => s.status === 'success').length,

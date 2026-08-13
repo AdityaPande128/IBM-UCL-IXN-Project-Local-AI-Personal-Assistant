@@ -2311,6 +2311,67 @@ test('a booking carries the requested day and time onto the calendar', async () 
     }
 });
 
+test('an event takes its name from the dictated words or the request\'s own object', () => {
+    assert.strictEqual(
+        webAgent.eventName({ write: ['Squash with Sam'] }, 'whatever the goal says'),
+        'Squash with Sam');
+    assert.strictEqual(
+        webAgent.eventName({ write: [] },
+            'find the dinner email from sandhya@example.com and put the dinner on my calendar'),
+        'Dinner');
+    assert.strictEqual(
+        webAgent.eventName({}, 'add the team stand-up to my calendar'),
+        'Team stand-up');
+    assert.strictEqual(webAgent.eventName({}, 'what is on my calendar today'), null);
+    assert.strictEqual(webAgent.eventName({}, 'find the email and add it to my calendar'), null,
+        'a pronoun names nothing — the fallback wording must be consulted instead');
+});
+
+test('a booking whose details live in an email becomes a card, not a keystroke', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    // Every model call fails: the intent falls back to the pattern reading,
+    // and no model turn may be needed — the route is deterministic.
+    llmClient.complete = async () => 'not even json';
+
+    try {
+        const goal = 'find the dinner email from sandhya@example.com and put the dinner on my calendar';
+        const result = await webAgent.browse(goal, {
+            url: `${site.origin}/mail`, allowPrivate: true, maxActions: 8,
+            request: goal, calendarUrl: `${site.origin}/calendar/timed`
+        });
+
+        assert.strictEqual(result.status, 'needs_approval', result.reason || result.answer);
+        assert.ok(result.proposal, 'the run must come back carrying the card');
+        assert.strictEqual(result.proposal.kind, 'book_from_mail');
+        assert.match(result.proposal.will, /"Dinner"/);
+        assert.match(result.proposal.will, /saturday/i);
+        assert.match(result.proposal.will, /9:00 pm/i);
+        assert.match(result.proposal.found, /Alleycats/);
+        assert.deepStrictEqual(site.booked, [],
+            'nothing may land on the calendar before the card is answered');
+
+        // Approving the card books through the plain route and the calendar
+        // records the day and time the email named.
+        const proposals = require('../services/proposals');
+        const outcome = await proposals.approve(result.proposal.id, {});
+        assert.strictEqual(outcome.status, 'success', outcome.response);
+        assert.strictEqual(outcome.action, 'booked_from_mail');
+
+        const wanted = webAgent.whenFrom('for saturday at 9:00 pm');
+        const date = webAgent.likeDate('13-08-2026', wanted.date);
+        assert.deepStrictEqual(site.booked, [{ title: 'Dinner', date, start: '21:00' }],
+            'the approved booking must land exactly as the email said');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
 test('a paraphrased goal keeps the mandate the user\'s own request granted', async () => {
     const site = await fixture.start();
     const store = scratch();
