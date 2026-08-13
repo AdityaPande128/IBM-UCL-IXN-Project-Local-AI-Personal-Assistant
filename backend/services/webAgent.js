@@ -35,6 +35,14 @@ function holdsText(element) {
     return element.axRole ? AX_FIELDS.has(element.axRole) : FIELDS.has(element.role);
 }
 
+// A recipient or search box on a mail page often announces itself as a
+// combobox; only a native select actually is one. Everything else that
+// carries the role takes text.
+function fillable(element) {
+    if (holdsText(element)) return true;
+    return Boolean(element) && element.role === 'combobox' && element.tag !== 'select';
+}
+
 const MAX_CONSECUTIVE_SKIPS = 2;
 
 
@@ -249,7 +257,7 @@ async function act(surface, decision, observation, context, options) {
     const name = (element && element.name) || decision.ref;
 
     if (decision.action === 'fill') {
-        if (!holdsText(element)) {
+        if (!fillable(element)) {
             return {
                 ok: false,
                 refusal: 'wrong-action',
@@ -296,8 +304,16 @@ async function act(surface, decision, observation, context, options) {
                 detail: `"${name}" could not be typed into: ${firstLine(typed.why)}` };
         }
 
+        // An address typed into a rich recipient box only becomes the
+        // recipient once it is committed as a pill; Enter is that commit.
+        // A native input keeps its text — there Enter would submit the form.
+        const commitsPill = AN_ADDRESS.test(String(decision.text ?? '').trim())
+            && ADDRESSES.test(element.name || '')
+            && element.tag && !['input', 'textarea'].includes(element.tag);
+
         let sent = '';
-        if (element.role === 'combobox' || (decision.submit && element.role !== 'textbox')) {
+        if (element.role === 'combobox' || commitsPill
+            || (decision.submit && element.role !== 'textbox')) {
             const submitted = await surface.submit(found.handle);
             if (!submitted.ok) {
                 return { ok: false, stale: true, before: found.observation,
@@ -321,6 +337,22 @@ async function act(surface, decision, observation, context, options) {
                 refusal: 'wrong-action',
                 detail: `"${name}" is a field, not a button — clicking it only puts the cursor there. `
                     + 'Use {"action":"fill","ref":"' + decision.ref + '","text":"..."} to write in it.',
+                before: found.observation || observation
+            };
+        }
+
+        // The bare "To" control beside a recipient box opens an address-book
+        // picker — a dialog the loop then has to find its way back out of.
+        // The box next to it takes the address directly.
+        if (BARE_RECIPIENT.test(String(name).trim())
+            && (source.elements || []).some(el =>
+                fillable(el) && !el.disabled && ADDRESSES.test(el.name || ''))) {
+            return {
+                ok: false,
+                refusal: 'wrong-action',
+                detail: `"${name}" opens the address book, which there is no need to enter. `
+                    + 'This page has a recipient box that takes text — fill it with the '
+                    + 'address and the recipient is set.',
                 before: found.observation || observation
             };
         }
@@ -527,7 +559,7 @@ function unusedSearchBox(observation) {
 function searchBox(observation) {
     const elements = (observation && observation.elements) || [];
     const empty = element =>
-        holdsText(element)
+        fillable(element)
         && !element.disabled && !element.sensitive
         && !String(element.value || '').trim();
 
@@ -608,6 +640,9 @@ function fromThem(query, goal) {
 }
 
 const THE_LATEST = /\b(latest|most recent|newest|last|recent)\b/i;
+
+const RESULTS_WAIT_MS = 3000;
+const RESULTS_POLL_MS = 500;
 
 const ROW_LABEL = 60;
 
@@ -864,7 +899,7 @@ const AN_ADDRESS = /^[\w.+-]+@[\w.-]+\.\w{2,}$/;
 function boxFor(observation, value, isLast) {
     if (AN_ADDRESS.test(String(value || '').trim())) {
         const recipient = ((observation && observation.elements) || []).find(element =>
-            holdsText(element) && !element.disabled && !element.sensitive
+            fillable(element) && !element.disabled && !element.sensitive
             && ADDRESSES.test(element.name || '')
             && !String(element.value || '').trim());
         if (recipient) return recipient;
@@ -895,7 +930,7 @@ const ADDRESSES = /\b(to|recipients?|cc|bcc|address(es)?)\b/i;
 
 function unaddressed(observation, fresh = false) {
     const elements = (observation && observation.elements) || [];
-    const recipient = element => holdsText(element) && ADDRESSES.test(element.name || '');
+    const recipient = element => fillable(element) && ADDRESSES.test(element.name || '');
 
     if (elements.some(element => recipient(element) && String(element.value || '').trim())) {
         return false;
@@ -998,6 +1033,98 @@ function newestDate(observation) {
         if (!Number.isNaN(when)) return when;
     }
     return null;
+}
+
+// A line that is only a date stamp — the header a mail pane puts between one
+// message and the next. Weekday, month and meridiem words are part of the
+// stamp; any other word makes it prose.
+function plainDate(line) {
+    const text = String(line || '').trim();
+    if (!text || text.length > 40 || !ROW_DATE.test(text)) return false;
+    const residue = text
+        .replace(/\b(mon|tue|wed|thu|fri|sat|sun|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/gi, '')
+        .replace(/\b(am|pm)\b/gi, '');
+    return !/[a-z]{3,}/i.test(residue);
+}
+
+// The newest words the named correspondent wrote, read out of an opened
+// thread: their sender line starts a message, the next date stamp ends it,
+// and anything under a "wrote:" line is an older message being carried
+// along, not something they said now. A pane that writes its sender lines
+// bare lists messages oldest first, so the last block is the newest; a pane
+// that labels them "From:" puts the message above its quotes, so the first
+// block is — and a From: line under a bare-line pane is a quoted header.
+function latestFromThem(observation, who) {
+    const address = String(who || '').trim().toLowerCase();
+    if (!address.includes('@')) return null;
+
+    const text = String((observation && observation.text) || '');
+
+    // A pane renders its buttons into innerText alongside the words; a line
+    // that is nothing but the names of this page's own controls is furniture.
+    const controls = [...new Set(((observation && observation.elements) || [])
+        .map(element => String(element.name || '').trim())
+        .filter(name => name.length >= 3 && name.length <= 40))]
+        .sort((a, b) => b.length - a.length);
+    const furniture = line => {
+        let residue = ` ${line} `;
+        for (const name of controls) residue = residue.split(name).join(' ');
+        return !/[a-z0-9]{2,}/i.test(residue);
+    };
+
+    const read = fromLabelled => {
+        const messages = [];
+        // A sender line opens a message header, whose action toolbar and
+        // metadata run until the date stamp; only what follows the stamp is
+        // the message. waiting spans the header, body the words.
+        let waiting = false;
+        let body = null;
+        const flush = () => {
+            if (body && body.length) {
+                const words = body.join('\n').trim();
+                if (words) messages.push(words);
+            }
+            body = null;
+            waiting = false;
+        };
+
+        for (const raw of text.split('\n')) {
+            const line = raw.trim();
+
+            if (QUOTE_LINE.test(line)) { flush(); continue; }
+            // An unsent draft shown on the thread is not something anybody
+            // said; its marker ends whatever message was being read.
+            if (/^\[?drafts?\]?$/i.test(line) || /^saved:/i.test(line)) { flush(); continue; }
+            if (/^(to|cc|bcc|subject)\b[:\s]/i.test(line)
+                || /^you (replied|forwarded)/i.test(line)) {
+                continue;
+            }
+
+            const labelled = /^from\b/i.test(line);
+            if (line.toLowerCase().includes(address) && labelled === fromLabelled) {
+                flush();
+                waiting = true;
+                continue;
+            }
+            if (labelled) { flush(); continue; }
+
+            const stamp = plainDate(line) || /^(date|sent)\b[:\s]/i.test(line);
+            if (waiting) {
+                if (stamp) { waiting = false; body = []; }
+                continue;
+            }
+            if (!body) continue;
+            if (stamp) { flush(); continue; }
+            if (line && !furniture(line)) body.push(line);
+        }
+        flush();
+        return messages;
+    };
+
+    const bare = read(false);
+    if (bare.length) return bare[bare.length - 1];
+    const labelled = read(true);
+    return labelled.length ? labelled[0] : null;
 }
 
 function safeOrigin(url) {
@@ -1434,13 +1561,59 @@ async function browse(goal, options = {}) {
             });
         }
 
+        // A page left mid-search by earlier work carries the old query's
+        // scope and refiners into everything that follows — a from:-search
+        // run inside a Sent-Items scope finds nothing. Leave the search
+        // before starting this request's own work.
+        const midSearch = ((observation && observation.elements) || []).find(element =>
+            !holdsText(element) && !element.disabled
+            && /^(exit|close|clear)\s+search$/i.test(String(element.name || '').trim()));
+        if (midSearch) {
+            const left = await act(surface, { action: 'click', ref: midSearch.ref },
+                observation, { goal, userLabel: inputLabel, contextLabel, mandate, home },
+                options);
+            if (left.ok) {
+                actions.push({ action: 'click', ref: midSearch.ref, ok: true,
+                    detail: `left the search the page was on ("${midSearch.name}")` });
+                history.push('left the search the page was still on');
+                await surface.settle().catch(() => null);
+                observation = await surface.observe();
+                contextLabel = labels.join(contextLabel, observation.label);
+            }
+        }
+
+        // A reply must find their thread even when the intent reading offers
+        // no query — the goal itself names who the reply is for.
         const looking = fromThem(
-            intent.query || (mandate.size ? null : subject(goal)[0]) || null, goal);
-        if (looking && intent.act) {
+            intent.query
+                || (mandate.size
+                    ? (replying(goal)
+                        ? (String(goal).match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
+                        : null)
+                    : subject(goal)[0])
+                || null,
+            goal);
+        // The ladder runs whenever there is someone to look for — including
+        // when the intent reading failed and left only its fallback, which
+        // is precisely the run that needs the deterministic route.
+        if (looking && (intent.act || intent.query || mandate.size)) {
+            const findBox = () => searchBox(observation)
+                || ((observation && observation.elements) || []).find(element =>
+                    fillable(element) && !element.disabled && !element.sensitive
+                    && (element.role === 'searchbox' || /\bsearch\b/i.test(element.name || '')));
+
             const runSearch = async (query, replacing = null) => {
-                const box = searchBox(observation)
+                let box = findBox()
                     || (replacing && ((observation && observation.elements) || []).find(element =>
-                        holdsText(element) && String(element.value || '').trim() === replacing));
+                        fillable(element) && String(element.value || '').trim() === replacing));
+                // A page still assembling itself shows its search box a beat
+                // after it is first looked at.
+                for (let wait = 0; wait < 2 && !box; wait++) {
+                    await surface.settle().catch(() => null);
+                    observation = await surface.observe();
+                    contextLabel = labels.join(contextLabel, observation.label);
+                    box = findBox();
+                }
                 if (!box) return false;
                 const put = await act(surface, { action: 'fill', ref: box.ref, text: query },
                     observation,
@@ -1479,11 +1652,25 @@ async function browse(goal, options = {}) {
                 if (!foundNothing(observation)) break;
             }
 
-            if (searched && !openedNewest && !asksWhetherReplied(goal)
+            // "Has X replied" is a question about replying only when nothing
+            // is mandated — a mandated "reply to X" needs the row opened.
+            if (searched && !openedNewest
+                && !(asksWhetherReplied(goal) && !mandate.size)
                 && (!mandate.size || replying(goal) || mandate.has('save'))) {
-                openedNewest = true;
-                const row = topRow(observation);
+                let row = topRow(observation);
+                // A restored view re-runs its search after the submit and
+                // renders in bursts that fool DOM-quiet settling — wait for
+                // the search's own outcome: rows, or a no-results notice.
+                const until = Date.now() + RESULTS_WAIT_MS;
+                while (!row && !foundNothing(observation) && Date.now() < until) {
+                    await new Promise(pause => setTimeout(pause, RESULTS_POLL_MS));
+                    await surface.settle().catch(() => null);
+                    observation = await surface.observe();
+                    contextLabel = labels.join(contextLabel, observation.label);
+                    row = topRow(observation);
+                }
                 if (row) {
+                    openedNewest = true;
                     const opened = await act(surface, { action: 'click', ref: row.ref },
                         observation,
                         { goal, userLabel: inputLabel, contextLabel, mandate, home,
@@ -1496,6 +1683,30 @@ async function browse(goal, options = {}) {
                         await surface.settle().catch(() => null);
                         observation = await surface.observe();
                         contextLabel = labels.join(contextLabel, observation.label);
+
+                        // Asked what they said, standing on their newest
+                        // message, the answer is its words — read them out
+                        // rather than leaving the extraction to the model.
+                        if (!mandate.size && /^from:/i.test(looking)) {
+                            if (process.env.JARVIS_WEB_DEBUG) {
+                                console.error(`----- reader pane -----\n${observation.text}`);
+                            }
+                            const said = latestFromThem(observation,
+                                looking.replace(/^from:/i, ''));
+                            if (said) {
+                                status = 'success';
+                                answer = 'In their latest email, '
+                                    + `${looking.replace(/^from:/i, '')} wrote: `
+                                    + `"${said.replace(/\s*\n\s*/g, ' ').slice(0, 400)}"`;
+                                actions.push({ action: 'done',
+                                    reason: 'read their newest message', answer });
+                                record(0, {
+                                    capability: 'web.done', status: 'success',
+                                    label: contextLabel, summary: answer,
+                                    durationMs: Date.now() - startedAt
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -1642,9 +1853,6 @@ async function browse(goal, options = {}) {
 
         await carryOut();
         await admitDownloads();
-
-        if (status === 'success' && answer) {
-        }
 
         if (complete() && await bookingLanded() && await sendLanded()) {
             status = 'success';
@@ -2256,6 +2464,9 @@ module.exports = {
     named,
     subject,
     fromThem,
+    fillable,
+    latestFromThem,
+    plainDate,
     topRow,
     automated,
     boxFor,

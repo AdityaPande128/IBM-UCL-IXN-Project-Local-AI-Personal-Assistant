@@ -384,6 +384,55 @@ function mailRoute(pathname, params, sent) {
             </script>`);
     }
 
+    if (pathname === '/mail/rich-compose') {
+        return mailPage('New message', `
+            <button type="button" id="pick" aria-label="To">To</button>
+            <span id="pills"></span>
+            <div id="to" contenteditable="true" aria-label="To"
+                 style="min-height:1.5em">&#8203;</div>
+            <div id="body" contenteditable="true" role="textbox" aria-label="Message body"
+                 style="min-height:3em"></div>
+            <button type="button" id="send">Send</button>
+            <a href="/mail">Back to the inbox</a>
+            <script>
+              var to = document.getElementById('to');
+              to.addEventListener('keydown', function (event) {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                var address = to.textContent.replace(/[\\u200B\\u200C\\u200D\\uFEFF]/g, '').trim();
+                if (!address) return;
+                var pill = document.createElement('button');
+                pill.type = 'button';
+                pill.textContent = address;
+                document.getElementById('pills').appendChild(pill);
+                to.textContent = '\\u200B';
+              });
+              document.getElementById('pick').addEventListener('click', function () {
+                location.href = '/mail/address-book';
+              });
+              document.getElementById('send').addEventListener('click', function () {
+                var pill = document.querySelector('#pills button');
+                var words = document.getElementById('body').textContent.trim();
+                if (!pill) {
+                  var warning = document.createElement('div');
+                  warning.setAttribute('role', 'alertdialog');
+                  warning.textContent = 'This message needs at least one recipient.';
+                  document.body.appendChild(warning);
+                  return;
+                }
+                location.href = '/mail/send?to=' + encodeURIComponent(pill.textContent)
+                  + '&body=' + encodeURIComponent(words);
+              });
+            </script>`);
+    }
+
+    if (pathname === '/mail/address-book') {
+        return mailPage('Address book', `
+            <p>Choose a contact.</p>
+            <button type="button">Save</button>
+            <button type="button">Cancel</button>`);
+    }
+
     if (pathname === '/mail/send') {
         sent.push({ to: params.to || '', body: params.body || '' });
         return mailPage('Sent', `<p>Your message has been sent to ${params.to || 'nobody'}.</p>

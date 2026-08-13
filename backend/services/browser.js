@@ -85,7 +85,7 @@ async function attach() {
         // Accepted downloads sit in Playwright's temporary area and die with
         // the context; only the web loop's policy gate can move one to disk.
         acceptDownloads: true,
-        viewport: { width: 1280, height: 900 },
+        viewport: { width: 1680, height: 1000 },
         ignoreDefaultArgs: ['--use-mock-keychain', '--password-store=basic'],
         args: [
             '--no-first-run',
@@ -126,7 +126,7 @@ async function launch() {
 
         context = await browser.newContext({
             userAgent: USER_AGENT,
-            viewport: { width: 1280, height: 900 },
+            viewport: { width: 1680, height: 1000 },
             acceptDownloads: true,
             permissions: [],
             javaScriptEnabled: true

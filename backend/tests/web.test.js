@@ -1879,6 +1879,136 @@ test('the words are written without waiting for the model to move first', async 
 });
 
 
+test('a rich compose is addressed as a pill, written, and the send verified', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    let turns = 0;
+    llmClient.complete = async messages => {
+        if (isIntentCall(messages)) {
+            return intentReply({ act: 'send', write: ['Meet me at the bridge at 9'] });
+        }
+        turns += 1;
+        return JSON.stringify({ action: 'done', answer: 'nothing to do' });
+    };
+
+    try {
+        const result = await webAgent.browse(
+            'email leila@example.com saying "Meet me at the bridge at 9"', {
+                url: `${site.origin}/mail/rich-compose`, allowPrivate: true, maxActions: 6
+            });
+
+        assert.strictEqual(site.sent.length, 1,
+            `it should have gone: ${JSON.stringify(result.actions)}`);
+        assert.strictEqual(site.sent[0].to, 'leila@example.com',
+            'the pill carries the address the request named');
+        assert.strictEqual(site.sent[0].body, 'Meet me at the bridge at 9');
+        assert.strictEqual(result.status, 'success');
+        assert.strictEqual(turns, 0, 'and it needed no turn of the model at all');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('the control that opens the address book is refused in favour of the box', async () => {
+    const observation = {
+        url: 'https://mail.example.org/compose',
+        elements: [
+            { ref: 'e1', role: 'button', name: 'To' },
+            { ref: 'e2', role: 'textbox', name: 'To', tag: 'div', value: '' },
+            { ref: 'e3', role: 'button', name: 'Send' }
+        ]
+    };
+    const stub = {
+        resolve: async (ref) => ({
+            handle: ref,
+            element: observation.elements.find(el => el.ref === ref),
+            observation
+        }),
+        click: async () => { throw new Error('the picker must not be opened'); }
+    };
+    const context = {
+        goal: 'email leila@example.com saying hello',
+        userLabel: labels.label(ORIGIN.USER, SENSITIVITY.PERSONAL),
+        contextLabel: labels.label(ORIGIN.USER, SENSITIVITY.PERSONAL),
+        mandate: new Set(['compose', 'send'])
+    };
+
+    const outcome = await webAgent.act(stub, { action: 'click', ref: 'e1' },
+        observation, context, {});
+    assert.strictEqual(outcome.ok, false);
+    assert.match(String(outcome.detail || ''), /address book/i);
+    assert.match(String(outcome.detail || ''), /recipient box/i);
+});
+
+test('the newest words they wrote are read out of an opened thread', () => {
+    const outlook = ['Dinner', 'AP', 'Aditya Pande<them@example.com>',
+        'To:me@example.net', 'Wed 12-08-2026 17:39',
+        'You replied on Wed 12-08-2026 21:14',
+        'Yo', "Let's do dinner Saturday 9pm", 'Cheers',
+        'AP', 'Aditya Pande', 'Wed 12-08-2026 21:14',
+        'Hello, thank you for sending that over!'].join('\n');
+    assert.match(webAgent.latestFromThem({ text: outlook }, 'them@example.com'),
+        /^Yo\nLet's do dinner Saturday 9pm/,
+        'their message, not the reply the user sent after it');
+
+    const quoting = ['Stuff', 'Aditya Pande<them@example.com>', 'Wed 12-08-2026 17:38',
+        'Haha, thanks!',
+        'On Wed, 12 Aug 2026 at 17:37, Aditya Pande <them@example.com> wrote:',
+        'Hi', 'Thanks for sending that over'].join('\n');
+    assert.strictEqual(webAgent.latestFromThem({ text: quoting }, 'them@example.com'),
+        'Haha, thanks!', 'the words below the wrote: line are not theirs now');
+
+    const labelled = ['India or Pakistan',
+        'From: Philip Hargreaves <philip@example.com>', 'Date: August 1',
+        "Hi, I'm going on my honeymoon.", 'Any thoughts?',
+        'On July 30, 2026, Aditya Pande wrote:',
+        'Could we meet at Primrose Hill at 9 PM?'].join('\n');
+    assert.strictEqual(webAgent.latestFromThem({ text: labelled }, 'philip@example.com'),
+        "Hi, I'm going on my honeymoon.\nAny thoughts?");
+
+    assert.strictEqual(webAgent.latestFromThem({ text: 'Inbox\nNo messages' },
+        'them@example.com'), null);
+
+    // The live pane: the sender line broken around the address, the action
+    // toolbar rendered between the header and the date stamp, and unsent
+    // drafts carried on the thread — none of it is what they said.
+    const littered = {
+        text: ['Dinner', 'AP', 'From: Aditya Pande', 'them@example.com',
+            'Reply', 'Reply all', 'Forward', 'Apps', 'More items',
+            'To: me@example.net', 'Wed 12-08-2026 17:39',
+            'You replied on Wed 12-08-2026 21:14',
+            'Yo', "Let's do dinner Saturday 9pm", 'Cheers',
+            '[Draft]', 'Saved: Wed 12-08-2026 19:04',
+            'Hello, thank you for sending that over!',
+            'AP', 'Aditya Pande<me@example.net>', 'Wed 12-08-2026 21:14',
+            'Hello, thank you for sending that over!'].join('\n'),
+        elements: []
+    };
+    assert.match(webAgent.latestFromThem(littered, 'them@example.com'),
+        /^Yo\nLet's do dinner Saturday 9pm\nCheers/,
+        'the toolbar, the drafts and the user\'s own reply are not their words');
+    assert.doesNotMatch(webAgent.latestFromThem(littered, 'them@example.com'),
+        /thank you for sending|Reply|More items/);
+});
+
+test('a search box that announces itself as a combobox is still the search box', () => {
+    const observation = {
+        elements: [
+            { ref: 'e1', role: 'combobox', tag: 'input', value: '',
+              name: 'Search for email, meetings, files and more.' },
+            { ref: 'e2', role: 'button', name: 'New mail' }
+        ]
+    };
+    assert.strictEqual(webAgent.searchBox(observation).ref, 'e1');
+    assert.strictEqual(webAgent.fillable({ role: 'combobox', tag: 'select' }), false,
+        'a native select still is not a text field');
+});
+
 test('a figure that is not on the page is not reported as an answer', async () => {
     const site = await fixture.start();
     const store = scratch();
