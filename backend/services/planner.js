@@ -43,6 +43,24 @@ const REFERENCE = /^\$([a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)$/i;
 const PLACEHOLDER =
     /\$\(|\$\{|<[a-z_ ]+>|%[a-z_]+%|\byour[-_ ]|\busername\b|\/path\/to\/|\bexample\.com\b/i;
 
+// The mailbox is not a phone and the calendar is not a booking desk. A model
+// tempted by the one URL it knows will steer "text my sister" or "book me a
+// table" at the mail provider; naming what went wrong teaches the retry to
+// declare the gap instead. "text" counts only with a recipient after it —
+// "the text of my speech" is a noun and mails fine.
+const STEERED = new Set(Object.values(mailProvider.PROVIDERS)
+    .flatMap(provider => [provider.url, provider.calendar])
+    .map(url => new URL(url).hostname));
+const OTHER_CHANNEL =
+    /\btext(?:s|ing|ed)?\s+(?:me|him|her|them|us|(?:my|our|your|the)\s+\w+)\b|\b(?:sms|i-?message|whatsapp|telegram|slack|discord)\b/i;
+const NOT_AN_EVENT =
+    /\b(?:book|books|booking|reserve|reserves|reserving|reservation)\s+(?:me\s+|us\s+)?(?:a|an|the|some|two|three|\d+)?\s*(?:tables?|restaurants?|flights?|hotels?|taxis?|cabs?|seats?|tickets?)\b/i;
+
+// Mirrors rule 7a: what a file's name and metadata already answer. Only a
+// question of this shape lets a plan end at found paths.
+const LOCATING =
+    /\bwhere\b|\bwhich (?:folder|directory|drive)\b|\bwhether\b|\bexists?\b|\b(?:is|are) there\b|\bhow (?:many|big|large|old|recent)\b|\bwhen (?:did|was)\b[^?]{0,30}\b(?:chang|modif|creat|sav|updat|touch)/i;
+
 
 function procedureRule(capabilities) {
     if (!capabilities.some(capability => capability.kind === 'procedure')) return '';
@@ -248,7 +266,9 @@ const REPAIR_INSTRUCTION =
     'list, and make every "$step.output" reference point at an earlier step ' +
     'and a real output name. If you named a capability that is not in the ' +
     'list, DELETE that step rather than looking for a substitute — if the job ' +
-    'genuinely needs it, put it in "missing" instead.';
+    'genuinely needs it, put it in "missing" instead, and do the same when ' +
+    'nothing in the list truly performs the job: a skill does exactly what ' +
+    'its description says, never something merely like it.';
 
 
 function referencesIn(value, found = []) {
@@ -340,9 +360,47 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
             }
         }
 
-        for (const [name, io] of Object.entries(capability.inputs)) {
-            if (io.required && (inputs[name] === undefined || inputs[name] === null || inputs[name] === '')) {
-                errors.push(`${where}: ${capability.id} requires "${name}"`);
+        // A model that invents an input name usually decorated a real one —
+        // "input_directory" for "directory". When the real name is missing
+        // and the invented key contains it, the value moves across rather
+        // than the plan bouncing.
+        for (const key of Object.keys(inputs)) {
+            if (key in capability.inputs) continue;
+            const meant = Object.entries(capability.inputs).find(([name, io]) =>
+                io.required
+                && (inputs[name] === undefined || inputs[name] === null || inputs[name] === '')
+                && (key.includes(name) || name.includes(key)));
+            if (meant) {
+                inputs[meant[0]] = inputs[key];
+                delete inputs[key];
+                repairs.push(`input_name:${step.id}.${key}->${meant[0]}`);
+            }
+        }
+
+        // One error per step, echoing the inputs it already has: a retry told
+        // only what was missing rewrites the step and loses the rest.
+        const absent = Object.entries(capability.inputs)
+            .filter(([name, io]) => io.required
+                && (inputs[name] === undefined || inputs[name] === null || inputs[name] === ''))
+            .map(([name]) => `"${name}"`);
+        if (absent.length) {
+            errors.push(`${where}: ${capability.id} requires ${absent.join(' and ')} `
+                + `added to the inputs it already has, ${JSON.stringify(inputs)}`);
+        }
+
+        if (capability.id === 'web.browse') {
+            let aimed = null;
+            try { aimed = new URL(String(inputs.url || '')).hostname; } catch { }
+            if (STEERED.has(aimed)) {
+                const about = `${inputs.goal || ''} ${question}`;
+                const misfit = (about.match(OTHER_CHANNEL) || about.match(NOT_AN_EVENT) || [])[0];
+                if (misfit) {
+                    errors.push(
+                        `${where}: this steers "${String(misfit).trim()}" at the user's ` +
+                        'mailbox, which sends mail and keeps their calendar, nothing else. ' +
+                        'If no capability reaches what the request asks, leave "steps" ' +
+                        'empty and describe the job in "missing"');
+                }
             }
         }
 
@@ -381,10 +439,16 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
 
     // A plan that stops at gathered passages is completed, not rejected: the
     // answer step it forgot is appended deterministically, the way a stronger
-    // planner ends the same plan unprompted.
+    // planner ends the same plan unprompted. A plan that stops at found paths
+    // is finished the same way only when the question is one the paths
+    // themselves answer — where a file is, whether it exists. An imperative
+    // that merely stalled at found files gets no answer nobody asked for.
     const tail = unused[unused.length - 1];
-    if (unused.length === 1 && tail.isLast
-        && 'passages' in (tail.capability.outputs || {})
+    const evidence = tail
+        && ['passages', 'paths'].find(name => name in (tail.capability.outputs || {}));
+    const answerable = evidence === 'passages'
+        || (evidence === 'paths' && LOCATING.test(String(question)));
+    if (unused.length === 1 && tail.isLast && answerable
         && String(question).trim()
         && graph.resolveId('answer')
         && parsed.steps.length < maxSteps) {
@@ -392,7 +456,7 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
         while (seen.has(id)) id = `${id}a`;
         parsed.steps.push({
             id, capability: 'answer',
-            inputs: { question: String(question).trim(), passages: `$${tail.step.id}.passages` },
+            inputs: { question: String(question).trim(), passages: `$${tail.step.id}.${evidence}` },
             reason: 'read the answer out of what was gathered'
         });
         repairs.push('appended_answer');
@@ -405,12 +469,15 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
             `${Object.keys(entry.capability.outputs).join(', ')} that nothing uses` +
             (entry.isLast ? ' and does not end the plan with an answer' : '') +
             // Costs nothing on a valid plan; on retry it teaches the merge a
-            // find-then-act request needs.
+            // find-then-act request needs — or, off the web, that gathering
+            // for a job the list cannot do belongs in "missing".
             (entry.capability.id === 'web.browse'
                 ? ' — if a later step was meant to act on what this one finds, merge them: '
                   + 'one web.browse carries the whole request, reading one page and acting '
                   + 'on another by itself'
-                : '')
+                : ' — either a later step must use what this produces, or the job it was '
+                  + 'gathering for is not one the list can do: then leave the step out '
+                  + 'and name that job in "missing"')
         );
     }
 

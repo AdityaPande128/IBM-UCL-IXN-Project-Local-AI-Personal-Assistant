@@ -207,7 +207,15 @@ const MAILBOX = [
 
     { id: 'm6', box: 'inbox', from: 'Sandhya Pandey', address: 'sandhya@example.com',
       subject: 'Dinner — are you free on Saturday evening this week?', date: 'July 5',
-      body: `Let's do dinner Saturday 9pm at Alleycats in Westminster.` }
+      body: `Let's do dinner Saturday 9pm at Alleycats in Westminster.` },
+
+    // A thread whose plan-bearing message sits collapsed behind an
+    // "Expand conversation" control, the way a busy conversation renders.
+    { id: 'm7', box: 'inbox', from: 'Priya Sharma', address: 'priya@example.com',
+      subject: 'Curry — are you around on Friday evening for a proper catch-up?',
+      date: 'July 20',
+      body: `Sounds lovely, see you then!`,
+      older: `Curry Friday 8pm at Tayyabs in Whitechapel?`, olderDate: 'July 18' }
 ];
 
 const SEARCH_BOX = `
@@ -348,6 +356,11 @@ function mailRoute(pathname, params, sent) {
                ${message.from || message.to} &lt;${message.address}&gt;</p>
             <p>Date: ${message.date}</p>
             <blockquote>${message.body}</blockquote>
+            ${message.older ? (params.all
+                ? `<p>From: ${message.from} &lt;${message.address}&gt;</p>
+                   <p>Date: ${message.olderDate || message.date}</p>
+                   <blockquote>${message.older}</blockquote>`
+                : `<a href="/mail/thread?id=${message.id}&all=1">Expand conversation</a>`) : ''}
             ${message.quoting ? `<blockquote>${message.quoting}</blockquote>` : ''}
             ${message.attachment ? `<p>One attachment: ${message.attachment.name}</p>
             <a href="/mail/attachment?id=${message.id}">Download ${message.attachment.name}</a>` : ''}

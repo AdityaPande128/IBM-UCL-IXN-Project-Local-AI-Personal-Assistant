@@ -1561,7 +1561,7 @@ test('the words to be typed are kept exactly as the user wrote them', async () =
 });
 
 
-test('the search box is used for whatever the request was about, not just an address', async () => {
+test('the search box gets the person the question is about, not the reading\'s operators', async () => {
     const site = await fixture.start();
     const store = scratch();
     const real = llmClient.complete;
@@ -1576,8 +1576,10 @@ test('the search box is used for whatever the request was about, not just an add
             url: `${site.origin}/mail`, allowPrivate: true, maxActions: 3
         });
 
-        assert.strictEqual(result.actions[0].detail, 'searched for to:philip');
-        assert.match(result.url, /q=to%3Aphilip/);
+        assert.strictEqual(result.actions[0].detail, 'searched for Philip',
+            'a replied-question searches the correspondent, so both sides share the page');
+        assert.match(String(result.answer), /^No/);
+        assert.match(String(result.answer), /no reply yet/);
     } finally {
         llmClient.complete = real;
         await browser.close();
@@ -2327,6 +2329,45 @@ test('an event takes its name from the dictated words or the request\'s own obje
         'a pronoun names nothing — the fallback wording must be consulted instead');
 });
 
+test('a correspondent can be named without an address', () => {
+    assert.strictEqual(
+        webAgent.namedFrom('find the dinner email from Sandhya and put the dinner on my calendar'),
+        'Sandhya');
+    assert.strictEqual(
+        webAgent.namedFrom('the email from Sandhya Pandey about dinner'),
+        'Sandhya Pandey');
+    assert.strictEqual(webAgent.namedFrom('the invite from last week'), null,
+        'a time is not a correspondent');
+    assert.strictEqual(webAgent.namedFrom('an email from my landlord'), null);
+    assert.strictEqual(webAgent.namedFrom('the email from work about the party'), null,
+        'a place is not a correspondent');
+});
+
+test('a bare name opens their messages only from the sender line', () => {
+    const pane = {
+        elements: [],
+        text: 'Dinner\nSandhya Pandey\nMon 7/28/2026 9:15 AM\nSee you at the recital.\n'
+            + 'Sandhya Pandey\nTue 8/12/2026 1:05 PM\nDinner is at nine.\n'
+    };
+    assert.strictEqual(webAgent.latestFromThem(pane, 'Sandhya'), 'Dinner is at nine.');
+
+    const prose = {
+        elements: [],
+        text: 'From: Aditya Pande\nDate: July 3\nCan you tell Sandhya the plan moved?\n'
+    };
+    assert.strictEqual(webAgent.latestFromThem(prose, 'Sandhya'), null,
+        'a name mentioned mid-sentence is not a sender line');
+
+    // A narrow pane wraps the sender's name across lines.
+    const wrapped = {
+        elements: [],
+        text: 'Dinner\nAP\nAditya\nPande\nWed 12-08-2026 17:39\n'
+            + 'Yo Let\'s do dinner Saturday 9pm at alleycats\n'
+    };
+    assert.strictEqual(webAgent.latestFromThem(wrapped, 'Aditya Pande'),
+        'Yo Let\'s do dinner Saturday 9pm at alleycats');
+});
+
 test('a booking whose details live in an email becomes a card, not a keystroke', async () => {
     const site = await fixture.start();
     const store = scratch();
@@ -2364,6 +2405,111 @@ test('a booking whose details live in an email becomes a card, not a keystroke',
         const date = webAgent.likeDate('13-08-2026', wanted.date);
         assert.deepStrictEqual(site.booked, [{ title: 'Dinner', date, start: '21:00' }],
             'the approved booking must land exactly as the email said');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('whether they wrote back is read off the user\'s own thread to them', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+    // The reading proposes operator soup, as the live model does; every
+    // later call fails — the answer must come from the page, not a model.
+    llmClient.complete = async messages => {
+        if (isIntentCall(messages)) {
+            const askedFor = messages[messages.length - 1].content || '';
+            return intentReply({
+                query: /nadia/i.test(askedFor) ? 'to:me from:nadia' : null
+            });
+        }
+        return 'not even json';
+    };
+
+    try {
+        const yes = await webAgent.browse('did Nadia ever get back to me about the Barbican?', {
+            url: `${site.origin}/mail`, allowPrivate: true, maxActions: 6
+        });
+        assert.strictEqual(yes.status, 'success', yes.reason || yes.answer);
+        assert.match(yes.answer, /^Yes/);
+        assert.match(yes.answer, /1 reply/);
+
+        const no = await webAgent.browse('has Philip written back to my last email?', {
+            url: `${site.origin}/mail`, allowPrivate: true, maxActions: 6,
+        });
+        assert.strictEqual(no.status, 'success', no.reason || no.answer);
+        assert.match(no.answer, /^No/);
+        assert.match(no.answer, /no reply yet/);
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('a correspondent named by bare name still books from their email', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+    llmClient.complete = async () => 'not even json';
+
+    try {
+        const goal = 'find the dinner email from Sandhya and put the dinner on my calendar';
+        const result = await webAgent.browse(goal, {
+            url: `${site.origin}/mail`, allowPrivate: true, maxActions: 8,
+            request: goal, calendarUrl: `${site.origin}/calendar/timed`
+        });
+
+        assert.strictEqual(result.status, 'needs_approval', result.reason || result.answer);
+        assert.ok(result.proposal, 'the run must come back carrying the card');
+        assert.match(result.proposal.will, /the email from Sandhya says/);
+        assert.match(result.proposal.found, /Alleycats/);
+
+        const proposals = require('../services/proposals');
+        const outcome = await proposals.approve(result.proposal.id, {});
+        assert.strictEqual(outcome.status, 'success', outcome.response);
+
+        const wanted = webAgent.whenFrom('for saturday at 9:00 pm');
+        const date = webAgent.likeDate('13-08-2026', wanted.date);
+        assert.deepStrictEqual(site.booked, [{ title: 'Dinner', date, start: '21:00' }],
+            'the name alone must carry the run to the same booking the address did');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('a when that sits collapsed under the thread is expanded into the card', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+    llmClient.complete = async () => 'not even json';
+
+    try {
+        const goal = 'find the curry email from Priya and put the curry on my calendar';
+        const result = await webAgent.browse(goal, {
+            url: `${site.origin}/mail`, allowPrivate: true, maxActions: 8,
+            request: goal, calendarUrl: `${site.origin}/calendar/timed`
+        });
+
+        assert.strictEqual(result.status, 'needs_approval', result.reason || result.answer);
+        assert.match(result.proposal.found, /Tayyabs/,
+            'the words offered must be the collapsed message, not the timeless reply');
+        assert.match(result.proposal.will, /"Curry" for friday at 8:00 pm/);
+
+        const proposals = require('../services/proposals');
+        const outcome = await proposals.approve(result.proposal.id, {});
+        assert.strictEqual(outcome.status, 'success', outcome.response);
+
+        const wanted = webAgent.whenFrom('for friday at 8:00 pm');
+        const date = webAgent.likeDate('13-08-2026', wanted.date);
+        assert.deepStrictEqual(site.booked, [{ title: 'Curry', date, start: '20:00' }]);
     } finally {
         llmClient.complete = real;
         await browser.close();

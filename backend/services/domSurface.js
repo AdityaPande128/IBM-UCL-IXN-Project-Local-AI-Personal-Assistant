@@ -131,7 +131,10 @@ async function fill(handle, text) {
 
 async function submit(handle) {
     try {
-        await handle.press('Enter');
+        // With a handle, Enter lands on it; without one it lands wherever
+        // focus is — after a click, on the thing just clicked.
+        if (handle) await handle.press('Enter');
+        else await page.keyboard.press('Enter');
     } catch (err) {
         return { ok: false, why: err.message };
     }

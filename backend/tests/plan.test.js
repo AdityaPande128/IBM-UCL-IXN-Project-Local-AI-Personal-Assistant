@@ -229,6 +229,21 @@ test('a required input cannot be left out', () => {
     assert.match(check.errors.join(' '), /requires "what"/);
 });
 
+test('an input name survives the artefacts small models put on it', () => {
+    const check = validate({
+        goal: 'x',
+        steps: [
+            { id: 's1', capability: 'find', inputs: { what_text: 'thesis' } },
+            { id: 's2', capability: 'say',
+              inputs: { question: 'where is it?', passages: '$s1.paths' } }
+        ]
+    });
+
+    assert.ok(check.valid, check.errors.join('; '));
+    assert.ok(check.repairs.some(repair => repair.startsWith('input_name:')),
+        'the decorated name must be moved onto the real input, and recorded');
+});
+
 test('duplicate step ids are rejected', () => {
     const check = validate({
         goal: 'x',
@@ -314,6 +329,70 @@ test('a plan that gathers material must end by saying something', () => {
         missing: []
     });
     assert.ok(answered.valid, answered.errors.join('; '));
+});
+
+test('a where-question that stops at found paths is finished with the answer', () => {
+    const check = planner.validatePlan({
+        goal: 'Say where the tenancy agreement is',
+        steps: [{ id: 's1', capability: 'files.search', inputs: { text: 'tenancy agreement' } }],
+        missing: []
+    }, { question: 'where did I save the tenancy agreement' });
+
+    assert.ok(check.valid, check.errors.join('; '));
+    assert.ok(check.repairs.includes('appended_answer'));
+});
+
+test('an imperative that stalls at found files is not rescued into an answer', () => {
+    const check = planner.validatePlan({
+        goal: 'Convert the photos',
+        steps: [{ id: 's1', capability: 'files.search', inputs: { ext: 'heic' } }],
+        missing: []
+    }, { question: 'convert all the heic photos on my desktop to jpeg' });
+
+    assert.strictEqual(check.valid, false);
+    assert.match(check.errors.join(' '), /"missing"/,
+        'the error must teach that an undoable job is declared, not half-done');
+});
+
+test('a message for another channel is not steered at the mailbox', () => {
+    const texted = planner.validatePlan({
+        goal: 'Text the user\'s sister',
+        steps: [{ id: 's1', capability: 'web.browse',
+            inputs: { goal: 'text my sister to say I will be late',
+                      url: 'https://outlook.live.com/mail' } }],
+        missing: []
+    }, { question: 'text my sister to say I will be late' });
+    assert.strictEqual(texted.valid, false);
+    assert.match(texted.errors.join(' '), /mailbox/);
+
+    const told = planner.validatePlan({
+        goal: 'Tell Ingrid to meet at nine',
+        steps: [{ id: 's1', capability: 'web.browse',
+            inputs: { goal: 'tell Ingrid to meet me at Primrose Hill at 9 PM',
+                      url: 'https://outlook.live.com/mail' } }],
+        missing: []
+    }, { question: 'tell Ingrid to meet me at Primrose Hill at 9 PM' });
+    assert.ok(told.valid, told.errors.join('; '));
+});
+
+test('a restaurant table is not booked on the user\'s calendar', () => {
+    const table = planner.validatePlan({
+        goal: 'Book a table',
+        steps: [{ id: 's1', capability: 'web.browse',
+            inputs: { goal: 'book a table for two near the office for tonight',
+                      url: 'https://outlook.live.com/calendar/view/week' } }],
+        missing: []
+    }, { question: 'book me a table for two at a restaurant near the office tonight' });
+    assert.strictEqual(table.valid, false);
+
+    const meeting = planner.validatePlan({
+        goal: 'Book a meeting',
+        steps: [{ id: 's1', capability: 'web.browse',
+            inputs: { goal: 'book a meeting with Sam for Friday at 3 PM',
+                      url: 'https://outlook.live.com/calendar/view/week' } }],
+        missing: []
+    }, { question: 'book a meeting with Sam for Friday at 3 PM' });
+    assert.ok(meeting.valid, meeting.errors.join('; '));
 });
 
 const PATHS_GRAPH = fakeGraph({

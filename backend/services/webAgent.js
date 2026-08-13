@@ -640,6 +640,28 @@ function fromThem(query, goal) {
     return `from:${text}`;
 }
 
+// Who the mail is from when the request names them without an address: "the
+// dinner email from Sandhya". The name is what follows "from" — one word as
+// written, further words only while they stay capitalised — and a word that
+// is really a time or a place ("from last week", "from work") names nobody.
+const NAMED_FROM =
+    /\b(?:e-?mails?|messages?|notes?|invites?)\s+from\s+(?!(?:my|the|a|an|your)\b)([\p{L}][\p{L}'’-]*(?:\s+[\p{L}][\p{L}'’-]*){0,2})/iu;
+const NOT_THEM =
+    /^(?:today|yesterday|tomorrow|last|this|next|that|earlier|before|work|school|home|uni|college|him|her|them|me|us|you)$/i;
+
+function namedFrom(text) {
+    const found = String(text || '').match(NAMED_FROM);
+    if (!found) return null;
+    const words = found[1].split(/\s+/);
+    if (NOT_THEM.test(words[0])) return null;
+    const name = [words[0]];
+    for (const word of words.slice(1)) {
+        if (!/^\p{Lu}/u.test(word)) break;
+        name.push(word);
+    }
+    return name.join(' ');
+}
+
 const THE_LATEST = /\b(latest|most recent|newest|last|recent)\b/i;
 
 const RESULTS_WAIT_MS = 3000;
@@ -655,6 +677,34 @@ function topRow(observation) {
         && !SELECTORS.has(element.role)
         && !ACCOUNT_CONTROL.test(element.name || '')
         && String(element.name || '').length > ROW_LABEL) || null;
+}
+
+// The user's own last message to a correspondent: the row a mailbox labels
+// "To: <them>". Whether they wrote back lives on that thread — the newest
+// message they happen to appear in is where a wrong answer comes from.
+function sentRowTo(observation, who) {
+    const needle = String(who || '').trim().toLowerCase();
+    return ((observation && observation.elements) || []).find(element =>
+        !holdsText(element) && !element.disabled
+        && !SELECTORS.has(element.role)
+        && /^to:?\s/i.test(element.name || '')
+        && (!needle || String(element.name).toLowerCase().includes(needle))) || null;
+}
+
+// "1 reply", "no replies" — a thread that announces its own standing has
+// already answered whether they wrote back. A bare "Reply" button never
+// matches: the count or the "no" in front is what makes it a standing.
+const THE_STANDING = /\b(\d+|no)\s+repl(?:y|ies)\b/i;
+
+// The correspondent inside a reading's query, whatever decoration the model
+// gave it: "to:me from:nadia" names nadia. A plain name passes through, and
+// operator soup with no from: falls back to the name the goal capitalises.
+function correspondentIn(query, goal) {
+    const text = String(query || '');
+    const from = text.match(/\bfrom:\s*([\w.@+-]+)/i);
+    if (from) return from[1];
+    if (text.trim() && !OPERATOR.test(text)) return text.trim();
+    return subject(goal)[0] || null;
 }
 
 function subject(goal) {
@@ -1033,7 +1083,7 @@ function matches(address, person) {
 }
 
 const ASKS_REPLIED =
-    /\b(replied|repl(y|ies)|responded|response|answered|got ?back|heard (back|from)|written back)\b/i;
+    /\b(replied|repl(y|ies)|responded|response|answered|(got|get|gets|gotten|getting) ?back|heard (back|from)|written back)\b/i;
 
 function asksWhetherReplied(goal) {
     return ASKS_REPLIED.test(String(goal || ''));
@@ -1065,16 +1115,33 @@ function plainDate(line) {
     return !/[a-z]{3,}/i.test(residue);
 }
 
-// The newest words the named correspondent wrote, read out of an opened
+// Every message the named correspondent wrote, read out of an opened
 // thread: their sender line starts a message, the next date stamp ends it,
 // and anything under a "wrote:" line is an older message being carried
 // along, not something they said now. A pane that writes its sender lines
 // bare lists messages oldest first, so the last block is the newest; a pane
 // that labels them "From:" puts the message above its quotes, so the first
 // block is — and a From: line under a bare-line pane is a quoted header.
-function latestFromThem(observation, who) {
-    const address = String(who || '').trim().toLowerCase();
-    if (!address.includes('@')) return null;
+function messagesFromThem(observation, who) {
+    const needle = String(who || '').trim().toLowerCase();
+    if (!needle) return { blocks: [], newestLast: false };
+    // An address may sit anywhere in a sender line; a bare name must open it.
+    // Prose mentions a name mid-sentence — "tell Sandhya I said hi" — but a
+    // header leads with it, and only the header starts one of their messages.
+    // A narrow pane wraps a name across lines, so the sender may span a few:
+    // the match reports how many it took, and the reader steps past them.
+    const anywhere = needle.includes('@');
+    const senderSpan = (lines, at) => {
+        let led = lines[at].toLowerCase().replace(/^from\b[:\s]*/, '');
+        if (anywhere) return led.includes(needle) ? 1 : 0;
+        let span = 1;
+        while (led.length < needle.length && at + span < lines.length) {
+            led = `${led} ${lines[at + span].toLowerCase()}`;
+            span += 1;
+        }
+        return led.startsWith(needle)
+            && !/[\p{L}\p{N}]/u.test(led.charAt(needle.length)) ? span : 0;
+    };
 
     const text = String((observation && observation.text) || '');
 
@@ -1106,8 +1173,9 @@ function latestFromThem(observation, who) {
             waiting = false;
         };
 
-        for (const raw of text.split('\n')) {
-            const line = raw.trim();
+        const lines = text.split('\n').map(raw => raw.trim());
+        for (let at = 0; at < lines.length; at++) {
+            const line = lines[at];
 
             if (QUOTE_LINE.test(line)) { flush(); continue; }
             // An unsent draft shown on the thread is not something anybody
@@ -1119,9 +1187,11 @@ function latestFromThem(observation, who) {
             }
 
             const labelled = /^from\b/i.test(line);
-            if (line.toLowerCase().includes(address) && labelled === fromLabelled) {
+            const span = senderSpan(lines, at);
+            if (span && labelled === fromLabelled) {
                 flush();
                 waiting = true;
+                at += span - 1;
                 continue;
             }
             if (labelled) { flush(); continue; }
@@ -1140,9 +1210,14 @@ function latestFromThem(observation, who) {
     };
 
     const bare = read(false);
-    if (bare.length) return bare[bare.length - 1];
-    const labelled = read(true);
-    return labelled.length ? labelled[0] : null;
+    if (bare.length) return { blocks: bare, newestLast: true };
+    return { blocks: read(true), newestLast: false };
+}
+
+function latestFromThem(observation, who) {
+    const their = messagesFromThem(observation, who);
+    if (!their.blocks.length) return null;
+    return their.newestLast ? their.blocks[their.blocks.length - 1] : their.blocks[0];
 }
 
 // "Friday at 3pm", "tomorrow at 14:30", "on the 15th at noon" — the words a
@@ -1698,6 +1773,16 @@ async function browse(goal, options = {}) {
         }
         if (options.url) {
             let landed = await surface.navigate(options.url);
+
+            // A signed-in site refreshing its session can bounce a cold
+            // navigation onto another host entirely — a marketing page in
+            // the mail site's clothes. By the time the bounce has landed
+            // the session is refreshed, and asking once more arrives.
+            if (safeHost(landed.url) !== safeHost(options.url)) {
+                await surface.settle().catch(() => null);
+                landed = await surface.navigate(options.url);
+            }
+
             let arrival = checkArrival(landed.url, options);
 
             if (arrival && mode === browser.MODE.ATTACHED && surface !== chromeSurface
@@ -1768,15 +1853,22 @@ async function browse(goal, options = {}) {
         const asked = `${goal || ''} ${options.request || ''}`;
         const detailsInMail = mandate.has('book')
             && /\b(e-?mail\w*|mail\w*|inbox|message\w*)\b/i.test(asked);
-        const looking = fromThem(
-            intent.query
-                || (mandate.size
-                    ? (replying(goal) || detailsInMail
-                        ? (String(asked).match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
-                        : null)
-                    : subject(goal)[0])
-                || null,
-            goal);
+        // A replied-question searches for the correspondent themselves —
+        // both sides of the exchange on one page — not for whatever
+        // operator soup the reading proposed.
+        const wondersReplied = asksWhetherReplied(goal) && !mandate.size;
+        const looking = wondersReplied
+            ? correspondentIn(intent.query, goal)
+            : fromThem(
+                intent.query
+                    || (mandate.size
+                        ? (replying(goal) || detailsInMail
+                            ? (String(asked).match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
+                                || namedFrom(asked)
+                            : null)
+                        : subject(goal)[0])
+                    || null,
+                asked);
         // The ladder runs whenever there is someone to look for — including
         // when the intent reading failed and left only its fallback, which
         // is precisely the run that needs the deterministic route.
@@ -1837,24 +1929,35 @@ async function browse(goal, options = {}) {
             }
 
             // "Has X replied" is a question about replying only when nothing
-            // is mandated — a mandated "reply to X" needs the row opened.
+            // is mandated — a mandated "reply to X" needs their newest row.
+            // The question opens a different row: the user's own message TO
+            // them, whose thread carries the answer.
+            const correspondent = String(looking || '').replace(/^from:/i, '');
             if (searched && !openedNewest
-                && !(asksWhetherReplied(goal) && !mandate.size)
-                && (!mandate.size || replying(goal) || mandate.has('save') || detailsInMail)) {
-                let row = topRow(observation);
+                && (wondersReplied || !mandate.size || replying(goal)
+                    || mandate.has('save') || detailsInMail)) {
+                const nextRow = () => (wondersReplied
+                    ? sentRowTo(observation, correspondent)
+                    : topRow(observation));
+                let row = nextRow();
                 // A restored view re-runs its search after the submit and
                 // renders in bursts that fool DOM-quiet settling — wait for
-                // the search's own outcome: rows, or a no-results notice.
+                // the search's own outcome: rows, or a no-results notice. A
+                // rendered list that simply has no sent row will not grow
+                // one, so a replied-question stops waiting there.
                 const until = Date.now() + RESULTS_WAIT_MS;
-                while (!row && !foundNothing(observation) && Date.now() < until) {
+                while (!row && !foundNothing(observation)
+                    && !(wondersReplied && topRow(observation))
+                    && Date.now() < until) {
                     await new Promise(pause => setTimeout(pause, RESULTS_POLL_MS));
                     await surface.settle().catch(() => null);
                     observation = await surface.observe();
                     contextLabel = labels.join(contextLabel, observation.label);
-                    row = topRow(observation);
+                    row = nextRow();
                 }
                 if (row) {
                     openedNewest = true;
+                    const beforeOpen = perception.fingerprint(observation);
                     const opened = await act(surface, { action: 'click', ref: row.ref },
                         observation,
                         { goal, userLabel: inputLabel, contextLabel, mandate, home,
@@ -1868,6 +1971,67 @@ async function browse(goal, options = {}) {
                         observation = await surface.observe();
                         contextLabel = labels.join(contextLabel, observation.label);
 
+                        // A virtualised mail list can swallow the click: the
+                        // row is selected — the toolbar even changes — but
+                        // nothing opens. The page having changed proves
+                        // nothing; what matters is whether the message is
+                        // readable. Enter on the selected row is the gesture
+                        // such a list always honours, and on an already-open
+                        // thread it merely reopens it.
+                        const unopened = () =>
+                            perception.fingerprint(observation) === beforeOpen
+                            || (Boolean(correspondent)
+                                && !messagesFromThem(observation, correspondent).blocks.length
+                                && !THE_STANDING.test(
+                                    String((observation && observation.text) || '')));
+                        if (unopened()) {
+                            // The row is re-found by its own words on the
+                            // page as it stands now — a positional ref could
+                            // name anything after a navigation. Where even
+                            // its words have shifted, the click left focus
+                            // on the row, and a bare Enter lands there.
+                            const wanted = String(row.name || '').slice(0, 40);
+                            const still = wanted
+                                && ((observation && observation.elements) || [])
+                                    .find(element => String(element.name || '')
+                                        .startsWith(wanted));
+                            const held = still
+                                ? await surface
+                                    .resolve(still.ref, anchorFor(still, observation))
+                                    .catch(() => null)
+                                : null;
+                            await surface.submit(held && held.handle).catch(() => null);
+                            await surface.settle().catch(() => null);
+                            observation = await surface.observe();
+                            contextLabel = labels.join(contextLabel, observation.label);
+                            history.push('the click only selected the row — Enter opened it');
+                        }
+
+                        // Standing on the user's own thread to them, the
+                        // page's answer is read out, not paraphrased.
+                        if (wondersReplied) {
+                            const standing =
+                                String((observation && observation.text) || '')
+                                    .match(THE_STANDING);
+                            if (standing) {
+                                status = 'success';
+                                answer = /^no$/i.test(standing[1])
+                                    ? `No — your last message to ${correspondent} has `
+                                      + 'no reply yet.'
+                                    : `Yes — ${correspondent} replied: your last message `
+                                      + `to them shows ${standing[1]} `
+                                      + (Number(standing[1]) === 1 ? 'reply' : 'replies')
+                                      + '.';
+                                actions.push({ action: 'done',
+                                    reason: 'read the thread\'s own standing', answer });
+                                record(0, {
+                                    capability: 'web.done', status: 'success',
+                                    label: contextLabel, summary: answer,
+                                    durationMs: Date.now() - startedAt
+                                });
+                            }
+                        }
+
                         // The details live in the message just opened: "put
                         // the dinner on my calendar" books what the email
                         // says. Nothing from the page is typed unseen — the
@@ -1875,9 +2039,51 @@ async function browse(goal, options = {}) {
                         // card runs the plain booking the user has now read,
                         // down the same route a spoken booking takes.
                         if (detailsInMail && /^from:/i.test(looking)) {
-                            const address = looking.replace(/^from:/i, '');
-                            const said = latestFromThem(observation, address);
-                            const found = said ? whenFrom(said) : null;
+                            const sender = looking.replace(/^from:/i, '');
+                            // Their newest words name the event — but when
+                            // they carry no when, the newest message of
+                            // theirs that does is the one the request meant.
+                            const readTheirWhen = () => {
+                                const their = messagesFromThem(observation, sender);
+                                const ordered = their.newestLast
+                                    ? [...their.blocks].reverse() : their.blocks;
+                                const block = ordered.find(words => whenFrom(words))
+                                    || ordered[0] || null;
+                                return { said: block,
+                                         found: block ? whenFrom(block) : null };
+                            };
+                            let { said, found } = readTheirWhen();
+                            // The message the request points at can sit
+                            // collapsed under the thread's later traffic;
+                            // the pane's own expander brings the history
+                            // back before the read is given up on.
+                            if (!found) {
+                                const expander =
+                                    ((observation && observation.elements) || [])
+                                        .find(element => !holdsText(element)
+                                            && !element.disabled
+                                            && /\bexpand\b.*\b(conversation|all|messages)\b|\bsee more messages\b/i
+                                                .test(element.name || ''));
+                                const pressed = expander
+                                    && await act(surface,
+                                        { action: 'click', ref: expander.ref },
+                                        observation,
+                                        { goal, userLabel: inputLabel, contextLabel,
+                                          mandate, home },
+                                        options);
+                                if (pressed && pressed.ok) {
+                                    actions.push({ action: 'click', ref: expander.ref,
+                                        ok: true,
+                                        detail: `pressed "${expander.name}"` });
+                                    history.push(
+                                        'expanded the conversation to read its older messages');
+                                    await surface.settle().catch(() => null);
+                                    observation = await surface.observe();
+                                    contextLabel =
+                                        labels.join(contextLabel, observation.label);
+                                    ({ said, found } = readTheirWhen());
+                                }
+                            }
                             const title = eventName(intent, goal)
                                 || eventName(intent, options.request);
                             if (said && found && title) {
@@ -1896,10 +2102,10 @@ async function browse(goal, options = {}) {
                                     request: goal,
                                     found: words,
                                     will: `book "${title}"${day}${clock}, as the email from `
-                                        + `${address} says`
+                                        + `${sender} says`
                                 }, () => bookAsApproved(plainGoal, options));
                                 status = 'needs_approval';
-                                failure = `The email from ${address} says: "${words}". `
+                                failure = `The email from ${sender} says: "${words}". `
                                     + `I can book "${title}"${day}${clock} — approve and I `
                                     + 'will put it on the calendar.';
                                 actions.push({ action: 'propose',
@@ -1917,7 +2123,7 @@ async function browse(goal, options = {}) {
                         // Asked what they said, standing on their newest
                         // message, the answer is its words — read them out
                         // rather than leaving the extraction to the model.
-                        if (!mandate.size && /^from:/i.test(looking)) {
+                        if (!mandate.size && status === 'exhausted' && /^from:/i.test(looking)) {
                             if (process.env.JARVIS_WEB_DEBUG) {
                                 console.error(`----- reader pane -----\n${observation.text}`);
                             }
@@ -1960,7 +2166,7 @@ async function browse(goal, options = {}) {
         }
 
         const carryOut = async () => {
-        if (asksWhetherReplied(goal) && !mandate.size && intent.query) {
+        if (asksWhetherReplied(goal) && !mandate.size && status !== 'success' && intent.query) {
             const who = (intent.query.match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
                 || intent.query.replace(/^\w+:/, '').trim();
             const look = async (query, scope) => {
@@ -2796,9 +3002,9 @@ module.exports = {
     recordableText,
     named,
     subject,
-    fromThem,
+    fromThem, namedFrom,
     fillable,
-    latestFromThem,
+    latestFromThem, messagesFromThem,
     plainDate,
     whenFrom,
     likeDate,

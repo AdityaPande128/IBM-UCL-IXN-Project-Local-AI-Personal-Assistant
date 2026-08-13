@@ -342,7 +342,12 @@ function renderContext({ instruction, trusted, untrusted }) {
 async function answer(query, options = {}) {
     const startedAt = Date.now();
 
-    const supplied = Array.isArray(options.passages) ? options.passages : null;
+    // A supplied passage may arrive as a bare string — a path out of
+    // files.search answers a where-question — and material is material
+    // whatever shape it came in.
+    const supplied = Array.isArray(options.passages)
+        ? options.passages.map(p => (typeof p === 'string' ? { text: p } : p))
+        : null;
     const gathered = supplied
         ? applyGlobalMargin(supplied
             .filter(p => p && typeof p.text === 'string' && p.text.trim())

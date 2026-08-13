@@ -230,3 +230,15 @@ test('a model that ignores the verdict protocol still answers as before', async 
     assert.strictEqual(result.refused, false);
     assert.strictEqual(result.text, 'It is at 3pm on Thursday.');
 });
+
+test('a bare string is material too — a path grounds a where-answer', async (t) => {
+    withModel(t, 'ANSWERED\nIt is in your Documents folder.');
+
+    const result = await answerService.answer('where did I save the tenancy agreement', {
+        passages: ['/Users/someone/Documents/tenancy-agreement.pdf']
+    });
+
+    assert.strictEqual(result.grounded, true,
+        'a supplied path must count as material, not be filtered to nothing');
+    assert.strictEqual(result.text, 'It is in your Documents folder.');
+});
