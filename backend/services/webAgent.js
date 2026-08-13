@@ -841,7 +841,7 @@ function ungrounded(answer, observation, goal) {
 }
 
 const REPLYING = /\b(reply|replies|replying|respond|responding|answer|answering|get back to)\b/i;
-const OPENS_NEW = /\b(compose|new message|new email|new mail)\b/i;
+const OPENS_NEW = /\b(compose|new message|new email|new mail|new event|create event|new appointment)\b/i;
 const OPENS_REPLY = /\breply\b/i;
 
 function replying(goal) {
@@ -896,13 +896,19 @@ function hasBody(observation) {
 
 const AN_ADDRESS = /^[\w.+-]+@[\w.-]+\.\w{2,}$/;
 
-function boxFor(observation, value, isLast) {
+function boxFor(observation, value, isLast, booking = false) {
     if (AN_ADDRESS.test(String(value || '').trim())) {
         const recipient = ((observation && observation.elements) || []).find(element =>
             fillable(element) && !element.disabled && !element.sensitive
             && ADDRESSES.test(element.name || '')
             && !String(element.value || '').trim());
         if (recipient) return recipient;
+    }
+    // A booking's words are the event's name: they go into the title box a
+    // calendar editor offers, never into the event body.
+    if (booking) {
+        const title = titleBox(observation);
+        if (title && !String(title.value || '').trim()) return title;
     }
     // Dictated words go into the message body, not into whichever empty box
     // the tree offers first — on some mailboxes that is the subject line.
@@ -916,6 +922,17 @@ function boxFor(observation, value, isLast) {
 }
 
 const A_BODY = /\b(message|body|content)\b/i;
+
+const A_TITLE = /\btitle\b/i;
+
+// A calendar editor's defining box: where the event's name goes. A mail
+// compose has no such box — its "title" is the subject, named as one.
+function titleBox(observation) {
+    return ((observation && observation.elements) || []).find(element =>
+        holdsText(element) && !element.disabled && !element.sensitive
+        && A_TITLE.test(element.name || '')
+        && !ASSISTANT_BOX.test(element.name || ''));
+}
 
 function emptyMessage(observation) {
     const boxes = ((observation && observation.elements) || []).filter(element =>
@@ -1127,6 +1144,107 @@ function latestFromThem(observation, who) {
     return labelled.length ? labelled[0] : null;
 }
 
+// "Friday at 3pm", "tomorrow at 14:30", "on the 15th at noon" — the words a
+// request places an event with. Nothing recognised means the editor's own
+// default slot stands.
+const DAY_WORDS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+const A_DAY = /\b(today|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
+const NTH_DAY = /\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b/i;
+const A_CLOCK = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b([01]?\d|2[0-3]):([0-5]\d)\b/i;
+
+function whenFrom(goal, now = new Date()) {
+    const text = String(goal || '');
+
+    let date = null;
+    const day = text.match(A_DAY);
+    if (day) {
+        const word = day[1].toLowerCase();
+        date = new Date(now);
+        if (word === 'tomorrow') date.setDate(date.getDate() + 1);
+        else if (word !== 'today') {
+            date.setDate(date.getDate() + (DAY_WORDS.indexOf(word) - date.getDay() + 7) % 7);
+        }
+    } else {
+        const nth = text.match(NTH_DAY);
+        if (nth) {
+            date = new Date(now);
+            date.setDate(Number(nth[1]));
+            if (date.getTime() < now.getTime() - 86400000) date.setMonth(date.getMonth() + 1);
+        }
+    }
+
+    let time = null;
+    if (/\b(noon|midday)\b/i.test(text)) {
+        time = { hours: 12, minutes: 0 };
+    } else if (/\bmidnight\b/i.test(text)) {
+        time = { hours: 0, minutes: 0 };
+    } else {
+        const clock = text.match(A_CLOCK);
+        if (clock) {
+            time = clock[3]
+                ? { hours: (Number(clock[1]) % 12) + (clock[3].toLowerCase() === 'pm' ? 12 : 0),
+                    minutes: Number(clock[2] || 0) }
+                : { hours: Number(clock[4]), minutes: Number(clock[5]) };
+        }
+    }
+
+    return date || time ? { date, time } : null;
+}
+
+// A date is typed in the shape the field already shows — the page is never
+// asked to parse a format it did not offer. A part above 12 says which slot
+// is the day; otherwise the value the field opened with (the day it shows)
+// is compared against that day to learn the order.
+function likeDate(shown, date, now = new Date()) {
+    const two = value => String(value).padStart(2, '0');
+    const day = date.getDate();
+    const month = date.getMonth() + 1;
+    const year = date.getFullYear();
+
+    const current = String(shown || '').trim();
+    const iso = current.match(/^(\d{4})([-/.])(\d{1,2})\2(\d{1,2})$/);
+    if (iso) return `${year}${iso[2]}${two(month)}${iso[2]}${two(day)}`;
+
+    const pair = current.match(/^(\d{1,2})([-/.])(\d{1,2})\2(\d{4})$/);
+    if (!pair) return null;
+    const [, a, joint, b] = pair;
+
+    let dayFirst = true;
+    if (Number(a) > 12) dayFirst = true;
+    else if (Number(b) > 12) dayFirst = false;
+    else if (Number(a) === now.getMonth() + 1 && Number(b) === now.getDate()
+             && Number(a) !== Number(b)) dayFirst = false;
+
+    return dayFirst
+        ? `${two(day)}${joint}${two(month)}${joint}${year}`
+        : `${two(month)}${joint}${two(day)}${joint}${year}`;
+}
+
+function likeTime(shown, time) {
+    const two = value => String(value).padStart(2, '0');
+    if (/\b(am|pm)\b/i.test(String(shown || ''))) {
+        const hours = time.hours % 12 || 12;
+        return `${hours}:${two(time.minutes)} ${time.hours < 12 ? 'AM' : 'PM'}`;
+    }
+    return `${two(time.hours)}:${two(time.minutes)}`;
+}
+
+// The collapsed when-control names its slot — "Thu 13-08-2026 19:00 - 19:30"
+// — and opens into the date and time fields when pressed.
+const TIME_RANGE = /\d{1,2}[:.]\d{2}\s*(?:AM|PM)?\s*[-–]\s*\d{1,2}[:.]\d{2}/i;
+
+const ABOUT_SAVING = /\b(draft|options|settings|more|cancel|undo|copy|as)\b/i;
+
+function saves(element) {
+    const name = String((element && element.name) || '');
+    return Boolean(element)
+        && !holdsText(element)
+        && !element.disabled
+        && name.length <= SEND_LABEL_CHARS
+        && /\bsave\b/i.test(name)
+        && !ABOUT_SAVING.test(name);
+}
+
 function safeOrigin(url) {
     try { return new URL(url).origin; } catch { return null; }
 }
@@ -1157,8 +1275,14 @@ async function chooseSurface(url, options, mandate = null) {
         // A mutation runs where the loop can read the editor back: the
         // attached profile's DOM. The pixels lane cannot see a web editor's
         // value, which means typing blind and claiming a send nobody
-        // verified — watching it happen live is not worth that.
-        if (mandate && mandate.size && await browser.attachAvailable()) return domSurface;
+        // verified — so a mutation never falls through to it, not even when
+        // the attached browser is busy or unlinked.
+        if (mandate && mandate.size) {
+            if (await browser.attachAvailable()) return domSurface;
+            throw new Error('this request changes something on the site, and that only runs '
+                + 'in the assistant\'s own signed-in browser — which is not available right '
+                + 'now (not linked, or held by other work). Try again in a moment.');
+        }
         if (await chromeSurface.ready()) return chromeSurface;
         return await browser.attachAvailable() ? domSurface : desktopOrExplain(url);
     }
@@ -1201,6 +1325,16 @@ async function browse(goal, options = {}) {
     const mandate = intent.mandate instanceof Set
         ? intent.mandate
         : webPolicy.mandateFrom(goal, inputLabel);
+
+    // A planner's paraphrase can lose the words that grant a mandate — "add
+    // X to my calendar" rewritten as "add a meeting for X to the user's
+    // calendar" no longer reads as a booking. Authority comes from what the
+    // user actually said, so their own request tops the goal's grants up.
+    if (options.request) {
+        for (const kind of webPolicy.mandateFrom(options.request, inputLabel)) {
+            mandate.add(kind);
+        }
+    }
 
     let home = options.url || null;
 
@@ -1759,11 +1893,17 @@ async function browse(goal, options = {}) {
                 });
             }
 
+            // A calendar editor's writable heart is its title box; a mail
+            // compose's is its body. Either one means the editor is open.
+            const booking = mandate.has('book');
+            const editorOpen = source => hasBody(source)
+                || (booking && Boolean(titleBox(source)));
+
             while (pending.length && mandate.has('compose')) {
                 if (wrongCorrespondent(observation, goal)) break;
                 const words = pending[0];
 
-                if (!hasBody(observation)) {
+                if (!editorOpen(observation)) {
                     const opener = editorOpener(observation, replying(goal));
                     if (!opener) break;
                     const pressed = await act(surface, { action: 'click', ref: opener.ref },
@@ -1775,11 +1915,11 @@ async function browse(goal, options = {}) {
                     history.push(`click: opened the editor with "${opener.name}"`);
                     observation = await surface.observe();
                     contextLabel = labels.join(contextLabel, observation.label);
-                    if (!hasBody(observation)) break;
+                    if (!editorOpen(observation)) break;
                 }
 
                 const isLast = pending.length === 1;
-                const box = boxFor(observation, words, isLast);
+                const box = boxFor(observation, words, isLast, booking);
                 if (!box) break;
 
                 const put = await act(surface, { action: 'fill', ref: box.ref, text: words },
@@ -1823,6 +1963,86 @@ async function browse(goal, options = {}) {
                         actions.push({ action: 'fill', ref: box.ref, ok: true,
                             detail: `titled it "${line}"` });
                         history.push(`fill: titled the message "${line}"`);
+                        observation = await surface.observe();
+                        contextLabel = labels.join(contextLabel, observation.label);
+                    }
+                }
+            }
+
+            // An event lands where the request says, not on the editor's
+            // default slot. The collapsed when-control opens into the date
+            // and time fields; each is typed in the shape it already shows,
+            // and the panel is left before Save so the editor is back in view.
+            const placeEvent = async () => {
+                const wanted = whenFrom(goal);
+                if (!wanted) return;
+
+                const findable = pattern => ((observation && observation.elements) || [])
+                    .find(element => fillable(element) && !element.disabled
+                        && pattern.test(element.name || ''));
+
+                if (!findable(/\bstart date\b/i) && !findable(/\bstart time\b/i)) {
+                    const folded = ((observation && observation.elements) || []).find(element =>
+                        !holdsText(element) && !element.disabled
+                        && TIME_RANGE.test(element.name || ''));
+                    if (!folded) return;
+                    const opened = await act(surface, { action: 'click', ref: folded.ref },
+                        observation, { goal, userLabel: inputLabel, contextLabel, mandate, home },
+                        options);
+                    if (!opened.ok) return;
+                    actions.push({ action: 'click', ref: folded.ref, ok: true,
+                        detail: 'opened the date and time fields' });
+                    history.push('click: opened the date and time fields');
+                    observation = await surface.observe();
+                    contextLabel = labels.join(contextLabel, observation.label);
+                }
+
+                const put = async (pattern, text) => {
+                    if (!text) return;
+                    const field = findable(pattern);
+                    if (!field || String(field.value || '').trim() === text) return;
+                    const set = await act(surface, { action: 'fill', ref: field.ref, text },
+                        observation,
+                        { goal: `${goal} ${text}`, userLabel: inputLabel, contextLabel,
+                          mandate, home },
+                        options);
+                    if (!set.ok) return;
+                    actions.push({ action: 'fill', ref: field.ref, ok: true,
+                        detail: `set "${field.name}" to ${text}` });
+                    history.push(`fill: set "${field.name}" to ${text}`);
+                    observation = await surface.observe();
+                    contextLabel = labels.join(contextLabel, observation.label);
+                };
+
+                const dated = findable(/\bstart date\b/i);
+                if (wanted.date && dated) {
+                    await put(/\bstart date\b/i, likeDate(dated.value, wanted.date));
+                }
+                const started = findable(/\bstart time\b/i);
+                if (wanted.time && started) {
+                    await put(/\bstart time\b/i, likeTime(started.value, wanted.time));
+                }
+
+                if (typeof surface.dismiss === 'function') {
+                    await surface.dismiss().catch(() => null);
+                    observation = await surface.observe();
+                    contextLabel = labels.join(contextLabel, observation.label);
+                }
+            };
+
+            if (booking && !performed.has('book') && filled.length > 0
+                && !outstanding().unsaid.length) {
+                await placeEvent();
+                const saver = ((observation && observation.elements) || []).find(saves);
+                if (saver) {
+                    const pressed = await act(surface, { action: 'click', ref: saver.ref },
+                        observation, { goal, userLabel: inputLabel, contextLabel, mandate, home },
+                        options);
+                    if (pressed.ok) {
+                        if (pressed.mandated) performed.add(pressed.mandated);
+                        actions.push({ action: 'click', ref: saver.ref, ok: true,
+                            detail: `pressed "${saver.name}"` });
+                        history.push(`click: pressed "${saver.name}"`);
                         observation = await surface.observe();
                         contextLabel = labels.join(contextLabel, observation.label);
                     }
@@ -2467,6 +2687,11 @@ module.exports = {
     fillable,
     latestFromThem,
     plainDate,
+    whenFrom,
+    likeDate,
+    likeTime,
+    titleBox,
+    saves,
     topRow,
     automated,
     boxFor,

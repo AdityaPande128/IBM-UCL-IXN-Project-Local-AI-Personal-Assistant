@@ -6,9 +6,12 @@
 // that says "work mail" goes to the work account, anything else to the default.
 
 const PROVIDERS = {
-    gmail: { label: 'Gmail', url: 'https://mail.google.com' },
-    outlook: { label: 'Outlook (personal)', url: 'https://outlook.live.com/mail' },
-    'outlook-work': { label: 'Outlook (work or school)', url: 'https://outlook.office.com/mail' }
+    gmail: { label: 'Gmail', url: 'https://mail.google.com',
+             calendar: 'https://calendar.google.com' },
+    outlook: { label: 'Outlook (personal)', url: 'https://outlook.live.com/mail',
+               calendar: 'https://outlook.live.com/calendar' },
+    'outlook-work': { label: 'Outlook (work or school)', url: 'https://outlook.office.com/mail',
+                      calendar: 'https://outlook.office.com/calendar' }
 };
 
 function current(config) {
@@ -81,7 +84,7 @@ function forRequest(text, config) {
     for (const acct of accounts(config)) {
         const name = acct.account.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const qualifies = new RegExp(
-            `\\b${name}\\s+(mail|e-?mail|inbox|mailbox|account)s?\\b`, 'i');
+            `\\b${name}\\s+(mail|e-?mail|inbox|mailbox|account|calendar)s?\\b`, 'i');
         if (qualifies.test(request)) return acct;
     }
     return current(config);

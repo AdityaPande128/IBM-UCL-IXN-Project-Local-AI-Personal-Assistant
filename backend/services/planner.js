@@ -10,12 +10,19 @@ const config = configReader.readConfig();
 const plannerConfig = config.planner || {};
 
 const MAIL_URL = mailProvider.current(config).url;
+const CALENDAR_URL = mailProvider.current(config).calendar;
 
 // When the user holds more than one mailbox, the request itself picks the
 // account ("work mail" goes to the work account); everything else lands on
 // the default. The chosen URL is what the prompt below steers messages at.
 function mailUrlFor(request) {
     return mailProvider.forRequest(request, config).url;
+}
+
+// The calendar rides the mail account: whichever mailbox a request steers to
+// is the account whose calendar "my calendar" means.
+function calendarUrlFor(request) {
+    return mailProvider.forRequest(request, config).calendar;
 }
 
 const TIER = 'engine';
@@ -51,7 +58,7 @@ function today() {
         { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-function buildPlanPrompt(capabilities, mailUrl = MAIL_URL) {
+function buildPlanPrompt(capabilities, mailUrl = MAIL_URL, calendarUrl = CALENDAR_URL) {
     return `You are the planner for a local macOS assistant. You are given a request and the complete list of operations this machine can perform. You produce a plan: an ordered list of steps that carries the request out.
 
 WHO IS ASKING: the person making this request owns this Mac and is its only user.
@@ -134,9 +141,10 @@ RULES
    what the user is doing, where they have to be or what time something is on a
    date starts at their calendar, and who wrote what starts at their mail.
    PUTTING something on the calendar — "book a meeting", "schedule a call",
-   "add it to my calendar" — starts at the calendar too, one web.browse with
-   the user's own words as the goal: their words are what authorises saving
-   the event. An
+   "add it to my calendar" — starts at the user's calendar, ${calendarUrl},
+   one web.browse whose goal is the user's request carried through unchanged:
+   their exact words are what authorises saving the event, and a paraphrase
+   loses that authority. An
    order, a delivery or a booking from a company starts at their MAIL too — the
    confirmation and the dispatch note were emailed to them — and not at that
    company's website, which nobody is signed in to and which the browser is
@@ -487,7 +495,7 @@ async function plan(request, options = {}) {
 
     const { capabilities, retrieved } = await selectCapabilities(request, options);
     const conversation = [
-        { role: 'system', content: buildPlanPrompt(capabilities, mailUrlFor(request)) },
+        { role: 'system', content: buildPlanPrompt(capabilities, mailUrlFor(request), calendarUrlFor(request)) },
         { role: 'user', content: String(request) }
     ];
 

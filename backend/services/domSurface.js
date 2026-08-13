@@ -139,6 +139,44 @@ async function submit(handle) {
     return { ok: true, detail: 'pressed Enter' };
 }
 
+// A transient panel — a date picker, an expanded dropdown — closes the way a
+// person closes it: Escape, or a click on empty space beside it. While a
+// light-dismiss layer is up the page marks everything behind it aria-hidden,
+// so a spot inside a hidden region that hits nothing interactive is outside
+// the panel and inert. Whatever was committed into the panel's fields stays.
+async function dismiss() {
+    try {
+        await page.keyboard.press('Escape');
+        await browser.settle(page);
+        const spot = await page.evaluate(() => {
+            const CONTROLS = 'a,button,input,select,textarea,summary,[role="button"],'
+                + '[role="link"],[role="menuitem"],[role="tab"],[role="checkbox"],'
+                + '[role="radio"],[role="combobox"],[role="option"],[role="textbox"],'
+                + '[role="searchbox"],[role="listbox"],[role="slider"],[role="switch"]';
+            const layers = Array.from(document.querySelectorAll('[aria-hidden="true"]'))
+                .map(el => el.getBoundingClientRect())
+                .filter(box => box.width > 40 && box.height > 20);
+            for (const box of layers) {
+                for (let y = box.top + 8; y < box.bottom - 4; y += 24) {
+                    for (let x = box.left + 8; x < box.right - 4; x += 24) {
+                        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
+                        const at = document.elementFromPoint(x, y);
+                        if (!at || !at.closest('[aria-hidden="true"]')) continue;
+                        if (at.closest(CONTROLS)) continue;
+                        return { x, y };
+                    }
+                }
+            }
+            return null;
+        });
+        if (spot) await page.mouse.click(spot.x, spot.y);
+    } catch (err) {
+        return { ok: false, why: err.message };
+    }
+    await browser.settle(page);
+    return { ok: true, detail: 'left the panel' };
+}
+
 async function settle() {
     return browser.settle(page);
 }
@@ -155,7 +193,7 @@ async function close() {
 }
 
 module.exports = {
-    ready, start, observe, resolve, navigate, back, click, fill, submit, settle, touch, close,
+    ready, start, observe, resolve, navigate, back, click, fill, submit, dismiss, settle, touch, close,
     takeDownloads, attachFiles,
     grantedOnly, TIER, name: 'dom'
 };

@@ -745,6 +745,30 @@ test('the mail provider maps names to mailbox addresses with a safe default', ()
     assert.strictEqual(mailProvider.current({ mail: { provider: 'compuserve' } }).name, 'gmail');
 });
 
+test('each provider carries its own calendar and the prompt steers bookings there', () => {
+    assert.strictEqual(mailProvider.current({}).calendar, 'https://calendar.google.com');
+    assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook' } }).calendar,
+        'https://outlook.live.com/calendar');
+    assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook-work' } }).calendar,
+        'https://outlook.office.com/calendar');
+
+    // "work calendar" steers like "work mail": the calendar rides the account.
+    const config = {
+        mail: { provider: 'gmail', accounts: { personal: 'gmail', work: 'outlook-work' } }
+    };
+    assert.strictEqual(mailProvider.forRequest('put the review on my work calendar', config).calendar,
+        'https://outlook.office.com/calendar');
+    assert.strictEqual(mailProvider.forRequest('add lunch with Sam to my calendar', config).calendar,
+        'https://calendar.google.com');
+
+    // The prompt names the steered calendar, not a hardcoded one.
+    const prompt = planner.buildPlanPrompt([], 'https://outlook.live.com/mail',
+        mailProvider.current({ mail: { provider: 'outlook' } }).calendar);
+    assert.ok(prompt.includes('https://outlook.live.com/calendar'),
+        'the provider calendar address must appear in the prompt');
+    assert.ok(!prompt.includes('${calendarUrl}'), 'the template token must be substituted');
+});
+
 test('the plan prompt steers mail at the configured provider, not a hardcoded one', () => {
     const prompt = planner.buildPlanPrompt([]);
     const configured = mailProvider.current(

@@ -452,6 +452,7 @@ function builtins() {
                 const result = await webAgent.browse(String(bound.goal), {
                     url: bound.url || undefined,
                     label: context.label,
+                    request: context.request || '',
                     parentPlanId: context.planId ?? null,
                     parentStep: context.step ? context.step.id : null
                 });

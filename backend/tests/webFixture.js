@@ -472,9 +472,31 @@ function calendarRoute(pathname, params, booked) {
         </main>`;
     }
 
+    if (pathname === '/calendar/timed') {
+        return `
+        <title>New event</title>
+        <main>
+          <h1>New event</h1>
+          <form action="/calendar/save" method="get">
+            <input type="hidden" name="timed" value="1">
+            <label for="title">Event title</label>
+            <input id="title" name="title">
+            <label for="date">Start date</label>
+            <input id="date" name="date" value="13-08-2026">
+            <label for="start">Start time</label>
+            <input id="start" name="start" value="19:00">
+            <button type="submit">Save</button>
+          </form>
+        </main>`;
+    }
+
     if (pathname === '/calendar/save') {
         const kept = !params.forget && (params.title || '').trim();
-        if (kept) booked.push({ title: params.title.trim() });
+        if (kept) {
+            booked.push(params.timed
+                ? { title: params.title.trim(), date: params.date || '', start: params.start || '' }
+                : { title: params.title.trim() });
+        }
         return `
         <title>Calendar</title>
         <main>

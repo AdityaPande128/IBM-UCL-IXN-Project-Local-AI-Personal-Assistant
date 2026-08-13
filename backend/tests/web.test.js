@@ -2218,6 +2218,144 @@ test('a booking is only done when the calendar shows the event', async () => {
     }
 });
 
+test('the words that place an event parse into a day and a time', () => {
+    const now = new Date(2026, 7, 13, 10, 0, 0); // Thursday 13 August 2026
+
+    const friday = webAgent.whenFrom('book the review for Friday at 3pm', now);
+    assert.strictEqual(friday.date.getDay(), 5);
+    assert.strictEqual(friday.date.getDate(), 14);
+    assert.deepStrictEqual(friday.time, { hours: 15, minutes: 0 });
+
+    const tomorrow = webAgent.whenFrom('put lunch in for tomorrow at 12:30', now);
+    assert.strictEqual(tomorrow.date.getDate(), 14);
+    assert.deepStrictEqual(tomorrow.time, { hours: 12, minutes: 30 });
+
+    const nth = webAgent.whenFrom('add the dentist on the 15th at noon', now);
+    assert.strictEqual(nth.date.getDate(), 15);
+    assert.strictEqual(nth.date.getMonth(), 7);
+    assert.deepStrictEqual(nth.time, { hours: 12, minutes: 0 });
+
+    // A weekday names the one ahead, never a day gone by; a past day of the
+    // month rolls into next month.
+    const monday = webAgent.whenFrom('schedule the call for Monday at 9am', now);
+    assert.strictEqual(monday.date.getDay(), 1);
+    assert.strictEqual(monday.date.getDate(), 17);
+    const rolled = webAgent.whenFrom('book it for the 2nd at 1pm', now);
+    assert.strictEqual(rolled.date.getMonth(), 8);
+
+    // The clock reads whichever case the request wrote it in.
+    const spoken = webAgent.whenFrom('book the review for Friday at 3 PM', now);
+    assert.deepStrictEqual(spoken.time, { hours: 15, minutes: 0 });
+
+    // Half a placement is still a placement; no placement at all is null.
+    const timeOnly = webAgent.whenFrom('book the stand-up at 9:15', now);
+    assert.strictEqual(timeOnly.date, null);
+    assert.deepStrictEqual(timeOnly.time, { hours: 9, minutes: 15 });
+    assert.strictEqual(webAgent.whenFrom('add squash with Sam to my calendar', now), null);
+});
+
+test('a date or time is typed in the shape the field already shows', () => {
+    const now = new Date(2026, 7, 13);
+    const friday = new Date(2026, 7, 14);
+
+    assert.strictEqual(webAgent.likeDate('13-08-2026', friday, now), '14-08-2026');
+    assert.strictEqual(webAgent.likeDate('2026-08-13', friday, now), '2026-08-14');
+    assert.strictEqual(webAgent.likeDate('8/13/2026', friday, now), '08/14/2026');
+
+    // Both parts small: the value the field opened with is today, and
+    // matching its parts against today teaches the order.
+    const june = new Date(2026, 5, 5);
+    const wanted = new Date(2026, 5, 10);
+    assert.strictEqual(webAgent.likeDate('06-05-2026', wanted, june), '06-10-2026');
+    assert.strictEqual(webAgent.likeDate('05-06-2026', wanted, june), '10-06-2026');
+
+    // A format the field never offered is not guessed at.
+    assert.strictEqual(webAgent.likeDate('June 5, 2026', wanted, june), null);
+
+    assert.strictEqual(webAgent.likeTime('19:00', { hours: 15, minutes: 0 }), '15:00');
+    assert.strictEqual(webAgent.likeTime('7:30 PM', { hours: 15, minutes: 0 }), '3:00 PM');
+    assert.strictEqual(webAgent.likeTime('7:30 PM', { hours: 9, minutes: 5 }), '9:05 AM');
+});
+
+test('a booking carries the requested day and time onto the calendar', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    llmClient.complete = async messages => {
+        if (isIntentCall(messages)) {
+            return intentReply({ write: ['Project review'], act: 'book',
+                completes: 'the event is on the calendar' });
+        }
+        return JSON.stringify({ action: 'give_up', reason: 'the route should not need me' });
+    };
+
+    try {
+        const goal = 'book a project review on my calendar for Friday at 3pm';
+        const result = await webAgent.browse(goal, {
+            url: `${site.origin}/calendar/timed`, allowPrivate: true, maxActions: 6
+        });
+
+        assert.strictEqual(result.status, 'success', result.reason || result.answer);
+
+        const wanted = webAgent.whenFrom(goal);
+        const date = webAgent.likeDate('13-08-2026', wanted.date);
+        assert.deepStrictEqual(site.booked,
+            [{ title: 'Project review', date, start: '15:00' }],
+            'the event must land on the asked-for day at the asked-for time');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('a paraphrased goal keeps the mandate the user\'s own request granted', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    let filledTitle = false;
+    llmClient.complete = async messages => {
+        // The intent reading fails outright, so the mandate falls back to the
+        // pattern reading of the goal — which the paraphrase defeats.
+        if (isIntentCall(messages)) return 'not even json';
+        const shown = messages.find(m => m.role === 'user').content;
+        const title = (shown.match(/\[(e\d+)\] textbox/) || [])[1];
+        const save = (shown.match(/\[(e\d+)\] button "Save"/) || [])[1];
+        const create = (shown.match(/\[(e\d+)\] link "Create event"/) || [])[1];
+        if (title && !filledTitle) {
+            filledTitle = true;
+            return JSON.stringify({ action: 'fill', ref: title, text: 'Squash with Sam' });
+        }
+        if (filledTitle && save) {
+            return JSON.stringify({ action: 'click', ref: save, reason: 'save the event' });
+        }
+        if (create) return JSON.stringify({ action: 'click', ref: create, reason: 'open the editor' });
+        return JSON.stringify({ action: 'give_up', reason: 'lost' });
+    };
+
+    try {
+        const goal = 'Add a half-hour squash meeting with Sam soon to the user\'s calendar';
+        assert.strictEqual(webPolicy.mandateFrom(goal, USER).size, 0,
+            'the paraphrase alone must grant nothing, or this test tests nothing');
+
+        const result = await webAgent.browse(goal, {
+            url: `${site.origin}/calendar`, allowPrivate: true, maxActions: 6,
+            request: 'add squash with Sam to my calendar'
+        });
+        assert.strictEqual(result.status, 'success', result.reason || result.answer);
+        assert.deepStrictEqual(site.booked, [{ title: 'Squash with Sam' }],
+            'the user\'s own words must carry their authority through the paraphrase');
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
 test('a save the calendar never recorded is not claimed as a booking', async () => {
     const site = await fixture.start();
     const store = scratch();

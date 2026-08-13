@@ -260,8 +260,11 @@ const IRREVERSIBLE = [
     { kind: 'send',
       pattern: /\b(send|post|publish|submit application|tweet)\b/i,
       what: 'sends something to other people' },
+    // "Save" and "Schedule event" commit an event; "New event" and "Create
+    // event" merely open the editor, and crediting the booking to the opener
+    // once ended a run with nothing on the calendar.
     { kind: 'book',
-      pattern: /\bsave\b|\b(create|add|schedule) event\b/i,
+      pattern: /\bsave\b|\bschedule event\b/i,
       what: 'puts an event on the calendar' },
     { kind: 'compose',
       pattern: /\b(reply|forward|compose|new message|write)\b/i,
