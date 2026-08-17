@@ -9,7 +9,7 @@
     "build:web": "tsc && vite build --config vite.config.telegram.ts",
     "serve:telegram": "vite preview --config vite.config.telegram.ts --port 3000",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "APPLE_SIGNING_IDENTITY=- tauri"
   },
   "dependencies": {
     "react": "^19.1.0",
