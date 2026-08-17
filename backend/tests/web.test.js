@@ -339,6 +339,10 @@ test('a question about what someone sent is asked of mail from them', () => {
     assert.strictEqual(webAgent.fromThem('from:sandhya', ASKED), 'from:sandhya');
     assert.strictEqual(webAgent.fromThem('to:sandhya', ASKED), 'to:sandhya');
 
+    assert.strictEqual(
+        webAgent.fromThem('sandhya', 'do I have any unread emails from Sandhya'),
+        'from:sandhya');
+
     assert.strictEqual(webAgent.fromThem('"August 15"', ASKED), '"August 15"');
     assert.strictEqual(
         webAgent.fromThem('Riverside Books', 'has my order from Riverside Books shipped yet?'),
@@ -596,6 +600,8 @@ test('an empty result page is recognised so a narrow search can be widened', () 
         webAgent.foundNothing({ text: 'No messages matched your search.' }), true);
     assert.strictEqual(
         webAgent.foundNothing({ text: 'Your search didn’t match any documents.' }), true);
+    assert.strictEqual(webAgent.foundNothing(
+        { text: 'We didn\'t find anything. Try a different keyword.' }), true);
     assert.strictEqual(webAgent.foundNothing({ text: '0 results' }), true);
 
     assert.strictEqual(webAgent.foundNothing({
@@ -1580,6 +1586,35 @@ test('the search box gets the person the question is about, not the reading\'s o
             'a replied-question searches the correspondent, so both sides share the page');
         assert.match(String(result.answer), /^No/);
         assert.match(String(result.answer), /no reply yet/);
+    } finally {
+        llmClient.complete = real;
+        await browser.close();
+        await site.close();
+        store.cleanup();
+    }
+});
+
+test('the site\'s own no-results notice is concluded from, never given as the answer', async () => {
+    const site = await fixture.start();
+    const store = scratch();
+    const real = llmClient.complete;
+
+    llmClient.complete = async messages => {
+        if (isIntentCall(messages)) return intentReply({ query: 'sandhya' });
+        return JSON.stringify({ action: 'done',
+            answer: 'We didn\'t find anything. Try a different keyword.' });
+    };
+
+    try {
+        const result = await webAgent.browse('do I have any unread emails from Sandhya', {
+            url: `${site.origin}/search`, allowPrivate: true, maxActions: 4
+        });
+
+        assert.strictEqual(result.status, 'success');
+        assert.match(String(result.answer), /found nothing about/);
+        assert.match(String(result.answer), /sandhya/i);
+        assert.doesNotMatch(String(result.answer), /didn['’]t find anything/i,
+            'the page\'s empty-state banner must not be the answer');
     } finally {
         llmClient.complete = real;
         await browser.close();

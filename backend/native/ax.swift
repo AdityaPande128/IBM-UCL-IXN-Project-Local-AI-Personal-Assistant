@@ -287,10 +287,19 @@ func present(_ appName: String, timeoutMs: Int = 12000) -> String? {
     var windows = (attr(app, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
 
     if windows.isEmpty {
+        // A windowless app can take well over the old 3s to raise its first
+        // window from cold (Chrome especially); give it the whole budget.
         reopen(appName)
-        for _ in 0..<20 where windows.isEmpty {
+        let windowDeadline = Date().addingTimeInterval(Double(timeoutMs) / 1000)
+        var renudged = false
+        while windows.isEmpty && Date() < windowDeadline {
             usleep(150_000)
             windows = (attr(app, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+            if windows.isEmpty && !renudged
+                && Date().timeIntervalSince(windowDeadline) > -(Double(timeoutMs) / 2000) {
+                renudged = true
+                reopen(appName)
+            }
         }
         if windows.isEmpty { return "\(appName) is running but has no window, and would not open one" }
     }

@@ -624,14 +624,14 @@ function plain(query) {
 }
 
 const FOUND_NOTHING =
-    /\bno (?:messages|results|matches|mail|emails|items|conversations)\b|did ?n['’]?t match any|nothing (?:was )?found|\b0 results\b/i;
+    /\bno (?:messages|results|matches|mail|emails|items|conversations)\b|did ?n['’]?t (?:match any|find any(?:thing)?)\b|nothing (?:was )?found|\b0 results\b/i;
 
 function foundNothing(observation) {
     return FOUND_NOTHING.test(String((observation && observation.text) || ''));
 }
 
 const THEIR_MAIL =
-    /\b(?:their|her|his)\s+(?:latest\s+|last\s+|most recent\s+|newest\s+)?(?:e-?mails?|messages?|notes?)\b|\bwhat did\s+[\w.@-]+\s+(?:ask|say|write|send|tell)\b|\b(?:e-?mail|message|note)\s+from\s+[\w.@-]+/i;
+    /\b(?:their|her|his)\s+(?:latest\s+|last\s+|most recent\s+|newest\s+)?(?:e-?mails?|messages?|notes?)\b|\bwhat did\s+[\w.@-]+\s+(?:ask|say|write|send|tell)\b|\b(?:e-?mails?|messages?|notes?)\s+from\s+[\w.@-]+/i;
 
 function fromThem(query, goal) {
     const text = String(query || '').trim();
@@ -2501,6 +2501,41 @@ async function browse(goal, options = {}) {
                 }
                 history.push({ step, action: 'done', detail: why });
                 continue;
+            }
+
+            // A site's own no-results notice is grounded — it is on the page
+            // — but it answers no question. Concluded from, it becomes the
+            // honest finding; concluded with, it is furniture.
+            if (decision.action === 'done' && !mandate.size
+                && decision.answer && FOUND_NOTHING.test(decision.answer)) {
+                if (searched) {
+                    if (await lookElsewhere()) continue;
+                    const missing = absent(observation, subject(goal));
+                    const sought = (missing.length ? missing
+                        : [intent.query || subject(goal)[0]].filter(Boolean));
+                    if (sought.length) {
+                        status = 'success';
+                        answer = 'I searched and found nothing about '
+                            + `${sought.map(term => `"${term}"`).join(' or ')}.`;
+                        record(step, {
+                            capability: 'web.done', status: 'success',
+                            label: contextLabel, summary: answer,
+                            durationMs: Date.now() - stepStartedAt
+                        });
+                        actions.push({ action: 'done', reason: 'nothing found', answer });
+                        break;
+                    }
+                } else {
+                    history.push('your answer was not accepted: that is the page\'s '
+                        + 'no-results notice, not an answer — search for what the '
+                        + 'request names, then conclude from what the search shows');
+                    record(step, {
+                        capability: 'web.done', status: 'skipped',
+                        error: 'answer was the page\'s own no-results notice',
+                        durationMs: Date.now() - stepStartedAt
+                    });
+                    continue;
+                }
             }
 
             const shaky = decision.action === 'done' && !mandate.size
