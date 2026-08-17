@@ -23,6 +23,9 @@ function complete(messages, opts = {}) {
     const max_tokens = opts.max_tokens ?? defaults.max_tokens ?? 300;
     const timeout_ms = opts.timeout_ms ?? defaults.timeout_ms ?? 30000;
 
+    const startedAt = Date.now();
+    const shape = opts.response_format ? 'json' : 'plain';
+
     return new Promise((resolve, reject) => {
         const payload = JSON.stringify({
             model, messages, temperature, max_tokens,
@@ -50,6 +53,7 @@ function complete(messages, opts = {}) {
                     if (typeof content !== 'string') {
                         return reject(new Error('inference_error: no content in response'));
                     }
+                    console.log(`[LLM] ${model} ${shape} ${Date.now() - startedAt}ms`);
                     resolve(content);
                 } catch (err) {
                     reject(new Error(`transport_error: ${err.message}`));

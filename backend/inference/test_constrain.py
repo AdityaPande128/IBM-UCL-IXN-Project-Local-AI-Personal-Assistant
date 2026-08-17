@@ -190,6 +190,32 @@ class ProcessorBehaviour(unittest.TestCase):
         self.assertTrue(constraint.broken)
         self.assertTrue(np.array_equal(np.array(base), np.array(out)))
 
+    def test_lookahead_call_after_eos_does_not_disable(self):
+        # mlx_lm runs one step ahead: the processor is called once more
+        # after EOS was sampled, and a real tokenizer decodes that EOS as
+        # literal text ("<|im_end|>"), which is off-grammar.
+        class LiteralEos(FakeTokenizer):
+            def decode(self, ids):
+                return "".join("<|im_end|>" if i == self.eos_token_id
+                               else self.vocab[i] for i in ids)
+
+        constraint = JsonConstraint(LiteralEos(VOCAB), log=lambda msg: None)
+        constraint.prompt_len = len(PROMPT)
+        closed = [8, 9, 10, 5, 2, 0]
+        out = constraint(mx.array(PROMPT + closed), logits_for([6]))
+        self.assertFalse(constraint.broken)
+        picked = int(np.asarray(out.astype(mx.float32).reshape(-1)).argmax())
+        self.assertEqual(picked, 0, "a closed object still forces eos")
+
+    def test_bfloat16_logits_keep_the_constraint_engaged(self):
+        # The live models hand bfloat16 logits, which numpy's buffer
+        # protocol rejects; the mask must still engage, not latch open.
+        constraint = JsonConstraint(FakeTokenizer(VOCAB), log=lambda msg: None)
+        out = constraint(mx.array(PROMPT), logits_for([6, 7, 1]).astype(mx.bfloat16))
+        self.assertFalse(constraint.broken)
+        picked = int(np.asarray(out.astype(mx.float32).reshape(-1)).argmax())
+        self.assertEqual(picked, 1)
+
     def test_no_legal_candidate_anywhere_fails_open(self):
         prose_only = ["</s>", "Sure", " thing", " boss"]
         constraint = JsonConstraint(FakeTokenizer(prose_only), log=lambda msg: None)

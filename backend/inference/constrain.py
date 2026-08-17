@@ -264,24 +264,31 @@ class JsonConstraint:
 
     def _apply(self, tokens, logits):
         import numpy as np
+        import mlx.core as mx
 
         token_list = [int(t) for t in tokens.tolist()]
         if self.prompt_len is None:
             self.prompt_len = len(token_list)
         generated = token_list[self.prompt_len:]
+        # mlx_lm computes one step ahead, so the call after EOS was sampled
+        # still reaches here — with the eos token decoding as literal text.
+        while generated and generated[-1] in self.eos_ids:
+            generated = generated[:-1]
 
         text = self.tokenizer.decode(generated) if generated else ""
         scanner = JsonScanner()
         if not scanner.feed(text):
             self.broken = True
-            self.log("[Constrain] generated text left the grammar; disabling.")
+            self.log(f"[Constrain] generated text left the grammar; disabling: {text[:120]!r}")
             return logits
 
         if scanner.done:
             return self._only_eos(logits)
 
         flat = logits.reshape(-1)
-        scores = np.array(flat, copy=False)
+        # numpy cannot view bfloat16 buffers; the float32 upcast is exact,
+        # so ordering and argmax are unchanged.
+        scores = np.asarray(flat.astype(mx.float32))
         vocab = scores.shape[0]
 
         argmax = int(scores.argmax())
