@@ -11,6 +11,7 @@ const routerTraces = require('./routerTraces');
 const proposals = require('./proposals');
 const activityBus = require('./activityBus');
 const profile = require('./profile');
+const llmClient = require('./llmClient');
 
 const OPENCLAW_TIMEOUT_MS = 900000;
 const MAX_OPENCLAW_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -336,6 +337,18 @@ async function executeIntent(intentText, options = {}) {
                     response: 'Building new skills is switched off. Turn on '
                         + 'self-improvement in settings if you want me to learn this.',
                     action: 'generation_off'
+                };
+                break;
+            }
+            // Refused here, before a card promises a build this machine's
+            // memory class cannot hold.
+            if (!llmClient.modelForTier('smith')) {
+                outcome = {
+                    status: 'refused',
+                    response: 'This machine doesn\'t run a builder model — its '
+                        + 'memory class is too small to write new skills. '
+                        + 'Everything already installed keeps working.',
+                    action: 'no_builder'
                 };
                 break;
             }

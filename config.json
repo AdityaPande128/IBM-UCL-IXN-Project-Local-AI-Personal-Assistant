@@ -96,10 +96,6 @@
         "engine": {
           "model": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
           "policy": "resident"
-        },
-        "smith": {
-          "model": "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit",
-          "policy": "transient"
         }
       },
       "16": {

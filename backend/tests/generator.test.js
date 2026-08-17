@@ -528,3 +528,35 @@ test('groundedTrial: runs the script on a copy of the named data', async () => {
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('generate refuses before any model call when the class maps no smith', () => {
+    const os = require('os');
+    const path = require('path');
+    const { execFileSync } = require('child_process');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-smith-'));
+    try {
+        fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({
+            models: {
+                hardware_defaults: {
+                    '8': { guard: { model: 'm', policy: 'resident' },
+                           engine: { model: 'm', policy: 'resident' } }
+                }
+            },
+            generation: { model: 'a-model-this-class-cannot-hold' }
+        }));
+        const out = execFileSync(process.execPath, ['-e', `
+            const generator = require('${path.resolve(__dirname, '../services/skillGenerator.js')}');
+            generator.generate('make me a skill that hums').then(r => console.log(JSON.stringify(r)));
+        `], { env: { ...process.env,
+                     JARVIS_CONFIG_PATH: path.join(dir, 'config.json'),
+                     JARVIS_SKILLS_DIR: dir } }).toString();
+        const result = JSON.parse(out.trim().split('\n').at(-1));
+        assert.strictEqual(result.status, 'error');
+        assert.strictEqual(result.attempts, 0, 'no attempt may be spent');
+        assert.match(result.reason, /builder/i);
+        assert.ok(!/unreachable/.test(result.reason),
+            'the refusal must come from the guard, not a failed model call');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});

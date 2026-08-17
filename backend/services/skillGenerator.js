@@ -331,6 +331,16 @@ async function writeSkill(manifest, candidate) {
 async function generate(request, options = {}) {
     const startedAt = Date.now();
 
+    // A machine whose memory class maps no smith tier builds nothing. The
+    // generic generation.model fallback must not answer here: it names a
+    // model this class may not be able to hold at all.
+    if (!llmClient.modelForTier(TIER)) {
+        return { status: 'error',
+                 reason: 'This machine\'s memory class maps no builder model, '
+                     + 'so new skills cannot be written here.',
+                 attempts: 0 };
+    }
+
     const gaps = (options.gaps || []).filter(Boolean);
     const userTurn = gaps.length
         ? `${request}\n\nThis was attempted with the existing skills and could not be ` +

@@ -98,7 +98,8 @@ test('describe recommends this machine\'s class defaults and marks them', () => 
     const recommendedEngine = described.engines.find(e => e.recommended);
     const recommendedSmith = described.smiths.find(e => e.recommended);
     assert.strictEqual(recommendedEngine.model, GRANITE);
-    assert.strictEqual(recommendedSmith.model, CODER14B);
+    assert.strictEqual(recommendedSmith.model,
+        'mlx-community/Qwen2.5-Coder-7B-Instruct-4bit');
     assert.ok(described.voice.stt && described.voice.stt.disk_gb > 0);
 });
 

@@ -66,8 +66,15 @@ test('the shipped config resolves to a usable tier table on this machine', () =>
         const chosen = modelTiers.effective({ models }, gb * GB);
         assert.deepStrictEqual(chosen.guard, chosen.engine,
             `the ${gb} GB defaults keep the guard on the engine`);
-        assert.ok(chosen.smith && chosen.smith.policy === 'transient',
-            `the ${gb} GB defaults keep the smith transient`);
+        if (gb >= 16) {
+            assert.ok(chosen.smith && chosen.smith.policy === 'transient',
+                `the ${gb} GB defaults keep the smith transient`);
+        } else {
+            // Measured 2026-08-16: the 3B built 1/10 — an 8 GB machine
+            // ships no builder rather than a broken one.
+            assert.ok(!chosen.smith,
+                `the ${gb} GB defaults map no smith`);
+        }
     }
 });
 

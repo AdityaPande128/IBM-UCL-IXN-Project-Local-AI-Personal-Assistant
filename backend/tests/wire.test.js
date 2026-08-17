@@ -407,7 +407,8 @@ test('a settings update that breaks the memory budget is refused', async () => {
     const client = await authed();
     client.send({
         type: 'settings_update',
-        tiers: { smith: { policy: 'pinned' } }
+        tiers: { smith: { model: 'mlx-community/Qwen2.5-Coder-14B-Instruct-4bit',
+                          policy: 'pinned' } }
     });
     const refused = await client.next(m => m.type === 'settings_update_result');
     assert.strictEqual(refused.status, 'invalid');
