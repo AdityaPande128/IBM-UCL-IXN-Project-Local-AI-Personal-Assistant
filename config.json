@@ -25,7 +25,7 @@
         "policy": "resident"
       },
       "smith": {
-        "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+        "model": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
         "policy": "transient"
       }
     },
@@ -126,7 +126,7 @@
           "policy": "resident"
         },
         "smith": {
-          "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+          "model": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
           "policy": "transient"
         }
       }
@@ -148,7 +148,7 @@
     "max_steps": 6
   },
   "generation": {
-    "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    "model": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
     "temperature": 0.2,
     "max_tokens": 2400,
     "timeout_ms": 240000,
