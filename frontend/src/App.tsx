@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ChatLog } from "./components/ChatLog";
 import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
@@ -165,16 +166,19 @@ function App() {
     inputRef.current?.focus();
   }, [selectConversation]);
 
+  const inShell = "__TAURI_INTERNALS__" in window;
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const meta = e.metaKey || e.ctrlKey;
-      if (meta && e.key === "n") {
+      // Inside the shell the native menu owns these accelerators.
+      if (!inShell && meta && e.key === "n") {
         e.preventDefault();
         newChat();
-      } else if (meta && e.key === "b") {
+      } else if (!inShell && meta && e.key === "b") {
         e.preventDefault();
         setSidebarOpen((open) => !open);
-      } else if (meta && e.key === ",") {
+      } else if (!inShell && meta && e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
       } else if (e.key === "Escape" && !settingsOpen) {
@@ -184,7 +188,20 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newChat, settingsOpen]);
+  }, [inShell, newChat, settingsOpen]);
+
+  useEffect(() => {
+    if (!inShell) return;
+    const ready = listen<string>("jarvis-menu", (event) => {
+      if (event.payload === "new-chat") newChat();
+      else if (event.payload === "settings") setSettingsOpen(true);
+      else if (event.payload === "toggle-sidebar") setSidebarOpen((open) => !open);
+      else if (event.payload === "toggle-activity") setShowActivity((visible) => !visible);
+    });
+    return () => {
+      ready.then((unlisten) => unlisten());
+    };
+  }, [inShell, newChat]);
 
   const voiceNotReady = () => {
     pushToast(

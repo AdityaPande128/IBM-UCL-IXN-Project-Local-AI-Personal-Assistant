@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State};
 
@@ -252,6 +252,73 @@ fn shutdown(supervisor: &Supervisor) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// The menu bar is the app's discoverability layer: every in-window shortcut
+// has a menu item that names it, and the standard Edit menu keeps the
+// system clipboard working inside the webview.
+fn build_app_menu(app: &AppHandle) -> tauri::Result<()> {
+    let settings = MenuItem::with_id(app, "settings", "Settings\u{2026}", true, Some("Cmd+,"))?;
+    let app_menu = Submenu::with_items(
+        app,
+        "Jarvis",
+        true,
+        &[
+            &PredefinedMenuItem::about(app, None, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &settings,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, None)?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
+
+    let new_chat = MenuItem::with_id(app, "new-chat", "New Chat", true, Some("Cmd+N"))?;
+    let file_menu = Submenu::with_items(app, "File", true, &[&new_chat])?;
+
+    let edit_menu = Submenu::with_items(
+        app,
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(app, None)?,
+            &PredefinedMenuItem::redo(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::cut(app, None)?,
+            &PredefinedMenuItem::copy(app, None)?,
+            &PredefinedMenuItem::paste(app, None)?,
+            &PredefinedMenuItem::select_all(app, None)?,
+        ],
+    )?;
+
+    let sidebar = MenuItem::with_id(app, "toggle-sidebar", "Toggle Sidebar", true, Some("Cmd+B"))?;
+    let activity =
+        MenuItem::with_id(app, "toggle-activity", "Toggle Activity", true, Some("Alt+Cmd+A"))?;
+    let view_menu = Submenu::with_items(
+        app,
+        "View",
+        true,
+        &[&sidebar, &activity, &PredefinedMenuItem::separator(app)?,
+          &PredefinedMenuItem::fullscreen(app, None)?],
+    )?;
+
+    let window_menu = Submenu::with_items(
+        app,
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+
+    let menu = Menu::with_items(app, &[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu])?;
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -264,7 +331,14 @@ pub fn run() {
         ])
         .setup(|app| {
             build_tray(&app.handle())?;
+            build_app_menu(app.handle())?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            let id = event.id.as_ref();
+            if matches!(id, "new-chat" | "settings" | "toggle-sidebar" | "toggle-activity") {
+                let _ = app.emit("jarvis-menu", id.to_string());
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
