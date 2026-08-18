@@ -356,7 +356,7 @@ async function generate(request, options = {}) {
     let stage = ledger.STAGES.REQUESTED;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        console.log(`[SkillGenerator] Attempt ${attempt}/${MAX_ATTEMPTS} for: "${request.slice(0, 70)}"`);
+        console.log(`[SkillGenerator] Attempt ${attempt}/${MAX_ATTEMPTS} (${request.length} chars)`);
         activityBus.publish('generator', 'attempt', { attempt, of: MAX_ATTEMPTS });
 
         stage = ledger.STAGES.MODEL_CALL;

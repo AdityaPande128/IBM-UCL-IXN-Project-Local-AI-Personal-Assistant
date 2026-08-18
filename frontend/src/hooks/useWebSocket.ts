@@ -109,7 +109,6 @@ export interface BriefData {
   text: string;
   notices: BriefNotice[];
   proposals: BriefDraft[];
-  drafts: BriefDraft[];
   approvals: BriefApproval[];
 }
 

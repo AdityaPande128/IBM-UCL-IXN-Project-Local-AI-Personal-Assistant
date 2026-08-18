@@ -273,7 +273,7 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
 
 async function executeIntent(intentText, options = {}) {
     const startedAt = Date.now();
-    console.log(`[Bridge] Processing: "${intentText.substring(0, 80)}"`);
+    console.log(`[Bridge] Processing intent (${intentText.length} chars)`);
 
     if (options.signal && options.signal.aborted) {
         return { status: 'aborted', response: 'Stopped.', action: 'aborted',

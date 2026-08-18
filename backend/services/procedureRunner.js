@@ -143,8 +143,12 @@ async function replay(target, args = {}, options = {}) {
         }
 
         for (const [ordinal, step] of (procedure.steps || []).entries()) {
+            // An abort is the user's decision, not site drift: it must reach
+            // the caller as its own status, or the slow path re-runs the work.
             if (options.signal && options.signal.aborted) {
-                throw decline('stopped by the user');
+                status = 'aborted';
+                failure = 'stopped by the user';
+                break;
             }
             const stepStartedAt = Date.now();
             browser.touch();
@@ -260,7 +264,7 @@ function finish({ procedure, status, failure = null, performed, observation, pla
     if (tracing && planId !== null) {
         traceStore.finishPlan(planId, { status: status === 'success' ? 'success' : status, runMs, error: failure });
     }
-    if (status !== 'blocked') {
+    if (status !== 'blocked' && status !== 'aborted') {
         procedureStore.recordReplay(procedure.name, { ok: status === 'success', error: failure, ms: runMs });
     }
 

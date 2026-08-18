@@ -218,6 +218,26 @@ function takeGrant(request) {
     return { ...row, label: labels.deserialise(row.label) };
 }
 
+// takeGrant without the consumption: whether a grant would redeem, leaving
+// it untouched for the caller that must first know every channel passes.
+function peekGrant(request) {
+    const destination = request.destination ?? null;
+    const row = handle().prepare(`
+        SELECT * FROM approvals
+        WHERE status = 'granted' AND channel = ? AND action = ?
+          AND destination IS ? AND summary = ?
+        ORDER BY resolved_ts DESC LIMIT 1
+    `).get(
+        String(request.channel || 'unknown'),
+        String(request.action || 'unknown'),
+        destination,
+        String(request.summary || request.action || 'unnamed action')
+    );
+    if (!row) return null;
+    if (Date.now() - Date.parse(row.resolved_ts) > GRANT_TTL_MS) return null;
+    return { id: row.id };
+}
+
 function resolveApproval(id, granted) {
     const result = handle().prepare(`
         UPDATE approvals SET status = ?, resolved_ts = ?
@@ -323,6 +343,7 @@ module.exports = {
     getApproval,
     resolveApproval,
     takeGrant,
+    peekGrant,
     prune,
     grantRoot,
     revokeRoot,

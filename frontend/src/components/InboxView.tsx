@@ -91,27 +91,6 @@ export function InboxView({ brief, onRefresh, onDecision, onResolveApproval, onM
         </section>
       )}
 
-      {brief.drafts.length > 0 && (
-        <section className="inbox-section">
-          <div className="inbox-section-head">
-            <h2>Suggested while you were away</h2>
-          </div>
-          <div className="inbox-section-note">
-            Nothing here has been sent or booked — ask for one in chat to act on it.
-          </div>
-          {brief.drafts.map((draft) => (
-            <article key={draft.id} className="inbox-card">
-              <div className="inbox-card-title">{draft.summary ?? draft.kind}</div>
-              {(draft.who || draft.subject || draft.goal) && (
-                <div className="inbox-card-detail">
-                  {[draft.who, draft.subject, draft.goal].filter(Boolean).join(" · ")}
-                </div>
-              )}
-            </article>
-          ))}
-        </section>
-      )}
-
       {brief.approvals.length > 0 && (
         <section className="inbox-section">
           <div className="inbox-section-head">

@@ -197,6 +197,10 @@ function fromProcedure(procedure) {
                 return descend(procedure, bound, context, err);
             }
 
+            if (result.status === 'aborted') {
+                throw new Error(result.reason || 'stopped by the user');
+            }
+
             // Site drift is not the user's problem: a recipe whose page moved
             // underneath it hands the goal to the slow path mid-request, and
             // the successful slow runs are what re-learns the recipe. Only a

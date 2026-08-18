@@ -918,13 +918,19 @@ async def text_to_speech(text: str = Form(...), voice: str = Form(default="af_he
 
         produced = sorted(glob.glob(prefix + "*.wav"))
         if not produced:
-            print(f"[TTS] No audio produced for: {text[:60]!r}")
+            if LOG_CONTENT:
+                print(f"[TTS] No audio produced for: {text[:60]!r}")
+            else:
+                print("[TTS] no audio produced")
             return {"error": "no audio produced"}
 
         with open(produced[0], "rb") as fh:
             data = fh.read()
 
-        print(f"[TTS] Synthesized {len(data)} bytes for: {text[:50]!r}")
+        if LOG_CONTENT:
+            print(f"[TTS] Synthesized {len(data)} bytes for: {text[:50]!r}")
+        else:
+            print(f"[TTS] synthesized {len(data)} bytes")
         return Response(content=data, media_type="audio/wav")
     except Exception as e:
         print(f"[TTS] Error: {e}")

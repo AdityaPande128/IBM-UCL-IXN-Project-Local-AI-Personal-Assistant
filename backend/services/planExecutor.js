@@ -59,18 +59,43 @@ function starvation(resolved) {
 
 
 function checkDisclosure(capability, label, step) {
-    let verdict = null;
-    for (const effect of capability.effects) {
-        const channel = DISCLOSURE_CHANNEL[effect];
-        if (!channel) continue;
+    const channels = (capability.effects || [])
+        .map(effect => DISCLOSURE_CHANNEL[effect])
+        .filter(Boolean);
+    if (!channels.length) return null;
 
-        verdict = egress.guard({
-            channel,
-            action: capability.id,
-            inputs: [label],
-            summary: `plan step ${step.id}: ${capability.id}${step.reason ? ` — ${step.reason}` : ''}`,
-            policy: capability.disclosurePolicy || undefined
-        });
+    // The summary is the grant's redemption key, so it carries only what a
+    // regenerated plan reproduces verbatim; the planner's own phrasing rides
+    // in the preview, where the user reads it and nothing matches on it.
+    const flowFor = (channel) => ({
+        channel,
+        action: capability.id,
+        inputs: [label],
+        summary: `a plan step disclosing through ${capability.id}`,
+        preview: step.reason ? `${step.id}: ${step.reason}` : step.id,
+        policy: capability.disclosurePolicy || undefined
+    });
+
+    // With several channels, consuming a single-use grant for one before
+    // another blocks would burn it; redeem nothing until all are known to pass.
+    if (channels.length > 1) {
+        for (const channel of channels) {
+            const flow = flowFor(channel);
+            const { decision } = (flow.policy || egress.evaluate)(label, channel);
+            if (decision === egress.DECISION.DENY) return egress.guard(flow);
+            if (decision === egress.DECISION.APPROVE
+                && !securityStore.peekGrant({
+                    channel, action: capability.id,
+                    destination: null, summary: flow.summary
+                })) {
+                return egress.guard(flow);
+            }
+        }
+    }
+
+    let verdict = null;
+    for (const channel of channels) {
+        verdict = egress.guard(flowFor(channel));
         if (!verdict.allowed) return verdict;
     }
     return verdict && verdict.allowed ? verdict : null;

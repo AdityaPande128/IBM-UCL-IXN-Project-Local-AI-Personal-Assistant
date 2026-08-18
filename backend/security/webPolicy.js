@@ -229,7 +229,7 @@ function checkFill({ element, text, goal, userLabel, contextLabel, label, destin
         action: 'web.fill',
         inputs: [effective],
         destination,
-        summary: `type into "${element.name || element.ref}" on ${destination || 'the page'}`,
+        summary: `type into "${element.name || 'an unnamed field'}" on ${destination || 'the page'}`,
         preview: String(text ?? '').slice(0, 200),
         policy: mayLeaveUnattended
     });

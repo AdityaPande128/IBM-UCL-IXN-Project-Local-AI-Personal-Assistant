@@ -1436,6 +1436,14 @@ async function browse(goal, options = {}) {
 
     let contextLabel = inputLabel;
 
+    if (options.signal && options.signal.aborted) {
+        return {
+            status: 'aborted', goal, answer: null, reason: 'stopped by the user',
+            refusal: null, approvalId: null, actions: [], url: null,
+            passages: [], planId: null, run_ms: Date.now() - startedAt
+        };
+    }
+
     const intent = await webIntent.read(goal, { label: inputLabel })
         .catch(() => webIntent.fallback(goal, inputLabel, 'the intent could not be read'));
 
@@ -2175,6 +2183,7 @@ async function browse(goal, options = {}) {
         }
 
         const carryOut = async () => {
+            if (options.signal && options.signal.aborted) return;
         if (asksWhetherReplied(goal) && !mandate.size && status !== 'success' && intent.query) {
             const who = (intent.query.match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0]
                 || intent.query.replace(/^\w+:/, '').trim();
@@ -2385,6 +2394,8 @@ async function browse(goal, options = {}) {
                 && (addressedIt || !unaddressed(observation))) {
                 const sender = sendControl(observation);
                 if (sender) {
+                    // The one action that cannot be taken back checks once more.
+                    if (options.signal && options.signal.aborted) return;
                     const pressed = await act(surface, { action: 'click', ref: sender.ref },
                         observation, { goal, userLabel: inputLabel, contextLabel, mandate, home }, options);
                     if (pressed.ok) {

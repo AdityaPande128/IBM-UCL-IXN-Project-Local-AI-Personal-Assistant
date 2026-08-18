@@ -53,7 +53,7 @@ test('an empty morning says so and asks for nothing', () => {
     try {
         const brief = morningBrief.assemble();
         assert.strictEqual(brief.notices.length, 0);
-        assert.strictEqual(brief.drafts.length, 0);
+        assert.strictEqual(brief.proposals.filter(e => e.kind === 'draft-reply').length, 0);
         assert.match(brief.text, /Nothing needs you/);
     } finally {
         scope.cleanup();
@@ -71,12 +71,13 @@ test('a new mail row becomes a drafted reply behind its own consent card', async
         const brief = morningBrief.assemble({ browse });
 
         assert.strictEqual(brief.notices.length, 1);
-        assert.strictEqual(brief.drafts.length, 1);
-        assert.match(brief.drafts[0].summary, /Philip Hargreaves/);
+        const drafted = brief.proposals.filter(e => e.kind === 'draft-reply');
+        assert.strictEqual(drafted.length, 1);
+        assert.match(drafted[0].summary, /Philip Hargreaves/);
         assert.match(brief.text, /reply is drafted and waiting/);
         assert.strictEqual(browsed.length, 0, 'nothing browses before consent');
 
-        const outcome = await proposals.approve(brief.drafts[0].id);
+        const outcome = await proposals.approve(drafted[0].id);
         assert.strictEqual(outcome.status, 'success');
         assert.strictEqual(browsed.length, 1);
         assert.match(browsed[0], /^draft a reply to Philip Hargreaves/);
@@ -93,11 +94,12 @@ test('the same mail row is never offered twice', async () => {
         const browse = async () => ({ status: 'success' });
 
         const first = morningBrief.assemble({ browse });
-        assert.strictEqual(first.drafts.length, 1);
-        await proposals.approve(first.drafts[0].id);
+        const offered = first.proposals.filter(e => e.kind === 'draft-reply');
+        assert.strictEqual(offered.length, 1);
+        await proposals.approve(offered[0].id);
 
         const second = morningBrief.assemble({ browse });
-        assert.strictEqual(second.drafts.length, 0, 'consent already asked once');
+        assert.strictEqual(second.proposals.filter(e => e.kind === 'draft-reply').length, 0, 'consent already asked once');
     } finally {
         scope.cleanup();
     }

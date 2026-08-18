@@ -129,6 +129,7 @@ export function SettingsView({
   }, [settingsResult?.status]);
 
   const commitName = useCallback(() => {
+    if (closingRef.current) return;
     const trimmed = (nameEdit ?? "").trim();
     if (nameEdit !== null && profile && trimmed && trimmed !== profile.name) {
       onUpdateProfile({ name: trimmed });
@@ -154,7 +155,11 @@ export function SettingsView({
     Object.keys(changedTiers).length > 0 || browserChanged || mailChanged;
 
   // Closing discards the half-typed name; only Enter or blur commits it.
+  // The ref outruns the blur the unmount fires, which would otherwise
+  // commit the draft close() just discarded.
+  const closingRef = useRef(false);
   const close = useCallback(() => {
+    closingRef.current = true;
     setNameEdit(null);
     onClose();
   }, [onClose]);
@@ -169,7 +174,8 @@ export function SettingsView({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        requestClose();
+        if (closeArmed) setCloseArmed(false);
+        else requestClose();
         return;
       }
       if (e.key !== "Tab") return;
@@ -192,7 +198,7 @@ export function SettingsView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [requestClose]);
+  }, [requestClose, closeArmed]);
 
   const openDashboard = async () => {
     if (!abilities) return;

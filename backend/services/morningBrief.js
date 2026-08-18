@@ -150,15 +150,17 @@ function assemble({ browse } = {}) {
     const queue = proposals.pending();
     const approvals = freshApprovals();
 
+    // Drafts are a subset of the proposals and already render there with
+    // their yes/no; shipping them twice put the same card in two sections.
+    const draftReplies = queue.filter(entry => entry.kind === 'draft-reply');
     const brief = {
         at: Date.now(),
         notices,
         approvals,
         proposals: queue,
-        drafts: queue.filter(entry => entry.kind === 'draft-reply'),
         text: null
     };
-    brief.text = spoken({ notices, approvals, drafts: brief.drafts });
+    brief.text = spoken({ notices, approvals, drafts: draftReplies });
     return brief;
 }
 
@@ -172,7 +174,7 @@ function start({ browse } = {}) {
             activityBus.publish('brief', 'ready', {
                 text: brief.text,
                 notices: brief.notices.length,
-                drafts: brief.drafts.length,
+                drafts: brief.proposals.filter(e => e.kind === 'draft-reply').length,
                 approvals: brief.approvals.length
             });
         } catch (err) {
