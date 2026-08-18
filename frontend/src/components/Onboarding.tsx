@@ -298,12 +298,18 @@ export function Onboarding({
 
   const [tokenDraft, setTokenDraft] = useState("");
 
+  // Poll only while waiting for the phone to pair; a blind poll would
+  // overwrite a rejected token's error before anyone could read it.
   useEffect(() => {
     if (step !== "phone") return;
     onRequestChannel();
+  }, [step, onRequestChannel]);
+
+  useEffect(() => {
+    if (step !== "phone" || !channel?.has_token || channel.paired) return;
     const poll = setInterval(onRequestChannel, 4000);
     return () => clearInterval(poll);
-  }, [step, onRequestChannel]);
+  }, [step, channel?.has_token, channel?.paired, onRequestChannel]);
 
   const pickTheme = (chosen: Theme) => {
     setTheme(chosen);
