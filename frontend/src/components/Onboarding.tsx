@@ -7,6 +7,7 @@ import type {
   OnboardingData,
 } from "../hooks/useWebSocket";
 import { applyTheme, storedTheme, type Theme } from "../theme";
+import { BotSteps } from "./BotSteps";
 
 type Step =
   | "theme"
@@ -607,12 +608,13 @@ export function Onboarding({
           <h1 className="ob-title">Reach Jarvis from your phone</h1>
           <p className="ob-lead">
             Optional: message Jarvis over Telegram through a bot that belongs
-            to you. Create one with @BotFather, paste its token, and pair
-            this Mac from your phone. You can also do this later in Settings.
+            only to you. Two minutes sets it up — and you can always do this
+            later in Settings.
           </p>
           {channel?.error && (
             <div className="ob-verdict ob-verdict--bad">{channel.error}</div>
           )}
+          {!channel?.has_token && <BotSteps />}
           {!channel?.has_token ? (
             <input
               className="ob-input"

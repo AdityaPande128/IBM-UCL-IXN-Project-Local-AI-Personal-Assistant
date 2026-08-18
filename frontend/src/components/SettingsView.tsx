@@ -13,6 +13,7 @@ import type {
 } from "../hooks/useWebSocket";
 import { applyTheme } from "../theme";
 import { ArmButton } from "./Confirm";
+import { BotSteps } from "./BotSteps";
 import { Pending } from "./Pending";
 
 interface SettingsViewProps {
@@ -617,12 +618,13 @@ export function SettingsView({
                   <div className="settings-field">
                     <span className="settings-label">Telegram</span>
                     <span className="diag-note">
-                      Message Jarvis from your phone through your own Telegram
-                      bot. Create one with @BotFather, paste its token here,
-                      then send the pairing code to the bot from your phone.
+                      Message Jarvis from your phone through a Telegram bot
+                      that belongs only to you.
                     </span>
                     {channel?.error && <span className="diag-error">{channel.error}</span>}
                     {!channel?.has_token ? (
+                      <>
+                      <BotSteps />
                       <div className="diag-row">
                         <input
                           className="settings-input"
@@ -648,6 +650,7 @@ export function SettingsView({
                           Connect
                         </button>
                       </div>
+                      </>
                     ) : (
                       <>
                         {channel.paired ? (

@@ -1682,6 +1682,34 @@ body {
   background: rgba(79, 209, 197, 0.04);
 }
 
+.bot-steps {
+  margin: 2px 0 6px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.55;
+  text-align: left;
+}
+
+.bot-steps li::marker {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.bot-steps code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+  background: rgba(var(--accent-tint), 0.08);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
 .ob-feature--info {
   border: none;
   border-radius: 0;
