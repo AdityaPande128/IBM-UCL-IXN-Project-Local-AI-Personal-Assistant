@@ -305,6 +305,24 @@ test('an approved disclosure authorises exactly one retry of the same flow', () 
     assert.notStrictEqual(third.approvalId, first.approvalId);
 });
 
+test('peeking at a grant leaves it for the take that follows', () => {
+    freshStore();
+    const flow = {
+        channel: egress.CHANNEL.NETWORK, action: 'http.post',
+        inputs: [labels.label(ORIGIN.FILE, SENSITIVITY.PERSONAL)],
+        summary: 'send the summary'
+    };
+    const blocked = egress.guard(flow);
+    assert.strictEqual(egress.resolve(blocked.approvalId, true).allowed, true);
+
+    const key = { channel: egress.CHANNEL.NETWORK, action: 'http.post',
+        destination: null, summary: 'send the summary' };
+    assert.ok(store.peekGrant(key), 'a granted approval is visible to a peek');
+    assert.ok(store.peekGrant(key), 'peeking consumes nothing');
+    assert.ok(store.takeGrant(key), 'the grant is still there to take');
+    assert.strictEqual(store.peekGrant(key), null, 'a used grant no longer peeks');
+});
+
 test('ATTACK: a granted approval for one destination opens nothing else', () => {
     freshStore();
     const flow = {

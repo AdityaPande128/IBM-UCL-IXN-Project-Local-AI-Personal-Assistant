@@ -674,8 +674,8 @@ wss.on('connection', (ws) => {
 
             if (parsed.type === 'brief') {
                 const brief = morningBrief.assemble({
-                    browse: goal => intentQueue.submit(() =>
-                        webAgent.browse(String(goal))).result
+                    browse: goal => intentQueue.submit(({ signal }) =>
+                        webAgent.browse(String(goal), { signal })).result
                 });
                 ws.send(JSON.stringify({ type: 'brief_result', ...brief }));
                 return;
@@ -860,7 +860,8 @@ async function boot() {
         memoryService.start();
         distiller.start();
         morningBrief.start({
-            browse: goal => intentQueue.submit(() => webAgent.browse(String(goal))).result
+            browse: goal => intentQueue.submit(({ signal }) =>
+                webAgent.browse(String(goal), { signal })).result
         });
         channelAdapter.start(channelDeps());
     } catch (err) {

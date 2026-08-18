@@ -198,7 +198,9 @@ function fromProcedure(procedure) {
             }
 
             if (result.status === 'aborted') {
-                throw new Error(result.reason || 'stopped by the user');
+                const stopped = new Error(result.reason || 'stopped by the user');
+                stopped.aborted = true;
+                throw stopped;
             }
 
             // Site drift is not the user's problem: a recipe whose page moved
@@ -466,6 +468,11 @@ function builtins() {
                 if (result.status === 'success') {
                     return { text: result.answer, passages: result.passages, url: result.url,
                              files: result.files || [] };
+                }
+                if (result.status === 'aborted') {
+                    const stopped = new Error(result.reason || 'stopped by the user');
+                    stopped.aborted = true;
+                    throw stopped;
                 }
                 // A browse that stopped to offer a card is not a failure —
                 // the card rides up so the executor can hold the plan on it.

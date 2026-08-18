@@ -283,8 +283,8 @@ test('a download can be stopped, and started again by name', async t => {
     await waitFor(() => manager.status().queue[0].status === 'downloading');
 
     manager.stop('org/slow');
-    await waitFor(() => manager.status().queue[0].status === 'stopped');
-    assert.strictEqual(manager.status().active, null);
+    await waitFor(() => manager.status().queue[0].status === 'stopped'
+        && manager.status().active === null);
 
     manager.start('org/slow');
     await waitFor(() => manager.status().queue[0].status === 'downloading');

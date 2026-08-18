@@ -10,6 +10,7 @@ const planner = require('../services/planner');
 const planExecutor = require('../services/planExecutor');
 const traceStore = require('../services/traceStore');
 const securityStore = require('../security/store');
+const egress = require('../security/egress');
 const labels = require('../security/labels');
 
 const { ORIGIN, SENSITIVITY } = labels;
@@ -1066,4 +1067,64 @@ test('a recipe that failed its last two runs is not offered again', () => {
     } finally {
         cleanup(dir);
     }
+});
+
+
+test('a stopped step is recorded as stopped, never as a failure', async () => {
+    const dir = scratch();
+
+    const graph = fakeGraph({
+        halt: {
+            tier: 1,
+            description: 'stops mid-run',
+            inputs: {},
+            outputs: { never: { type: 'string' } },
+            produces: labels.label(ORIGIN.GENERATED, SENSITIVITY.PUBLIC),
+            run: async () => {
+                const stopped = new Error('stopped by the user');
+                stopped.aborted = true;
+                throw stopped;
+            }
+        }
+    });
+
+    const result = await planExecutor.run({
+        goal: 'halt',
+        steps: [{ id: 's1', capability: 'halt', inputs: {}, reason: 'stop here' }],
+        missing: []
+    }, { graph, request: 'anything' });
+
+    assert.strictEqual(result.status, 'aborted');
+    assert.strictEqual(result.steps[0].status, 'aborted');
+    assert.match(result.text, /Stopped/);
+    assert.deepStrictEqual(traceStore.recentOutcomes('halt', 1), ['aborted'],
+        'the trace the learning stores read must not call a Stop a failure');
+
+    cleanup(dir);
+});
+
+test('ATTACK: a grant redeems only the ask that was approved', async () => {
+    const dir = scratch();
+
+    const post = {
+        goal: 'post it',
+        steps: [{ id: 's1', capability: 'publish', inputs: { body: 'hello' }, reason: 'post the news' }],
+        missing: []
+    };
+
+    const first = await planExecutor.run(post, { graph: GRAPH, request: 'post my news' });
+    assert.strictEqual(first.status, 'blocked');
+    const approvalId = (first.text.match(/#([\w-]+)/) || [])[1];
+    assert.ok(approvalId, 'the block names its approval');
+    assert.strictEqual(egress.resolve(approvalId, true).allowed, true);
+
+    const other = await planExecutor.run(post, { graph: GRAPH, request: 'post my diary' });
+    assert.strictEqual(other.status, 'blocked',
+        'a different ask through the same capability asks afresh');
+
+    const retry = await planExecutor.run(post, { graph: GRAPH, request: 'post my news' });
+    assert.strictEqual(retry.status, 'success',
+        'the approved ask still goes through: the other ask consumed nothing');
+
+    cleanup(dir);
 });

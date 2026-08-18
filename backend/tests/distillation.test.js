@@ -1051,6 +1051,24 @@ test('failures from before a re-learn do not block the rebuilt recipe', async ()
     } finally { world.cleanup(); }
 });
 
+test('a stopped run is no strike: aborted trace rows do not bench the recipe', () => {
+    const world = scratch();
+    const negativeMemory = require('../services/negativeMemory');
+    try {
+        retiredSearch();
+
+        const plan = traceStore.beginPlan({ request: 'stopped world', status: 'running' });
+        ['a1', 'a2'].forEach((key, ordinal) => traceStore.recordStep(plan, {
+            ordinal, key, capability: 'procedure.bookshop-search', tier: 1,
+            status: 'aborted', error: 'stopped by the user'
+        }));
+        traceStore.finishPlan(plan, { status: 'aborted', runMs: 100 });
+
+        assert.strictEqual(negativeMemory.isBlocked('procedure.bookshop-search'), false,
+            'two Stops must not take a healthy recipe from the planner');
+    } finally { world.cleanup(); }
+});
+
 test('traces from before the drift do not resurrect the buried steps', () => {
     const world = scratch();
     try {

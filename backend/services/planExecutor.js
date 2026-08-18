@@ -58,20 +58,24 @@ function starvation(resolved) {
 }
 
 
-function checkDisclosure(capability, label, step) {
-    const channels = (capability.effects || [])
+function checkDisclosure(capability, label, step, request) {
+    const channels = [...new Set((capability.effects || [])
         .map(effect => DISCLOSURE_CHANNEL[effect])
-        .filter(Boolean);
+        .filter(Boolean))];
     if (!channels.length) return null;
 
     // The summary is the grant's redemption key, so it carries only what a
-    // regenerated plan reproduces verbatim; the planner's own phrasing rides
-    // in the preview, where the user reads it and nothing matches on it.
+    // regenerated plan reproduces verbatim: the capability and the user's own
+    // words. The request scopes the grant — approving one ask must not open
+    // the same channel to a different ask — while the planner's phrasing
+    // rides in the preview, where the user reads it and nothing matches on it.
+    const asked = String(request || '').trim().replace(/\s+/g, ' ').slice(0, 120);
     const flowFor = (channel) => ({
         channel,
         action: capability.id,
         inputs: [label],
-        summary: `a plan step disclosing through ${capability.id}`,
+        summary: `a plan step disclosing through ${capability.id}`
+            + (asked ? ` for "${asked}"` : ''),
         preview: step.reason ? `${step.id}: ${step.reason}` : step.id,
         policy: capability.disclosurePolicy || undefined
     });
@@ -207,7 +211,7 @@ async function run(plan, options = {}) {
         }
 
         const blocked = checkConsent(capability)
-            || describeDisclosure(checkDisclosure(capability, inputLabel, step));
+            || describeDisclosure(checkDisclosure(capability, inputLabel, step, options.request));
 
         if (blocked) {
             record.push({
@@ -236,10 +240,14 @@ async function run(plan, options = {}) {
         } catch (err) {
             const durationMs = Date.now() - stepStartedAt;
             // A step that stopped to offer a card holds the plan rather than
-            // failing it: the card carries its own continuation.
-            const held = err.proposal ? 'needs_approval' : 'failed';
+            // failing it: the card carries its own continuation. A step the
+            // user stopped is no failure either — recorded as one, it would
+            // count against the very recipe the Stop interrupted.
+            const held = err.proposal ? 'needs_approval'
+                : err.aborted ? 'aborted' : 'failed';
             failure = { step: step.id, error: err.message,
-                        ...(err.proposal ? { proposal: err.proposal } : {}) };
+                        ...(err.proposal ? { proposal: err.proposal } : {}),
+                        ...(err.aborted ? { aborted: true } : {}) };
             record.push({ ...step, status: held, error: err.message, durationMs });
             if (tracing) {
                 traceStore.recordStep(planId, {
@@ -273,6 +281,7 @@ async function run(plan, options = {}) {
 
     const status = failure
         ? (failure.proposal ? 'needs_approval'
+            : failure.aborted ? 'aborted'
             : failure.blocked ? 'blocked' : failure.starved ? 'empty' : 'failed')
         : 'success';
 
@@ -343,7 +352,11 @@ function render(plan, record, failure) {
             lines.push(sentence(succeeded.map(clause)) || 'Done.');
         }
 
-        if (failure) {
+        if (failure && failure.aborted) {
+            lines.push(succeeded.length
+                ? `Stopped after ${succeeded.length} of ${plan.steps.length} steps.`
+                : 'Stopped.');
+        } else if (failure) {
             const where = plan.steps.findIndex(s => s.id === failure.step) + 1;
             lines.push(
                 succeeded.length

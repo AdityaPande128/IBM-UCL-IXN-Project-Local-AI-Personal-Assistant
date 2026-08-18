@@ -219,7 +219,11 @@ function takeGrant(request) {
 }
 
 // takeGrant without the consumption: whether a grant would redeem, leaving
-// it untouched for the caller that must first know every channel passes.
+// it untouched for the caller that must first know every channel passes. It
+// answers slightly early: a grant within a breath of expiry could otherwise
+// pass the peek and still expire under the take that follows it.
+const PEEK_MARGIN_MS = 1000;
+
 function peekGrant(request) {
     const destination = request.destination ?? null;
     const row = handle().prepare(`
@@ -234,7 +238,7 @@ function peekGrant(request) {
         String(request.summary || request.action || 'unnamed action')
     );
     if (!row) return null;
-    if (Date.now() - Date.parse(row.resolved_ts) > GRANT_TTL_MS) return null;
+    if (Date.now() - Date.parse(row.resolved_ts) > GRANT_TTL_MS - PEEK_MARGIN_MS) return null;
     return { id: row.id };
 }
 

@@ -76,3 +76,49 @@ test('executeIntent honours an already-aborted signal before doing any work', as
     const result = await bridge.executeIntent('list my files', { signal: controller.signal });
     assert.strictEqual(result.status, 'aborted');
 });
+
+test('a job that submits from inside the queue runs inline instead of deadlocking', async () => {
+    intentQueue.reset();
+    const outer = intentQueue.submit(async () => {
+        const inner = intentQueue.submit(() =>
+            Promise.resolve({ status: 'success', response: 'inner done' }));
+        assert.strictEqual(inner.position, 0, 'nested work never takes a queue place');
+        const got = await inner.result;
+        return { status: 'success', response: got.response };
+    });
+    const result = await outer.result;
+    assert.strictEqual(result.status, 'success');
+    assert.strictEqual(result.response, 'inner done');
+    assert.strictEqual(intentQueue.size(), 0);
+});
+
+test('nested inline work runs under the outer job\'s stop signal', async () => {
+    intentQueue.reset();
+    const outer = intentQueue.submit(async ({ signal }) => {
+        let inherited = null;
+        await intentQueue.submit(({ signal: inner }) => {
+            inherited = inner;
+            return Promise.resolve({ status: 'success' });
+        }).result;
+        return { status: 'success', shared: inherited === signal };
+    });
+    const result = await outer.result;
+    assert.strictEqual(result.shared, true);
+});
+
+test('a bare Stop passes over a background run and lands on the queued foreground job', async () => {
+    intentQueue.reset();
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    const watcher = intentQueue.submit(() =>
+        gate.then(() => ({ status: 'success' })), { background: true });
+    const user = intentQueue.submit(() => Promise.resolve({ status: 'success' }));
+
+    const outcome = intentQueue.abort();
+    assert.strictEqual(outcome.id, user.id, 'the Stop lands on the user\'s job');
+    assert.strictEqual((await user.result).status, 'aborted');
+
+    release();
+    assert.strictEqual((await watcher.result).status, 'success',
+        'the background run was never touched');
+});

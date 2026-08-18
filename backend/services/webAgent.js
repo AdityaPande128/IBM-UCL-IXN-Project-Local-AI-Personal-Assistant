@@ -1341,7 +1341,8 @@ async function bookAsApproved(plainGoal, options = {}) {
         url: target,
         request: plainGoal,
         allowPrivate: options.allowPrivate,
-        maxActions: options.maxActions
+        maxActions: options.maxActions,
+        signal: options.signal
     });
     return {
         status: result.status === 'success' ? 'success' : result.status,
@@ -2120,7 +2121,8 @@ async function browse(goal, options = {}) {
                                     found: words,
                                     will: `book "${title}"${day}${clock}, as the email from `
                                         + `${sender} says`
-                                }, () => bookAsApproved(plainGoal, options));
+                                }, (context = {}) => bookAsApproved(plainGoal,
+                                    { ...options, signal: context.signal }));
                                 status = 'needs_approval';
                                 failure = `The email from ${sender} says: "${words}". `
                                     + `I can book "${title}"${day}${clock} — approve and I `
@@ -2372,6 +2374,8 @@ async function browse(goal, options = {}) {
                 await placeEvent();
                 const saver = ((observation && observation.elements) || []).find(saves);
                 if (saver) {
+                    // Committing an event is as irreversible as a send.
+                    if (options.signal && options.signal.aborted) return;
                     const pressed = await act(surface, { action: 'click', ref: saver.ref },
                         observation, { goal, userLabel: inputLabel, contextLabel, mandate, home },
                         options);
@@ -2463,6 +2467,14 @@ async function browse(goal, options = {}) {
             } catch (err) {
                 failure = `the model did not answer: ${err.message}`;
                 status = 'failed';
+                break;
+            }
+
+            // The model takes seconds to answer; a Stop pressed while it
+            // thought must beat whatever it chose.
+            if (options.signal && options.signal.aborted) {
+                status = 'aborted';
+                failure = 'stopped by the user';
                 break;
             }
 

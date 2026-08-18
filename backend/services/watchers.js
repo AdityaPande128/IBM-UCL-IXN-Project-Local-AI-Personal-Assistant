@@ -262,7 +262,7 @@ async function tick(now = Date.now()) {
 async function runDue(now) {
     const ran = [];
     for (const watcher of due(now)) {
-        const job = intentQueue.submit(() => runOne(watcher, now));
+        const job = intentQueue.submit(() => runOne(watcher, now), { background: true });
         const result = await job.result;
         if (result && (result.status === 'error' || result.status === 'aborted')) {
             console.warn(`[Watchers] "${watcher.name}" failed: ${result.response}`);
