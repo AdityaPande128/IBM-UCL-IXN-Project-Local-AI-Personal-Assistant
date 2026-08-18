@@ -14,6 +14,20 @@ export function PushToTalk({
   return (
     <div className="ptt-container">
       <button
+      aria-label={recording ? "Release to send" : "Hold to talk"}
+      aria-pressed={recording}
+      onKeyDown={(e) => {
+        if ((e.key === " " || e.key === "Enter") && !e.repeat && !recording && !disabled) {
+          e.preventDefault();
+          onStart();
+        }
+      }}
+      onKeyUp={(e) => {
+        if ((e.key === " " || e.key === "Enter") && recording) {
+          e.preventDefault();
+          onStop();
+        }
+      }}
         className={`ptt-button ${recording ? "ptt-button--active" : ""} ${disabled ? "ptt-button--disabled" : ""}`}
         onMouseDown={!disabled ? onStart : undefined}
         onMouseUp={!disabled ? onStop : undefined}

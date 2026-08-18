@@ -9,6 +9,7 @@ const assert = require('node:assert');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-wire-'));
 process.env.PORT = '18099';
 process.env.JARVIS_SOCKET_TOKEN_PATH = path.join(scratch, 'socket-token');
+process.env.JARVIS_CONVERSATIONS_DB = path.join(scratch, 'conversations.db');
 process.env.INFERENCE_URL = 'http://127.0.0.1:18098';
 process.env.JARVIS_LOGS_DIR = path.join(scratch, 'logs');
 process.env.JARVIS_DIAGNOSTICS_DIR = path.join(scratch, 'diagnostics');
@@ -699,4 +700,22 @@ test('a rejected onboarding selection reports why and writes nothing', async () 
     assert.strictEqual(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'), before,
         'a refused apply must not touch the config');
     client.ws.close();
+});
+
+test('the phone channel is configured over the wire and refuses a junk token', async () => {
+    const client = await authed();
+    try {
+        client.send({ type: 'channel_status' });
+        const before = await client.next(m => m.type === 'channel_status_result');
+        assert.strictEqual(typeof before.has_token, 'boolean');
+        assert.strictEqual(typeof before.running, 'boolean');
+
+        client.send({ type: 'channel_set_token', token: 'not-a-token' });
+        const refused = await client.next(m => m.type === 'channel_status_result' && m.error);
+        assert.match(refused.error, /BotFather/);
+        assert.strictEqual(refused.has_token, before.has_token,
+            'a refused token changes nothing');
+    } finally {
+        client.ws.close();
+    }
 });

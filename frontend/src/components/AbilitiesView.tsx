@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { ArmButton } from "./Confirm";
 import type { AbilitiesData } from "../hooks/useWebSocket";
 
 interface AbilitiesViewProps {
@@ -8,8 +9,6 @@ interface AbilitiesViewProps {
 }
 
 export function AbilitiesView({ abilities, onRefresh, onRemoveSkill }: AbilitiesViewProps) {
-  const [confirming, setConfirming] = useState<string | null>(null);
-
   useEffect(() => {
     onRefresh();
   }, [onRefresh]);
@@ -49,26 +48,12 @@ export function AbilitiesView({ abilities, onRefresh, onRemoveSkill }: Abilities
               </div>
               {skill.author === "generated" && (
                 <div className="ability-actions">
-                  {confirming === skill.name ? (
-                    <>
-                      <button
-                        className="ability-remove ability-remove--armed"
-                        onClick={() => {
-                          onRemoveSkill(skill.name);
-                          setConfirming(null);
-                        }}
-                      >
-                        Really remove
-                      </button>
-                      <button className="ability-cancel" onClick={() => setConfirming(null)}>
-                        Keep
-                      </button>
-                    </>
-                  ) : (
-                    <button className="ability-remove" onClick={() => setConfirming(skill.name)}>
-                      Remove
-                    </button>
-                  )}
+                  <ArmButton
+                    label="Remove"
+                    confirmLabel="Really remove"
+                    className="ability-remove"
+                    onConfirm={() => onRemoveSkill(skill.name)}
+                  />
                 </div>
               )}
             </div>

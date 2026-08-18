@@ -7,9 +7,13 @@ interface ActivityPanelProps {
 
 export function ActivityPanel({ activities }: ActivityPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = listRef.current;
+    if (!list) return;
+    const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activities]);
 
   return (
@@ -18,7 +22,7 @@ export function ActivityPanel({ activities }: ActivityPanelProps) {
         <span className="activity-panel-title">Activity</span>
         <span className="activity-panel-count">{activities.length}</span>
       </div>
-      <div className="activity-panel-entries">
+      <div className="activity-panel-entries" ref={listRef}>
         {activities.length === 0 && (
           <div className="activity-empty">Nothing happening yet</div>
         )}

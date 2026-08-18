@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Pending } from "./Pending";
+import { ArmButton } from "./Confirm";
 import type { MemoryData, MemoryFact, WipePreview } from "../hooks/useWebSocket";
 
 interface MemoryViewProps {
@@ -52,7 +54,7 @@ export function MemoryView({
   }, [wipePreview]);
 
   if (!memory) {
-    return <div className="inbox inbox--empty">Opening the memory…</div>;
+    return <Pending label="Opening the memory…" onRetry={() => onRefresh()} />;
   }
 
   const remember = () => {
@@ -88,7 +90,7 @@ export function MemoryView({
               : "Stop recording: no new memories, no traces, until turned back on"
           }
         >
-          {memory.incognito ? "◐ Incognito — nothing is being recorded" : "Go incognito"}
+          {memory.incognito ? "◐ Private mode — nothing is being recorded" : "Private mode"}
         </button>
       </div>
 
@@ -96,7 +98,7 @@ export function MemoryView({
         <div className="memory-add">
           <input
             type="text"
-            className="chat-input"
+            className="settings-input"
             placeholder="Something to remember…"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -145,9 +147,12 @@ export function MemoryView({
                   {fact.status !== "active" && ` · ${fact.status}`}
                 </div>
               </div>
-              <button className="inbox-decline" onClick={() => onRemove([fact.id])}>
-                Forget
-              </button>
+              <ArmButton
+                label="Forget"
+                confirmLabel="Forget forever"
+                className="inbox-decline"
+                onConfirm={() => onRemove([fact.id])}
+              />
             </div>
           </article>
         ))}
@@ -160,7 +165,7 @@ export function MemoryView({
         <div className="memory-add">
           <input
             type="text"
-            className="chat-input"
+            className="settings-input"
             placeholder="A name, a place, a topic…"
             value={wipeTerm}
             onChange={(e) => setWipeTerm(e.target.value)}

@@ -18,7 +18,7 @@ export function ApprovalCard({ proposal, onDecision }: ApprovalCardProps) {
       <div className="approval-card-header">
         <span className="approval-card-title">Approval required</span>
         <span className="approval-card-kind">
-          {KIND_LABELS[proposal.kind] ?? proposal.kind}
+          {KIND_LABELS[proposal.kind] ?? "Approve this action"}
         </span>
       </div>
 

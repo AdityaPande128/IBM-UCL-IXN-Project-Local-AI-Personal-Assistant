@@ -300,6 +300,15 @@ export interface BundleResult {
   restarting?: boolean;
 }
 
+export interface ChannelStatus {
+  enabled: boolean;
+  running: boolean;
+  paired: boolean;
+  has_token: boolean;
+  pairing_code: string | null;
+  error?: string;
+}
+
 export interface ConversationSummary {
   id: number;
   title: string;
@@ -309,6 +318,10 @@ export interface ConversationSummary {
 
 interface UseWebSocketReturn {
   connected: boolean;
+  channel: ChannelStatus | null;
+  requestChannel: () => void;
+  setChannelToken: (token: string) => void;
+  clearChannel: () => void;
   conversations: ConversationSummary[];
   activeConversation: number | null;
   selectConversation: (id: number | null) => void;
@@ -416,6 +429,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [openclawConnected, setOpenclawConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [channel, setChannel] = useState<ChannelStatus | null>(null);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
   const [activities, setActivities] = useState<ActivityEvent[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
@@ -550,6 +564,14 @@ export function useWebSocket(): UseWebSocketReturn {
           if (msg.event === "proposal_approved" || msg.event === "proposal_declined") {
             setProposal((prev) => (prev && prev.id === msg.id ? null : prev));
           }
+          return;
+        }
+        if (msg.type === "channel_status_result") {
+          setChannel({
+            enabled: msg.enabled, running: msg.running, paired: msg.paired,
+            has_token: msg.has_token, pairing_code: msg.pairing_code ?? null,
+            ...(msg.error ? { error: msg.error } : {}),
+          });
           return;
         }
         if (msg.type === "conversations_result") {
@@ -776,6 +798,24 @@ export function useWebSocket(): UseWebSocketReturn {
     [addMessage]
   );
 
+  const requestChannel = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "channel_status" }));
+    }
+  }, []);
+
+  const setChannelToken = useCallback((token: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "channel_set_token", token }));
+    }
+  }, []);
+
+  const clearChannel = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "channel_clear" }));
+    }
+  }, []);
+
   const selectConversation = useCallback((id: number | null) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "conversation_select", id }));
@@ -974,6 +1014,10 @@ export function useWebSocket(): UseWebSocketReturn {
 
   return {
     connected,
+    channel,
+    requestChannel,
+    setChannelToken,
+    clearChannel,
     conversations,
     activeConversation,
     selectConversation,

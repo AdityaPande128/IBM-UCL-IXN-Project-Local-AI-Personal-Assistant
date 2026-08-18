@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { Pending } from "./Pending";
 import type { BriefData } from "../hooks/useWebSocket";
 
 interface InboxViewProps {
@@ -14,7 +15,7 @@ export function InboxView({ brief, onRefresh, onDecision, onMarkSeen }: InboxVie
   }, [onRefresh]);
 
   if (!brief) {
-    return <div className="inbox inbox--empty">Gathering the morning…</div>;
+    return <Pending label="Gathering the morning…" onRetry={() => onRefresh()} />;
   }
 
   const waiting = brief.proposals;

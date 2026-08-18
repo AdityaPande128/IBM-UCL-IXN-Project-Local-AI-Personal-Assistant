@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Pending } from "./Pending";
+import { ArmButton } from "./Confirm";
 import type {
   BundleResult,
   CheckpointResult,
@@ -37,7 +39,6 @@ export function PermissionsView({
   onExportBundle,
   onImportBundle,
 }: PermissionsViewProps) {
-  const [arming, setArming] = useState<string | null>(null);
   const [importPath, setImportPath] = useState("");
 
   useEffect(() => {
@@ -48,7 +49,7 @@ export function PermissionsView({
   if (!permissions) {
     return (
       <div className="abilities">
-        <div className="abilities-empty">Reading the grants…</div>
+        <Pending label="Reading the grants…" onRetry={() => onRefresh()} />
       </div>
     );
   }
@@ -70,8 +71,12 @@ export function PermissionsView({
         <h2>Skills</h2>
         <div className="diag-note">
           Generated skills run inside a sandbox derived from what they declared
-          ({permissions.enforce_mode} mode
-          {permissions.sandbox_available ? "" : " — sandbox-exec is unavailable on this Mac"}),
+          ({permissions.enforce_mode === "enforce"
+            ? "rules are enforced"
+            : `${permissions.enforce_mode} mode`}
+          {permissions.sandbox_available
+            ? ""
+            : " — the system sandbox is unavailable on this Mac, so skills run unsandboxed"}),
           and only while their content matches the hash pinned at install.
         </div>
         <div className="build-list">
@@ -198,33 +203,15 @@ export function PermissionsView({
             <div key={entry.name} className="build-row">
               <span className="ability-name">{entry.label ?? entry.name}</span>
               <span className="build-meta">
-                {when(entry.createdAt)} · {entry.files} file(s)
+                {when(entry.createdAt)} · {entry.files} {entry.files === 1 ? "file" : "files"}
               </span>
-              {arming === entry.name ? (
-                <>
-                  <button
-                    className="ability-remove ability-remove--armed"
-                    disabled={working}
-                    onClick={() => {
-                      onRestoreCheckpoint(entry.name);
-                      setArming(null);
-                    }}
-                  >
-                    Really restore
-                  </button>
-                  <button className="ability-cancel" onClick={() => setArming(null)}>
-                    Keep current state
-                  </button>
-                </>
-              ) : (
-                <button
-                  className="ability-remove"
-                  disabled={working}
-                  onClick={() => setArming(entry.name)}
-                >
-                  Restore
-                </button>
-              )}
+              <ArmButton
+                label="Restore"
+                confirmLabel="Really restore"
+                className="ability-remove"
+                disabled={working}
+                onConfirm={() => onRestoreCheckpoint(entry.name)}
+              />
             </div>
           ))}
         </div>

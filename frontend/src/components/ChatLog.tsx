@@ -15,6 +15,7 @@ interface ChatLogProps {
   greetingName?: string;
   suggestions?: string[];
   onSuggest?: (text: string) => void;
+  voiceEnabled?: boolean;
 }
 
 function formatTime(date: Date) {
@@ -83,21 +84,30 @@ function greeting(name?: string) {
   return name ? `${part}, ${name}.` : `${part}.`;
 }
 
-export function ChatLog({ messages, greetingName, suggestions, onSuggest }: ChatLogProps) {
+export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceEnabled }: ChatLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const logRef = useRef<HTMLDivElement>(null);
 
+  // Follow new output only while the reader is already at the bottom; a
+  // scroll back into history is never yanked away.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const log = logRef.current;
+    if (!log) return;
+    const nearBottom =
+      log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
-    <div className="chat-log">
+    <div className="chat-log" ref={logRef}>
       <div className="chat-log-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
             <div className="chat-empty-orb" />
             <div className="chat-empty-title">{greeting(greetingName)}</div>
-            <div className="chat-empty-hint">Type below, or hold the mic to talk.</div>
+            <div className="chat-empty-hint">
+              {voiceEnabled ? "Type below, or hold the mic to talk." : "Type below to get started."}
+            </div>
             {onSuggest && (suggestions?.length ?? 0) > 0 && (
               <div className="chat-suggestions">
                 {suggestions!.map((prompt) => (

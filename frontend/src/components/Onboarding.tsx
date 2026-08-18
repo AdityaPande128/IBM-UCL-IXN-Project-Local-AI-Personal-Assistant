@@ -15,12 +15,13 @@ type Step =
   | "risk"
   | "permissions"
   | "voice"
+  | "phone"
   | "models"
   | "download"
   | "hello";
 
 const STEPS: Step[] = [
-  "theme", "name", "mode", "risk", "permissions", "voice", "models", "download", "hello",
+  "theme", "name", "mode", "risk", "permissions", "voice", "phone", "models", "download", "hello",
 ];
 
 interface Feature {
@@ -178,6 +179,9 @@ interface OnboardingProps {
   data: OnboardingData;
   downloads: DownloadsData | null;
   applyResult: OnboardingApplyResult | null;
+  channel: import("../hooks/useWebSocket").ChannelStatus | null;
+  onRequestChannel: () => void;
+  onSetChannelToken: (token: string) => void;
   onApply: (payload: OnboardingApplyPayload) => void;
   onComplete: () => void;
   onDownloadAction: (action: "start" | "stop" | "status", model?: string) => void;
@@ -189,6 +193,9 @@ export function Onboarding({
   data,
   downloads,
   applyResult,
+  channel,
+  onRequestChannel,
+  onSetChannelToken,
   onApply,
   onComplete,
   onDownloadAction,
@@ -205,8 +212,6 @@ export function Onboarding({
   const [name, setName] = useState(profile.name);
   const [mode, setMode] = useState<"jarvis" | "openclaw">(profile.mode);
   const [agreed, setAgreed] = useState(false);
-  const [features, setFeatures] = useState<Set<string>>(
-    new Set(["voice", "web", "files", "alerts"]));
   const [voiceOn, setVoiceOn] = useState(true);
   const [tts, setTts] = useState(true);
   const [improvement, setImprovement] = useState(true);
@@ -286,9 +291,19 @@ export function Onboarding({
 
   useEffect(() => {
     if (step !== "hello") return;
-    const timer = setTimeout(onFinished, 3400);
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timer = setTimeout(onFinished, still ? 900 : 3400);
     return () => clearTimeout(timer);
   }, [step, onFinished]);
+
+  const [tokenDraft, setTokenDraft] = useState("");
+
+  useEffect(() => {
+    if (step !== "phone") return;
+    onRequestChannel();
+    const poll = setInterval(onRequestChannel, 4000);
+    return () => clearInterval(poll);
+  }, [step, onRequestChannel]);
 
   const pickTheme = (chosen: Theme) => {
     setTheme(chosen);
@@ -305,8 +320,15 @@ export function Onboarding({
       smith: improvement ? smith : null,
       voice: { enabled: voiceOn, tts: voiceOn && tts },
     });
-    setStep("download");
   };
+
+  // The models step is only left once the daemon accepted the selection; a
+  // rejected apply keeps the user where the error is shown.
+  useEffect(() => {
+    if (step === "models" && applyResult?.status === "applied") {
+      setStep("download");
+    }
+  }, [step, applyResult?.status]);
 
   const index = STEPS.indexOf(step);
 
@@ -454,45 +476,45 @@ export function Onboarding({
 
       {step === "permissions" && (
         <div className="ob-card ob-card--wide">
-          <h1 className="ob-title">What should Jarvis be able to do?</h1>
+          <h1 className="ob-title">What Jarvis will ask macOS for</h1>
           <p className="ob-lead">
-            Pick the features you want. Each shows exactly where in macOS to grant
-            what it needs — macOS will also prompt you the first time it's used.
+            Nothing is switched on here — this is the map of what each feature
+            needs and exactly where macOS grants it. The first real use will
+            also prompt you.
           </p>
           <div className="ob-features">
             {FEATURES.map((feature) => {
-              const on = features.has(feature.id);
+              const toggle = feature.id === "voice";
               return (
-                <div key={feature.id} className={`ob-feature ${on ? "ob-feature--on" : ""}`}>
-                  <label className="ob-check ob-check--head">
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={() => {
-                        setFeatures((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(feature.id)) next.delete(feature.id);
-                          else next.add(feature.id);
-                          return next;
-                        });
-                        if (feature.id === "voice") setVoiceOn(!on);
-                      }}
-                    />
-                    <span>
-                      <span className="ob-feature-title">{feature.title}</span>
-                      <span className="ob-feature-what">{feature.what}</span>
-                    </span>
-                  </label>
-                  {on && (
-                    <div className="ob-grants">
-                      {feature.grants.map((grant) => (
-                        <div key={grant.name} className="ob-grant">
-                          <span className="ob-grant-name">{grant.name}</span>
-                          <span className="ob-grant-how">{grant.how}</span>
-                        </div>
-                      ))}
+                <div key={feature.id} className="ob-feature ob-feature--on">
+                  {toggle ? (
+                    <label className="ob-check ob-check--head">
+                      <input
+                        type="checkbox"
+                        checked={voiceOn}
+                        onChange={(e) => setVoiceOn(e.target.checked)}
+                      />
+                      <span>
+                        <span className="ob-feature-title">{feature.title}</span>
+                        <span className="ob-feature-what">{feature.what}</span>
+                      </span>
+                    </label>
+                  ) : (
+                    <div className="ob-check ob-check--head">
+                      <span>
+                        <span className="ob-feature-title">{feature.title}</span>
+                        <span className="ob-feature-what">{feature.what}</span>
+                      </span>
                     </div>
                   )}
+                  <div className="ob-grants">
+                    {feature.grants.map((grant) => (
+                      <div key={grant.name} className="ob-grant">
+                        <span className="ob-grant-name">{grant.name}</span>
+                        <span className="ob-grant-how">{grant.how}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               );
             })}
@@ -546,7 +568,73 @@ export function Onboarding({
           )}
           <div className="ob-nav">
             <button className="ob-back" onClick={() => setStep("permissions")}>Back</button>
-            <button className="ob-next" onClick={() => setStep("models")}>Continue</button>
+            <button className="ob-next" onClick={() => setStep("phone")}>Continue</button>
+          </div>
+        </div>
+      )}
+
+      {step === "phone" && (
+        <div className="ob-card">
+          <h1 className="ob-title">Reach Jarvis from your phone</h1>
+          <p className="ob-lead">
+            Optional: message Jarvis over Telegram through a bot that belongs
+            to you. Create one with @BotFather, paste its token, and pair
+            this Mac from your phone. You can also do this later in Settings.
+          </p>
+          {channel?.error && (
+            <div className="ob-verdict ob-verdict--bad">{channel.error}</div>
+          )}
+          {!channel?.has_token ? (
+            <input
+              className="ob-input"
+              type="password"
+              placeholder="Bot token from @BotFather"
+              value={tokenDraft}
+              onChange={(e) => setTokenDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && tokenDraft.trim()) {
+                  onSetChannelToken(tokenDraft.trim());
+                  setTokenDraft("");
+                }
+              }}
+            />
+          ) : channel.paired ? (
+            <div className="ob-verdict ob-verdict--ok">
+              Paired — your phone reaches Jarvis.
+            </div>
+          ) : channel.running && channel.pairing_code ? (
+            <>
+              <p className="ob-hint">
+                Send this code to your bot from the phone that should be
+                allowed to talk to Jarvis:
+              </p>
+              <div className="channel-code">{channel.pairing_code}</div>
+            </>
+          ) : (
+            <p className="ob-hint">The token is saved; starting the channel…</p>
+          )}
+          <div className="ob-nav">
+            <button className="ob-back" onClick={() => setStep(voiceOn ? "voice" : "permissions")}>
+              Back
+            </button>
+            {!channel?.has_token && (
+              <button
+                className="ob-next"
+                disabled={!tokenDraft.trim()}
+                onClick={() => {
+                  onSetChannelToken(tokenDraft.trim());
+                  setTokenDraft("");
+                }}
+              >
+                Connect
+              </button>
+            )}
+            <button
+              className={channel?.paired ? "ob-next" : "ob-skip"}
+              onClick={() => setStep("models")}
+            >
+              {channel?.has_token ? "Continue" : "Skip for now"}
+            </button>
           </div>
         </div>
       )}
@@ -633,7 +721,7 @@ export function Onboarding({
           <div className="ob-nav">
             <button
               className="ob-back"
-              onClick={() => setStep(voiceOn ? "voice" : "permissions")}
+              onClick={() => setStep("phone")}
             >
               Back
             </button>
@@ -660,6 +748,9 @@ export function Onboarding({
                   ? "The base model is ready — you can step in now while the rest finishes in the background."
                   : "The base model comes first; everything else follows."}
           </p>
+          {applyResult?.status === "invalid" && (
+            <div className="ob-verdict ob-verdict--bad">{applyResult.error}</div>
+          )}
           <div className="ob-downloads">
             {queue.length === 0 && (
               <div className="ob-hint">Preparing the download queue…</div>
@@ -675,6 +766,9 @@ export function Onboarding({
             ))}
           </div>
           <div className="ob-nav">
+            <button className="ob-back" onClick={() => setStep("models")}>
+              Back
+            </button>
             <button
               className="ob-next"
               disabled={!connected || !baseReady}

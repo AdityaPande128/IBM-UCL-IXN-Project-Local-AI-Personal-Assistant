@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from "react";
+import { Pending } from "./Pending";
 import type { AuditData } from "../hooks/useWebSocket";
 
 interface AuditViewProps {
@@ -36,7 +37,7 @@ export function AuditView({ audit, onRefresh }: AuditViewProps) {
   if (!audit) {
     return (
       <div className="abilities">
-        <div className="abilities-empty">Reading the record…</div>
+        <Pending label="Reading the record…" onRetry={() => onRefresh()} />
       </div>
     );
   }
@@ -62,9 +63,10 @@ export function AuditView({ audit, onRefresh }: AuditViewProps) {
             Mark caught up
           </button>
           <span className="build-meta">
-            {audit.summary.plans} task(s) · {audit.summary.succeeded} succeeded ·{" "}
-            {audit.summary.failed} failed · {audit.summary.denied} refusal(s) ·{" "}
-            {audit.summary.builds} build(s)
+            {audit.summary.plans} {audit.summary.plans === 1 ? "task" : "tasks"} ·{" "}
+            {audit.summary.succeeded} succeeded · {audit.summary.failed} failed ·{" "}
+            {audit.summary.denied} {audit.summary.denied === 1 ? "refusal" : "refusals"} ·{" "}
+            {audit.summary.builds} {audit.summary.builds === 1 ? "build" : "builds"}
           </span>
         </div>
       </section>

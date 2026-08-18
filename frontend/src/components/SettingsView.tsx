@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type {
   AbilitiesData,
   CatalogModel,
+  ChannelStatus,
   DiagnosticsResult,
   DownloadsData,
   ProfileData,
@@ -11,9 +12,16 @@ import type {
   SettingsUpdate,
 } from "../hooks/useWebSocket";
 import { applyTheme } from "../theme";
+import { ArmButton } from "./Confirm";
+import { Pending } from "./Pending";
 
 interface SettingsViewProps {
+  connected: boolean;
   abilities: AbilitiesData | null;
+  channel: ChannelStatus | null;
+  onRequestChannel: () => void;
+  onSetChannelToken: (token: string) => void;
+  onClearChannel: () => void;
   diagnostics: DiagnosticsResult | null;
   settingsResult: SettingsResult | null;
   profile: ProfileData | null;
@@ -29,6 +37,11 @@ interface SettingsViewProps {
 }
 
 const POLICIES = ["pinned", "resident", "transient"];
+const POLICY_LABELS: Record<string, string> = {
+  pinned: "Always loaded (pinned)",
+  resident: "Loaded while in use (resident)",
+  transient: "Loaded on demand (transient)",
+};
 const DOOR_ACK_KEY = "jarvis-openclaw-door-acknowledged";
 const AVATAR_SIDE = 96;
 
@@ -69,8 +82,9 @@ function readAvatar(file: File): Promise<string> {
 }
 
 export function SettingsView({
-  abilities, diagnostics, settingsResult, profile, downloads, incognito,
-  onRefresh, onSaveDiagnostics, onUpdateSettings, onUpdateProfile,
+  connected, abilities, channel, diagnostics, settingsResult, profile,
+  downloads, incognito, onRefresh, onRequestChannel, onSetChannelToken,
+  onClearChannel, onSaveDiagnostics, onUpdateSettings, onUpdateProfile,
   onSetIncognito, onDownloadAction, onClose,
 }: SettingsViewProps) {
   const [tab, setTab] = useState<TabId>("profile");
@@ -82,19 +96,75 @@ export function SettingsView({
   const [mailEdit, setMailEdit] = useState<string | null>(null);
   const [doorOpen, setDoorOpen] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [tokenDraft, setTokenDraft] = useState("");
+  const [applyStale, setApplyStale] = useState(false);
+  const [closeArmed, setCloseArmed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     onRefresh();
-  }, [onRefresh]);
+    onRequestChannel();
+  }, [onRefresh, onRequestChannel]);
+
+  // The dialog owns focus while it is open, and hands it back on close.
+  useEffect(() => {
+    const before = document.activeElement as HTMLElement | null;
+    dialogRef.current?.focus();
+    return () => before?.focus?.();
+  }, []);
+
+  // An apply answered by a restart can lose its ack; stop claiming
+  // "Applying…" forever.
+  useEffect(() => {
+    if (settingsResult?.status !== "applying") {
+      setApplyStale(false);
+      return;
+    }
+    const timer = setTimeout(() => setApplyStale(true), 25000);
+    return () => clearTimeout(timer);
+  }, [settingsResult?.status]);
+
+  const commitName = useCallback(() => {
+    const trimmed = (nameEdit ?? "").trim();
+    if (nameEdit !== null && profile && trimmed && trimmed !== profile.name) {
+      onUpdateProfile({ name: trimmed });
+    }
+    setNameEdit(null);
+  }, [nameEdit, profile, onUpdateProfile]);
+
+  const close = useCallback(() => {
+    commitName();
+    onClose();
+  }, [commitName, onClose]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        close();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      const focusables = dialog.querySelectorAll<HTMLElement>(
+        'button, input, select, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [close]);
 
   const openDashboard = async () => {
     if (!abilities) return;
@@ -138,7 +208,13 @@ export function SettingsView({
     Object.keys(changedTiers).length > 0 || browserChanged || mailChanged;
 
   const applyRow = (dirty || settingsResult) && (
-    <div className="diag-row">
+    <div className="settings-field">
+      {dirty && (
+        <span className="settings-restart-note">
+          These changes take effect after a quick restart of the assistant's core.
+        </span>
+      )}
+      <div className="diag-row">
       {dirty && (
         <button
           className="diag-button"
@@ -162,14 +238,28 @@ export function SettingsView({
       {settingsResult?.status === "invalid" && (
         <span className="diag-error">{settingsResult.error}</span>
       )}
+      {applyStale && (
+        <span className="diag-error">
+          The reply may have been lost in the restart — your changes are still
+          shown above; apply them again if the models look wrong.
+        </span>
+      )}
+      </div>
     </div>
   );
 
   return (
     <div className="settings-backdrop" onMouseDown={(e) => {
-      if (e.target === e.currentTarget) onClose();
+      if (e.target === e.currentTarget) close();
     }}>
-      <div className="settings-modal" role="dialog" aria-label="Settings">
+      <div
+        className="settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        ref={dialogRef}
+        tabIndex={-1}
+      >
         <div className="settings-rail">
           <div className="settings-rail-title">Settings</div>
           {TABS.map((t) => (
@@ -181,12 +271,32 @@ export function SettingsView({
               {t.label}
             </button>
           ))}
-          <button className="settings-close" onClick={onClose}>Done</button>
+          {!connected && (
+            <div className="settings-restart-note">Reconnecting to the assistant…</div>
+          )}
+          {closeArmed ? (
+            <div className="arm-confirm">
+              <button className="arm-confirm-yes" onClick={close}>Discard</button>
+              <button className="arm-confirm-no" onClick={() => setCloseArmed(false)}>
+                Stay
+              </button>
+            </div>
+          ) : (
+            <button
+              className="settings-close"
+              onClick={() => {
+                if (dirty) setCloseArmed(true);
+                else close();
+              }}
+            >
+              Done
+            </button>
+          )}
         </div>
 
         <div className="settings-content">
           {!profile || !abilities ? (
-            <div className="abilities-empty">Loading…</div>
+            <Pending label="Loading…" onRetry={() => { onRefresh(); onRequestChannel(); }} />
           ) : (
             <>
               {tab === "profile" && (
@@ -220,17 +330,13 @@ export function SettingsView({
                   <div className="settings-field">
                     <span className="settings-label">Name</span>
                     <input
+                      ref={nameRef}
                       className="settings-input"
                       value={nameEdit ?? profile.name}
                       maxLength={80}
                       onChange={(e) => setNameEdit(e.target.value)}
-                      onBlur={() => {
-                        const trimmed = (nameEdit ?? "").trim();
-                        if (nameEdit !== null && trimmed && trimmed !== profile.name) {
-                          onUpdateProfile({ name: trimmed });
-                        }
-                        setNameEdit(null);
-                      }}
+                      onBlur={commitName}
+                      onKeyDown={(e) => e.key === "Enter" && commitName()}
                     />
                   </div>
                   <div className="settings-field">
@@ -394,7 +500,9 @@ export function SettingsView({
                         return (
                           <div key={tier.tier} className="build-row">
                             <span className="settings-label">
-                              {tier.tier === "engine" ? "Engine (and guard)" : "Builder"}
+                              {tier.tier === "engine"
+                                ? "Engine — answers and safety checks"
+                                : "Skill builder"}
                             </span>
                             {offered && offered.length ? (
                               <select
@@ -413,8 +521,7 @@ export function SettingsView({
                                 {offered.map((entry) => (
                                   <option key={entry.model} value={entry.model}>
                                     {entry.label}
-                                    {entry.recommended ? " (Recommended)" : ""} — {entry.ram_gb.toFixed(1)} GB memory · {entry.disk_gb.toFixed(1)} GB disk
-                                    {entry.downloaded ? "" : " · needs download"}
+                                    {entry.recommended ? " (Recommended)" : ""}
                                   </option>
                                 ))}
                               </select>
@@ -442,12 +549,22 @@ export function SettingsView({
                             >
                               {POLICIES.map((p) => (
                                 <option key={p} value={p}>
-                                  {p}
+                                  {POLICY_LABELS[p] ?? p}
                                 </option>
                               ))}
                             </select>
-                            <span className="build-meta">
-                              {measured !== undefined ? `${measured.toFixed(1)} GB` : "unmeasured"}
+                            <span className="settings-subline">
+                              {(() => {
+                                const chosen = offered?.find((entry) => entry.model === model);
+                                if (!chosen) {
+                                  return measured !== undefined
+                                    ? `${measured.toFixed(1)} GB in memory`
+                                    : "unmeasured";
+                                }
+                                return `${chosen.ram_gb.toFixed(1)} GB memory · `
+                                  + `${chosen.disk_gb.toFixed(1)} GB disk`
+                                  + (chosen.downloaded ? "" : " · needs download");
+                              })()}
                             </span>
                           </div>
                         );
@@ -496,6 +613,75 @@ export function SettingsView({
                     </select>
                   </div>
                   {applyRow}
+
+                  <div className="settings-field">
+                    <span className="settings-label">Telegram</span>
+                    <span className="diag-note">
+                      Message Jarvis from your phone through your own Telegram
+                      bot. Create one with @BotFather, paste its token here,
+                      then send the pairing code to the bot from your phone.
+                    </span>
+                    {channel?.error && <span className="diag-error">{channel.error}</span>}
+                    {!channel?.has_token ? (
+                      <div className="diag-row">
+                        <input
+                          className="settings-input"
+                          type="password"
+                          placeholder="Bot token from @BotFather"
+                          value={tokenDraft}
+                          onChange={(e) => setTokenDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && tokenDraft.trim()) {
+                              onSetChannelToken(tokenDraft.trim());
+                              setTokenDraft("");
+                            }
+                          }}
+                        />
+                        <button
+                          className="diag-button"
+                          disabled={!tokenDraft.trim()}
+                          onClick={() => {
+                            onSetChannelToken(tokenDraft.trim());
+                            setTokenDraft("");
+                          }}
+                        >
+                          Connect
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        {channel.paired ? (
+                          <span className="diag-path">
+                            Connected and paired — your phone reaches Jarvis.
+                          </span>
+                        ) : channel.running && channel.pairing_code ? (
+                          <>
+                            <span className="diag-note">
+                              Send this code to your bot from the phone that
+                              should be allowed to talk to Jarvis:
+                            </span>
+                            <span className="channel-code">{channel.pairing_code}</span>
+                          </>
+                        ) : (
+                          <span className="diag-note">
+                            A token is saved but the channel isn't running
+                            {channel.enabled ? "" : " — it is disabled in config"}.
+                          </span>
+                        )}
+                        <div className="diag-row">
+                          <ArmButton
+                            label="Disconnect"
+                            confirmLabel="Really disconnect"
+                            className="ability-remove"
+                            onConfirm={onClearChannel}
+                          />
+                          <button className="ob-mini-button" onClick={onRequestChannel}>
+                            Refresh
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </>
               )}
 

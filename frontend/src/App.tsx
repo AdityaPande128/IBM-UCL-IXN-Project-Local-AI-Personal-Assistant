@@ -45,6 +45,10 @@ const SUGGESTIONS = [
 function App() {
   const {
     connected,
+    channel,
+    requestChannel,
+    setChannelToken,
+    clearChannel,
     conversations,
     activeConversation,
     selectConversation,
@@ -110,7 +114,7 @@ function App() {
   const [showActivity, setShowActivity] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [toast, setToast] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [wizardActive, setWizardActive] = useState(false);
   const [view, setView] = useState<View>("chat");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -145,11 +149,15 @@ function App() {
     localStorage.setItem(SIDEBAR_KEY, sidebarOpen ? "open" : "closed");
   }, [sidebarOpen]);
 
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 6000);
-    return () => clearTimeout(timer);
-  }, [toast]);
+  const pushToast = useCallback((text: string) => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev.slice(-2), { id, text }]);
+    // Longer messages earn longer on-screen time.
+    const life = Math.min(12000, 3500 + text.length * 35);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, life);
+  }, []);
 
   const newChat = useCallback(() => {
     selectConversation(null);
@@ -166,6 +174,9 @@ function App() {
       } else if (meta && e.key === "b") {
         e.preventDefault();
         setSidebarOpen((open) => !open);
+      } else if (meta && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
       } else if (e.key === "Escape" && !settingsOpen) {
         setShowActivity(false);
         setShowDownloads(false);
@@ -176,7 +187,7 @@ function App() {
   }, [newChat, settingsOpen]);
 
   const voiceNotReady = () => {
-    setToast(
+    pushToast(
       "Voice isn't ready just yet — the speech models are still downloading. "
       + "The mic lights up as soon as they finish."
     );
@@ -231,6 +242,9 @@ function App() {
       <div className="app">
         <Onboarding
           connected={connected}
+          channel={channel}
+          onRequestChannel={requestChannel}
+          onSetChannelToken={setChannelToken}
           data={onboarding}
           downloads={downloads}
           applyResult={onboardingApply}
@@ -270,7 +284,7 @@ function App() {
       />
 
       <div className="app-column">
-        <header className="app-header">
+        <header className={`app-header ${sidebarOpen ? "" : "app-header--inset"}`} data-tauri-drag-region>
           <div className="app-header-left">
             <button
               className="icon-button"
@@ -340,7 +354,11 @@ function App() {
                   ? "Connected · OpenClaw available"
                   : "Connected"
                 : "Reconnecting…"}
-            />
+            >
+              <span className="sr-only">
+                {connected ? "Connected to the assistant" : "Reconnecting to the assistant"}
+              </span>
+            </span>
           </div>
         </header>
 
@@ -368,6 +386,7 @@ function App() {
                   greetingName={profile?.name}
                   suggestions={SUGGESTIONS}
                   onSuggest={connected ? sendIntent : undefined}
+                  voiceEnabled={voiceEnabled}
                 />
                 {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
               </>
@@ -485,6 +504,11 @@ function App() {
 
       {settingsOpen && (
         <SettingsView
+          connected={connected}
+          channel={channel}
+          onRequestChannel={requestChannel}
+          onSetChannelToken={setChannelToken}
+          onClearChannel={clearChannel}
           abilities={abilities}
           diagnostics={diagnostics}
           settingsResult={settingsResult}
@@ -501,9 +525,20 @@ function App() {
         />
       )}
 
-      {toast && (
-        <div className="toast" role="status">
-          {toast}
+      {toasts.length > 0 && (
+        <div className={`toast-stack ${proposal ? "toast-stack--raised" : ""}`}>
+          {toasts.map((t) => (
+            <div key={t.id} className="toast" role="status">
+              {t.text}
+              <button
+                className="toast-dismiss"
+                aria-label="Dismiss"
+                onClick={() => setToasts((prev) => prev.filter((x) => x.id !== t.id))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>

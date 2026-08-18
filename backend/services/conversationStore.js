@@ -8,7 +8,8 @@ const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const memoryService = require('./memoryService');
 
-const DEFAULT_PATH = path.join(__dirname, '..', 'data', 'conversations.db');
+const DEFAULT_PATH = process.env.JARVIS_CONVERSATIONS_DB
+    || path.join(__dirname, '..', 'data', 'conversations.db');
 const ROLES = new Set(['user', 'assistant', 'system', 'error']);
 const TITLE_LIMIT = 64;
 

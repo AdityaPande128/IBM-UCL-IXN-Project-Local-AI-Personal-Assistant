@@ -238,6 +238,38 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'channel_status') {
+                ws.send(JSON.stringify({ type: 'channel_status_result',
+                    ...channelSnapshot() }));
+                return;
+            }
+
+            if (parsed.type === 'channel_set_token' && typeof parsed.token === 'string') {
+                const secret = parsed.token.trim();
+                if (!/^\d+:[\w-]{20,}$/.test(secret)) {
+                    ws.send(JSON.stringify({ type: 'channel_status_result',
+                        error: 'That does not look like a Telegram bot token — it '
+                            + 'comes from @BotFather and looks like 1234567:AA…',
+                        ...channelSnapshot() }));
+                    return;
+                }
+                channelAdapter.stop();
+                fs.writeFileSync(channelAdapter.TOKEN_PATH, secret + '\n', { mode: 0o600 });
+                channelAdapter.start(channelDeps());
+                ws.send(JSON.stringify({ type: 'channel_status_result',
+                    ...channelSnapshot() }));
+                return;
+            }
+
+            if (parsed.type === 'channel_clear') {
+                channelAdapter.stop();
+                channelAdapter.unpair();
+                try { fs.unlinkSync(channelAdapter.TOKEN_PATH); } catch { }
+                ws.send(JSON.stringify({ type: 'channel_status_result',
+                    ...channelSnapshot() }));
+                return;
+            }
+
             if (parsed.type === 'conversations_list') {
                 ws.send(JSON.stringify({ type: 'conversations_result',
                     conversations: conversationStore.list() }));
@@ -732,6 +764,34 @@ wss.on('connection', (ws) => {
     });
 });
 
+// The pairing code is minted only while the channel runs unpaired, so the
+// settings pane can show it without ever inventing one for a dead channel.
+function channelSnapshot() {
+    const state = channelAdapter.status();
+    return {
+        ...state,
+        pairing_code: state.running && !state.paired
+            ? channelAdapter.currentPairingCode() : null
+    };
+}
+
+function channelDeps() {
+    return {
+        execute: text => intentQueue.submit(({ signal }) =>
+            openclawBridge.executeIntent(String(text), { interactive: true, signal })).result,
+        answer: (id, decision) =>
+            openclawBridge.answerProposal(id, decision === 'yes' ? 'yes' : 'no'),
+        transcribe: async filePath => {
+            const audio = await channelAdapter.downloadFile(filePath);
+            return audio ? aiPipeline.transcribeAudio(audio) : null;
+        },
+        speak: async (chatId, text) => {
+            const wav = await aiPipeline.synthesizeChunk(aiPipeline.speakableSummary(text), 0);
+            if (wav) await channelAdapter.sendVoiceNote(chatId, wav);
+        }
+    };
+}
+
 async function boot() {
     syncOpenClawConfig();
 
@@ -781,20 +841,7 @@ async function boot() {
         morningBrief.start({
             browse: goal => intentQueue.submit(() => webAgent.browse(String(goal))).result
         });
-        channelAdapter.start({
-            execute: text => intentQueue.submit(({ signal }) =>
-                openclawBridge.executeIntent(String(text), { interactive: true, signal })).result,
-            answer: (id, decision) =>
-                openclawBridge.answerProposal(id, decision === 'yes' ? 'yes' : 'no'),
-            transcribe: async filePath => {
-                const audio = await channelAdapter.downloadFile(filePath);
-                return audio ? aiPipeline.transcribeAudio(audio) : null;
-            },
-            speak: async (chatId, text) => {
-                const wav = await aiPipeline.synthesizeChunk(aiPipeline.speakableSummary(text), 0);
-                if (wav) await channelAdapter.sendVoiceNote(chatId, wav);
-            }
-        });
+        channelAdapter.start(channelDeps());
     } catch (err) {
         console.warn(`[Jarvis] Availability startup failed: ${err.message}`);
     }
