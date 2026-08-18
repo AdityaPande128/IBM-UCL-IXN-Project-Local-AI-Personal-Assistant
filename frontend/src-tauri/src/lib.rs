@@ -322,6 +322,7 @@ fn build_app_menu(app: &AppHandle) -> tauri::Result<()> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .manage(Supervisor::default())
         .invoke_handler(tauri::generate_handler![
             socket_token,

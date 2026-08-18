@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConversationSummary } from "../hooks/useWebSocket";
 
 type View = "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions";
@@ -43,17 +43,50 @@ function initialsOf(name: string) {
   return parts.slice(0, 2).map((p) => p[0]!.toUpperCase()).join("");
 }
 
+const WIDTH_KEY = "jarvis-sidebar-width";
+const MIN_WIDTH = 208;
+const MAX_WIDTH = 340;
+
+function storedWidth() {
+  const value = Number(localStorage.getItem(WIDTH_KEY));
+  return Number.isFinite(value) && value >= MIN_WIDTH && value <= MAX_WIDTH ? value : 248;
+}
+
 export function Sidebar({
   open, conversations, activeConversation, view, inboxCount, incognito,
   profileName, profileAvatar, onNewChat, onSelectConversation,
   onDeleteConversation, onSelectView, onOpenSettings,
 }: SidebarProps) {
   const [arming, setArming] = useState<number | null>(null);
+  const [width, setWidth] = useState(storedWidth);
+  const dragging = useRef(false);
+
+  useEffect(() => {
+    localStorage.setItem(WIDTH_KEY, String(width));
+  }, [width]);
+
+  const startDrag = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    document.body.style.cursor = "col-resize";
+    const onMove = (move: MouseEvent) => {
+      if (!dragging.current) return;
+      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, move.clientX)));
+    };
+    const onUp = () => {
+      dragging.current = false;
+      document.body.style.cursor = "";
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
 
   if (!open) return null;
 
   return (
-    <aside className="sidebar">
+    <aside className="sidebar" style={{ width }}>
       <button className="sidebar-new" onClick={onNewChat}>
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
         New chat
@@ -142,6 +175,13 @@ export function Sidebar({
           <path d="M16.2 12.4a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H2a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" />
         </svg>
       </button>
+      <div
+        className="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize the sidebar"
+        onMouseDown={startDrag}
+      />
     </aside>
   );
 }
