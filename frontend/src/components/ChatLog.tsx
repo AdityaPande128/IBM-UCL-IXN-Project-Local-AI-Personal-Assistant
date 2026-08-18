@@ -12,6 +12,9 @@ interface ChatMessage {
 
 interface ChatLogProps {
   messages: ChatMessage[];
+  greetingName?: string;
+  suggestions?: string[];
+  onSuggest?: (text: string) => void;
 }
 
 function formatTime(date: Date) {
@@ -73,7 +76,14 @@ function Artifacts({ artifacts }: { artifacts: MessageArtifacts }) {
   );
 }
 
-export function ChatLog({ messages }: ChatLogProps) {
+function greeting(name?: string) {
+  const hour = new Date().getHours();
+  const part = hour < 5 ? "Up late" : hour < 12 ? "Good morning"
+    : hour < 18 ? "Good afternoon" : "Good evening";
+  return name ? `${part}, ${name}.` : `${part}.`;
+}
+
+export function ChatLog({ messages, greetingName, suggestions, onSuggest }: ChatLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -86,8 +96,21 @@ export function ChatLog({ messages }: ChatLogProps) {
         {messages.length === 0 && (
           <div className="chat-empty">
             <div className="chat-empty-orb" />
-            <div className="chat-empty-title">How can I help?</div>
+            <div className="chat-empty-title">{greeting(greetingName)}</div>
             <div className="chat-empty-hint">Type below, or hold the mic to talk.</div>
+            {onSuggest && (suggestions?.length ?? 0) > 0 && (
+              <div className="chat-suggestions">
+                {suggestions!.map((prompt) => (
+                  <button
+                    key={prompt}
+                    className="chat-suggestion"
+                    onClick={() => onSuggest(prompt)}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {messages.map((msg) =>

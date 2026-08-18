@@ -9,6 +9,9 @@ const configReader = require('../utils/configReader');
 const MODES = ['jarvis', 'openclaw'];
 const THEMES = ['dark', 'light'];
 const MAX_NAME = 80;
+// A small square photo as a data URI; anything bigger belongs on disk, not
+// in config.
+const MAX_AVATAR = 200000;
 
 function read(config) {
     const stored = (config || configReader.readConfig()).profile || {};
@@ -19,6 +22,7 @@ function read(config) {
         theme: THEMES.includes(stored.theme) ? stored.theme : 'dark',
         improvement: stored.improvement === true,
         voice: { enabled: voice.enabled === true, tts: voice.tts === true },
+        avatar: typeof stored.avatar === 'string' ? stored.avatar : '',
         onboarded: stored.onboarded === true
     };
 }
@@ -55,6 +59,15 @@ function validate(update) {
     if (update.improvement !== undefined && typeof update.improvement !== 'boolean') {
         return 'improvement must be true or false.';
     }
+    if (update.avatar !== undefined) {
+        if (typeof update.avatar !== 'string') return 'The avatar must be an image.';
+        if (update.avatar && !/^data:image\//.test(update.avatar)) {
+            return 'The avatar must be an image.';
+        }
+        if (update.avatar.length > MAX_AVATAR) {
+            return 'That photo is too large — pick one under about 150 KB.';
+        }
+    }
     if (update.voice !== undefined) {
         if (typeof update.voice !== 'object' || update.voice === null) {
             return 'The voice update is malformed.';
@@ -80,6 +93,7 @@ function apply(update) {
     if (update.mode !== undefined) profile.mode = update.mode;
     if (update.theme !== undefined) profile.theme = update.theme;
     if (update.improvement !== undefined) profile.improvement = update.improvement;
+    if (update.avatar !== undefined) profile.avatar = update.avatar;
     if (update.voice !== undefined) {
         profile.voice = { ...(existing.voice || {}), ...update.voice };
     }

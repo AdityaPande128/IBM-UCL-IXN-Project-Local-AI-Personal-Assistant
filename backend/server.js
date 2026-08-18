@@ -9,6 +9,7 @@ const activityBus = require('./services/activityBus');
 const aiPipeline = require('./services/aiPipeline');
 const socketAuth = require('./services/socketAuth');
 const intentQueue = require('./services/intentQueue');
+const conversationStore = require('./services/conversationStore');
 const traceStore = require('./services/traceStore');
 const skillRegistry = require('./services/skillRegistry');
 const skillPins = require('./services/skillPins');
@@ -237,6 +238,30 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'conversations_list') {
+                ws.send(JSON.stringify({ type: 'conversations_result',
+                    conversations: conversationStore.list() }));
+                return;
+            }
+
+            if (parsed.type === 'conversation_select') {
+                const wanted = parsed.id == null ? null : Number(parsed.id);
+                const id = wanted !== null && conversationStore.exists(wanted) ? wanted : null;
+                ws.conversationId = id;
+                ws.send(JSON.stringify({ type: 'conversation_messages', id,
+                    messages: id === null ? [] : conversationStore.messages(id) }));
+                return;
+            }
+
+            if (parsed.type === 'conversation_delete' && parsed.id) {
+                const id = Number(parsed.id);
+                const removed = conversationStore.remove(id);
+                if (ws.conversationId === id) ws.conversationId = null;
+                ws.send(JSON.stringify({ type: 'conversation_delete_result', id, removed,
+                    conversations: conversationStore.list() }));
+                return;
+            }
+
             if (parsed.type === 'intent' && parsed.text) {
                 // The executor follows the profile's mode at the moment the
                 // intent arrives, so switching modes never needs a restart.
@@ -248,9 +273,13 @@ wss.on('connection', (ws) => {
                             ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
                         })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));
+                const started = conversationStore.append(ws, 'user', parsed.text);
+                if (started) ws.send(JSON.stringify({ type: 'conversation_started', ...started }));
 
                 const result = await job.result;
                 ws.send(JSON.stringify({ type: 'intent_result', id: job.id, ...result }));
+                conversationStore.append(ws, result.status === 'error' ? 'error' : 'assistant',
+                    result.response ?? result.error ?? 'No response.', result.artifacts);
 
                 broadcast({ type: 'state_sync', skill: result.skill || null,
                             status: result.status }, ws);

@@ -1,6 +1,8 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const jarvisConfig = JSON.parse(
@@ -9,8 +11,30 @@ const jarvisConfig = JSON.parse(
 
 const host = process.env.TAURI_DEV_HOST;
 
+// The daemon rotates its socket token every boot; outside the Tauri shell
+// the dev page cannot read the file, so the dev server hands it over.
+function devSocketToken(): Plugin {
+  return {
+    name: "jarvis-dev-socket-token",
+    apply: "serve",
+    configureServer(server) {
+      server.middlewares.use("/__socket-token", (_req, res) => {
+        try {
+          const token = readFileSync(
+            join(homedir(), ".jarvis", "socket-token"), "utf8").trim();
+          res.setHeader("Content-Type", "text/plain");
+          res.end(token);
+        } catch {
+          res.statusCode = 404;
+          res.end("");
+        }
+      });
+    },
+  };
+}
+
 export default defineConfig(async () => ({
-  plugins: [react()],
+  plugins: [react(), devSocketToken()],
 
   define: {
     __JARVIS_CONFIG__: JSON.stringify(jarvisConfig),

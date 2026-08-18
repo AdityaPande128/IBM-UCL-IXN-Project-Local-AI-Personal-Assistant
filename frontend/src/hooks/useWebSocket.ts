@@ -201,6 +201,7 @@ export interface ProfileData {
   theme: "dark" | "light";
   improvement: boolean;
   voice: { enabled: boolean; tts: boolean };
+  avatar: string;
   onboarded: boolean;
 }
 
@@ -273,6 +274,7 @@ export interface ProfileUpdate {
   theme?: "dark" | "light";
   improvement?: boolean;
   voice?: { enabled?: boolean; tts?: boolean };
+  avatar?: string;
 }
 
 export interface CheckpointEntry {
@@ -298,8 +300,19 @@ export interface BundleResult {
   restarting?: boolean;
 }
 
+export interface ConversationSummary {
+  id: number;
+  title: string;
+  updated_at: string;
+  messages: number;
+}
+
 interface UseWebSocketReturn {
   connected: boolean;
+  conversations: ConversationSummary[];
+  activeConversation: number | null;
+  selectConversation: (id: number | null) => void;
+  deleteConversation: (id: number) => void;
   openclawConnected: boolean;
   busy: boolean;
   messages: ChatMessage[];
@@ -402,6 +415,8 @@ export function useWebSocket(): UseWebSocketReturn {
   const [connected, setConnected] = useState(false);
   const [openclawConnected, setOpenclawConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [activeConversation, setActiveConversation] = useState<number | null>(null);
   const [activities, setActivities] = useState<ActivityEvent[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [activeIntents, setActiveIntents] = useState<string[]>([]);
@@ -449,9 +464,9 @@ export function useWebSocket(): UseWebSocketReturn {
         });
       } catch {
         // Outside the Tauri shell (dev preview) the token file is unreachable;
-        // a dev build may carry the token through the environment instead.
+        // the dev server reads it fresh so daemon restarts do not strand us.
         token = import.meta.env.DEV
-          ? ((import.meta.env.VITE_SOCKET_TOKEN as string | undefined) ?? null)
+          ? await fetch("/__socket-token").then((r) => (r.ok ? r.text() : null)).catch(() => null)
           : null;
       }
       if (token && ws.readyState === WebSocket.OPEN) {
@@ -475,7 +490,7 @@ export function useWebSocket(): UseWebSocketReturn {
           // The profile decides whether the app opens into onboarding, so it
           // is fetched on every (re)connect rather than on demand.
           ws.send(JSON.stringify({ type: "onboarding" }));
-          addMessage("system", msg.message);
+          ws.send(JSON.stringify({ type: "conversations_list" }));
           return;
         }
         if (msg.type === "onboarding_result") {
@@ -535,6 +550,44 @@ export function useWebSocket(): UseWebSocketReturn {
           if (msg.event === "proposal_approved" || msg.event === "proposal_declined") {
             setProposal((prev) => (prev && prev.id === msg.id ? null : prev));
           }
+          return;
+        }
+        if (msg.type === "conversations_result") {
+          setConversations(msg.conversations ?? []);
+          return;
+        }
+        if (msg.type === "conversation_started") {
+          setActiveConversation(msg.id);
+          setConversations((prev) => [
+            { id: msg.id, title: msg.title, updated_at: new Date().toISOString(), messages: 1 },
+            ...prev.filter((c) => c.id !== msg.id),
+          ]);
+          return;
+        }
+        if (msg.type === "conversation_messages") {
+          setActiveConversation(msg.id ?? null);
+          setMessages(
+            (msg.messages ?? []).map(
+              (row: { ts: string; role: string; text: string; artifacts?: MessageArtifacts }, i: number) => ({
+                id: `hist-${msg.id}-${i}`,
+                type: row.role as ChatMessage["type"],
+                text: row.text,
+                timestamp: new Date(row.ts),
+                artifacts: row.artifacts,
+              })
+            )
+          );
+          return;
+        }
+        if (msg.type === "conversation_delete_result") {
+          setConversations(msg.conversations ?? []);
+          setActiveConversation((prev) => {
+            if (prev === msg.id) {
+              setMessages([]);
+              return null;
+            }
+            return prev;
+          });
           return;
         }
         if (msg.type === "stt_result") {
@@ -723,6 +776,18 @@ export function useWebSocket(): UseWebSocketReturn {
     [addMessage]
   );
 
+  const selectConversation = useCallback((id: number | null) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "conversation_select", id }));
+    }
+  }, []);
+
+  const deleteConversation = useCallback((id: number) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "conversation_delete", id }));
+    }
+  }, []);
+
   const sendAbort = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "abort" }));
@@ -909,6 +974,10 @@ export function useWebSocket(): UseWebSocketReturn {
 
   return {
     connected,
+    conversations,
+    activeConversation,
+    selectConversation,
+    deleteConversation,
     openclawConnected,
     busy: activeIntents.length > 0,
     messages,

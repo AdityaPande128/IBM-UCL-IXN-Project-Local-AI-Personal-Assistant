@@ -2,6 +2,7 @@ const http = require('http');
 const openclawBridge = require('./openclawBridge');
 const intentQueue = require('./intentQueue');
 const activityBus = require('./activityBus');
+const conversationStore = require('./conversationStore');
 const configReader = require('../utils/configReader');
 
 const config = configReader.readConfig();
@@ -151,6 +152,15 @@ function send(ws, payload) {
     catch (err) { console.warn(`[Pipeline] Send failed: ${err.message}`); return false; }
 }
 
+// What the chat view shows, the conversation keeps. Errors only join a
+// conversation that already exists — a failure with no exchange around it
+// is not worth a row of its own.
+function record(ws, role, text, artifacts) {
+    if (role === 'error' && !ws.conversationId) return;
+    const created = conversationStore.append(ws, role, text, artifacts);
+    if (created) send(ws, { type: 'conversation_started', ...created });
+}
+
 async function handleIncomingAudio(audioBuffer, ws) {
     console.log(`[Pipeline] Audio buffer received (${audioBuffer.length} bytes). Starting cascaded pipeline.`);
 
@@ -165,10 +175,12 @@ async function handleIncomingAudio(audioBuffer, ws) {
         }
 
         send(ws, { type: 'stt_result', text: transcribedText });
+        record(ws, 'user', transcribedText);
         await respondTo(transcribedText, ws);
     } catch (err) {
         console.error(`[Pipeline] Error: ${err.message}`);
         send(ws, { type: 'pipeline_error', error: err.message });
+        record(ws, 'error', err.message);
     }
 }
 
@@ -192,6 +204,8 @@ async function respondTo(transcribedText, ws) {
 
             console.log(`[Pipeline] Response (${llmResult.status}): "${responseText.substring(0, 100)}..."`);
             send(ws, { type: 'intent_result', id: job.id, ...llmResult });
+            record(ws, llmResult.status === 'error' ? 'error' : 'assistant',
+                llmResult.response, llmResult.artifacts);
         } finally {
             unsubscribe();
         }
@@ -226,6 +240,7 @@ async function respondTo(transcribedText, ws) {
     } catch (err) {
         console.error(`[Pipeline] Error: ${err.message}`);
         send(ws, { type: 'pipeline_error', error: err.message });
+        record(ws, 'error', err.message);
     }
 }
 

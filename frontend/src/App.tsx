@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ChatLog } from "./components/ChatLog";
 import { PushToTalk } from "./components/PushToTalk";
@@ -10,6 +10,8 @@ import { MemoryView } from "./components/MemoryView";
 import { AuditView } from "./components/AuditView";
 import { PermissionsView } from "./components/PermissionsView";
 import { Onboarding } from "./components/Onboarding";
+import { Sidebar } from "./components/Sidebar";
+import { SettingsView } from "./components/SettingsView";
 import {
   DownloadsPanel,
   downloadsPending,
@@ -22,9 +24,31 @@ import { useServices, serviceBanner } from "./hooks/useServices";
 import { applyTheme } from "./theme";
 import "./index.css";
 
+type View = "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions";
+
+const VIEW_TITLES: Record<Exclude<View, "chat">, string> = {
+  abilities: "Skills",
+  inbox: "Inbox",
+  memory: "Memory",
+  audit: "Audit",
+  permissions: "Permissions",
+};
+
+const SIDEBAR_KEY = "jarvis-sidebar";
+
+const SUGGESTIONS = [
+  "Check my inbox for unread emails",
+  "How many PDFs are in my Downloads folder?",
+  "What's on my calendar this week?",
+];
+
 function App() {
   const {
     connected,
+    conversations,
+    activeConversation,
+    selectConversation,
+    deleteConversation,
     openclawConnected,
     busy,
     messages,
@@ -80,13 +104,16 @@ function App() {
   const { listening, startListening, stopListening } = useWakeWord(sendBinary);
   const services = useServices();
   const banner = serviceBanner(services);
-  const [showActivity, setShowActivity] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    localStorage.getItem(SIDEBAR_KEY) !== "closed"
+  );
+  const [showActivity, setShowActivity] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
-  const [voiceNotice, setVoiceNotice] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const [wizardActive, setWizardActive] = useState(false);
-  const [view, setView] = useState<
-    "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions"
-  >("chat");
+  const [view, setView] = useState<View>("chat");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const profile = onboarding?.profile ?? null;
   // Before a profile exists nothing is gated; a recorded choice is what
@@ -115,13 +142,41 @@ function App() {
   }, [listening, wakeMode]);
 
   useEffect(() => {
-    if (!voiceNotice) return;
-    const timer = setTimeout(() => setVoiceNotice(null), 6000);
+    localStorage.setItem(SIDEBAR_KEY, sidebarOpen ? "open" : "closed");
+  }, [sidebarOpen]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 6000);
     return () => clearTimeout(timer);
-  }, [voiceNotice]);
+  }, [toast]);
+
+  const newChat = useCallback(() => {
+    selectConversation(null);
+    setView("chat");
+    inputRef.current?.focus();
+  }, [selectConversation]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.key === "n") {
+        e.preventDefault();
+        newChat();
+      } else if (meta && e.key === "b") {
+        e.preventDefault();
+        setSidebarOpen((open) => !open);
+      } else if (e.key === "Escape" && !settingsOpen) {
+        setShowActivity(false);
+        setShowDownloads(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [newChat, settingsOpen]);
 
   const voiceNotReady = () => {
-    setVoiceNotice(
+    setToast(
       "Voice isn't ready just yet — the speech models are still downloading. "
       + "The mic lights up as soon as they finish."
     );
@@ -188,207 +243,269 @@ function App() {
     );
   }
 
-  return (
-    <div className="app">
-      <header className="app-header">
-        <div className="app-logo">
-          <span className="app-logo-orb" />
-          <span className="app-logo-text">Jarvis</span>
-        </div>
-        <div className="app-status">
-          {voiceEnabled && (
-            <button
-              className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
-              onClick={toggleWake}
-              title={listening
-                ? "Listening for “Hey Jarvis” — click to close the microphone"
-                : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
-            >
-              {listening && wakeMode ? "● Listening" : "Hey Jarvis"}
-            </button>
-          )}
-          {downloadsPending(downloads) && (
-            <button
-              className={`activity-toggle ${showDownloads ? "activity-toggle--on" : ""}`}
-              onClick={() => {
-                setShowDownloads((visible) => !visible);
-                downloadAction("status");
-              }}
-            >
-              Downloads
-              {downloadsPercent(downloads) !== null && ` ${downloadsPercent(downloads)}%`}
-            </button>
-          )}
-          <button
-            className={`activity-toggle ${view === "inbox" ? "activity-toggle--on" : ""}`}
-            onClick={() => setView((v) => (v === "inbox" ? "chat" : "inbox"))}
-          >
-            Inbox
-            {brief && brief.notices.length + brief.proposals.length > 0 && (
-              <span className="inbox-badge">
-                {brief.notices.length + brief.proposals.length}
-              </span>
-            )}
-          </button>
-          <button
-            className={`activity-toggle ${view === "memory" ? "activity-toggle--on" : ""}`}
-            onClick={() => setView((v) => (v === "memory" ? "chat" : "memory"))}
-          >
-            Memory
-            {memory?.incognito && <span className="memory-badge">◐</span>}
-          </button>
-          <button
-            className={`activity-toggle ${view === "abilities" ? "activity-toggle--on" : ""}`}
-            onClick={() => setView((v) => (v === "abilities" ? "chat" : "abilities"))}
-          >
-            Abilities
-          </button>
-          <button
-            className={`activity-toggle ${view === "audit" ? "activity-toggle--on" : ""}`}
-            onClick={() => setView((v) => (v === "audit" ? "chat" : "audit"))}
-          >
-            Audit
-          </button>
-          <button
-            className={`activity-toggle ${view === "permissions" ? "activity-toggle--on" : ""}`}
-            onClick={() => setView((v) => (v === "permissions" ? "chat" : "permissions"))}
-          >
-            Permissions
-          </button>
-          <button
-            className={`activity-toggle ${showActivity ? "activity-toggle--on" : ""}`}
-            onClick={() => setShowActivity((visible) => !visible)}
-          >
-            Activity
-          </button>
-          <span className={`status-chip ${connected ? "status-chip--on" : "status-chip--off"}`}>
-            <span className="status-chip-dot" />
-            {connected ? "Online" : "Offline"}
-          </span>
-          {connected && (profile?.mode === "openclaw" || openclawConnected) && (
-            <span className="status-chip status-chip--openclaw">
-              <span className="status-chip-dot" />
-              {profile?.mode === "openclaw" ? "OpenClaw mode" : "OpenClaw"}
-            </span>
-          )}
-        </div>
-      </header>
+  const activeTitle =
+    view === "chat"
+      ? conversations.find((c) => c.id === activeConversation)?.title ?? "New chat"
+      : VIEW_TITLES[view];
 
-      {banner && <div className="service-banner">{banner}</div>}
-      {voiceNotice && <div className="service-banner">{voiceNotice}</div>}
-      {showDownloads && downloads && (
-        <DownloadsPanel
+  return (
+    <div className="app-shell">
+      <Sidebar
+        open={sidebarOpen}
+        conversations={conversations}
+        activeConversation={activeConversation}
+        view={view}
+        inboxCount={brief ? brief.notices.length + brief.proposals.length : 0}
+        incognito={memory?.incognito ?? false}
+        profileName={profile?.name ?? ""}
+        profileAvatar={profile?.avatar ?? ""}
+        onNewChat={newChat}
+        onSelectConversation={(id) => {
+          selectConversation(id);
+          setView("chat");
+        }}
+        onDeleteConversation={deleteConversation}
+        onSelectView={setView}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
+
+      <div className="app-column">
+        <header className="app-header">
+          <div className="app-header-left">
+            <button
+              className="icon-button"
+              aria-label={sidebarOpen ? "Hide the sidebar" : "Show the sidebar"}
+              title={`${sidebarOpen ? "Hide" : "Show"} sidebar (⌘B)`}
+              onClick={() => setSidebarOpen((open) => !open)}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <rect x="3" y="4" width="14" height="12" rx="2" />
+                <path d="M8 4v12" />
+              </svg>
+            </button>
+            {!sidebarOpen && (
+              <button
+                className="icon-button"
+                aria-label="New chat"
+                title="New chat (⌘N)"
+                onClick={newChat}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 4v12M4 10h12" />
+                </svg>
+              </button>
+            )}
+            <h1 className="app-title" title={activeTitle}>{activeTitle}</h1>
+          </div>
+          <div className="app-status">
+            {voiceEnabled && (
+              <button
+                className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
+                onClick={toggleWake}
+                title={listening
+                  ? "Listening for “Hey Jarvis” — click to close the microphone"
+                  : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
+              >
+                {listening && wakeMode ? "● Listening" : "Hey Jarvis"}
+              </button>
+            )}
+            {downloadsPending(downloads) && (
+              <button
+                className={`activity-toggle ${showDownloads ? "activity-toggle--on" : ""}`}
+                onClick={() => {
+                  setShowDownloads((visible) => !visible);
+                  downloadAction("status");
+                }}
+              >
+                Downloads
+                {downloadsPercent(downloads) !== null && ` ${downloadsPercent(downloads)}%`}
+              </button>
+            )}
+            <button
+              className={`icon-button ${showActivity ? "icon-button--on" : ""}`}
+              aria-label={showActivity ? "Hide activity" : "Show activity"}
+              title="What Jarvis is doing right now"
+              onClick={() => setShowActivity((visible) => !visible)}
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M2 10h4l2-5 4 10 2-5h4" />
+              </svg>
+              {busy && <span className="icon-button-dot" aria-hidden="true" />}
+            </button>
+            <span
+              className={`status-dot ${connected ? "status-dot--on" : "status-dot--off"}`}
+              role="status"
+              title={connected
+                ? openclawConnected || profile?.mode === "openclaw"
+                  ? "Connected · OpenClaw available"
+                  : "Connected"
+                : "Reconnecting…"}
+            />
+          </div>
+        </header>
+
+        {banner && <div className="service-banner">{banner}</div>}
+        {!connected && !banner && (
+          <div className="service-banner">Reconnecting to the assistant…</div>
+        )}
+        {showDownloads && downloads && (
+          <DownloadsPanel
+            downloads={downloads}
+            onAction={downloadAction}
+            onChangeModel={() => {
+              setShowDownloads(false);
+              setSettingsOpen(true);
+            }}
+          />
+        )}
+
+        <div className="app-body">
+          <main className="app-main">
+            {view === "chat" && (
+              <>
+                <ChatLog
+                  messages={messages}
+                  greetingName={profile?.name}
+                  suggestions={SUGGESTIONS}
+                  onSuggest={connected ? sendIntent : undefined}
+                />
+                {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
+              </>
+            )}
+            {view === "inbox" && (
+              <InboxView
+                brief={brief}
+                onRefresh={requestBrief}
+                onDecision={sendDecision}
+                onMarkSeen={markNoticesSeen}
+              />
+            )}
+            {view === "memory" && (
+              <MemoryView
+                memory={memory}
+                wipePreview={wipePreview}
+                onRefresh={requestMemory}
+                onAdd={addMemory}
+                onRemove={removeMemories}
+                onPin={pinMemory}
+                onPreviewWipe={previewWipe}
+                onClearWipePreview={clearWipePreview}
+                onWipeAll={wipeAllMemory}
+                onSetIncognito={setIncognito}
+              />
+            )}
+            {view === "abilities" && (
+              <AbilitiesView
+                key={connected ? "online" : "offline"}
+                abilities={abilities}
+                onRefresh={requestAbilities}
+                onRemoveSkill={removeSkill}
+              />
+            )}
+            {view === "audit" && (
+              <AuditView
+                key={connected ? "online" : "offline"}
+                audit={audit}
+                onRefresh={requestAudit}
+              />
+            )}
+            {view === "permissions" && (
+              <PermissionsView
+                key={connected ? "online" : "offline"}
+                permissions={permissions}
+                checkpointResult={checkpointResult}
+                bundleResult={bundleResult}
+                onRefresh={requestPermissions}
+                onCreateCheckpoint={createCheckpoint}
+                onListCheckpoints={listCheckpoints}
+                onRestoreCheckpoint={restoreCheckpoint}
+                onExportBundle={exportBundle}
+                onImportBundle={importBundle}
+              />
+            )}
+          </main>
+          {showActivity && (
+            <div className="activity-drawer">
+              <ActivityPanel activities={activities} />
+            </div>
+          )}
+        </div>
+
+        <footer className="app-footer">
+          <div className="input-container">
+            <input
+              ref={inputRef}
+              type="text"
+              className="chat-input"
+              placeholder={connected ? "Message Jarvis…" : "Reconnecting…"}
+              disabled={!connected}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && e.currentTarget.value.trim() !== "") {
+                  sendIntent(e.currentTarget.value);
+                  e.currentTarget.value = "";
+                  if (view !== "chat") setView("chat");
+                }
+              }}
+            />
+            {busy ? (
+              <button className="stop-button" onClick={sendAbort}>
+                Stop
+              </button>
+            ) : (
+              <button
+                className="send-button"
+                aria-label="Send"
+                disabled={!connected}
+                onClick={() => {
+                  const field = inputRef.current;
+                  if (field && field.value.trim() !== "") {
+                    sendIntent(field.value);
+                    field.value = "";
+                    if (view !== "chat") setView("chat");
+                    field.focus();
+                  }
+                }}
+              >
+                <svg viewBox="0 0 20 20" aria-hidden="true">
+                  <path d="M10 16V4M5 9l5-5 5 5" />
+                </svg>
+              </button>
+            )}
+            {voiceEnabled && (
+              <PushToTalk
+                recording={recording}
+                disabled={!connected}
+                onStart={handleStart}
+                onStop={handleStop}
+              />
+            )}
+          </div>
+        </footer>
+      </div>
+
+      {settingsOpen && (
+        <SettingsView
+          abilities={abilities}
+          diagnostics={diagnostics}
+          settingsResult={settingsResult}
+          profile={profile}
           downloads={downloads}
-          onAction={downloadAction}
-          onChangeModel={() => {
-            setShowDownloads(false);
-            setView("abilities");
-          }}
+          incognito={memory?.incognito ?? false}
+          onRefresh={requestAbilities}
+          onSaveDiagnostics={saveDiagnostics}
+          onUpdateSettings={updateSettings}
+          onUpdateProfile={updateProfile}
+          onSetIncognito={setIncognito}
+          onDownloadAction={downloadAction}
+          onClose={() => setSettingsOpen(false)}
         />
       )}
 
-      <div className="app-body">
-        <main className="app-main">
-          {view === "chat" && (
-            <>
-              <ChatLog messages={messages} />
-              {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
-            </>
-          )}
-          {view === "inbox" && (
-            <InboxView
-              brief={brief}
-              onRefresh={requestBrief}
-              onDecision={sendDecision}
-              onMarkSeen={markNoticesSeen}
-            />
-          )}
-          {view === "memory" && (
-            <MemoryView
-              memory={memory}
-              wipePreview={wipePreview}
-              onRefresh={requestMemory}
-              onAdd={addMemory}
-              onRemove={removeMemories}
-              onPin={pinMemory}
-              onPreviewWipe={previewWipe}
-              onClearWipePreview={clearWipePreview}
-              onWipeAll={wipeAllMemory}
-              onSetIncognito={setIncognito}
-            />
-          )}
-          {view === "abilities" && (
-            <AbilitiesView
-              key={connected ? "online" : "offline"}
-              abilities={abilities}
-              diagnostics={diagnostics}
-              settingsResult={settingsResult}
-              profile={profile}
-              downloads={downloads}
-              incognito={memory?.incognito ?? false}
-              onRefresh={requestAbilities}
-              onRemoveSkill={removeSkill}
-              onSaveDiagnostics={saveDiagnostics}
-              onUpdateSettings={updateSettings}
-              onUpdateProfile={updateProfile}
-              onSetIncognito={setIncognito}
-              onDownloadAction={downloadAction}
-            />
-          )}
-          {view === "audit" && (
-            <AuditView
-              key={connected ? "online" : "offline"}
-              audit={audit}
-              onRefresh={requestAudit}
-            />
-          )}
-          {view === "permissions" && (
-            <PermissionsView
-              key={connected ? "online" : "offline"}
-              permissions={permissions}
-              checkpointResult={checkpointResult}
-              bundleResult={bundleResult}
-              onRefresh={requestPermissions}
-              onCreateCheckpoint={createCheckpoint}
-              onListCheckpoints={listCheckpoints}
-              onRestoreCheckpoint={restoreCheckpoint}
-              onExportBundle={exportBundle}
-              onImportBundle={importBundle}
-            />
-          )}
-        </main>
-        {showActivity && <ActivityPanel activities={activities} />}
-      </div>
-
-      <footer className="app-footer">
-        <div className="input-container">
-          <input
-            type="text"
-            className="chat-input"
-            placeholder="Type a message..."
-            disabled={!connected}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && e.currentTarget.value.trim() !== '') {
-                sendIntent(e.currentTarget.value);
-                e.currentTarget.value = '';
-              }
-            }}
-          />
-          {busy && (
-            <button className="stop-button" onClick={sendAbort}>
-              Stop
-            </button>
-          )}
-          {voiceEnabled && (
-            <PushToTalk
-              recording={recording}
-              disabled={!connected}
-              onStart={handleStart}
-              onStop={handleStop}
-            />
-          )}
+      {toast && (
+        <div className="toast" role="status">
+          {toast}
         </div>
-      </footer>
+      )}
     </div>
   );
 }
