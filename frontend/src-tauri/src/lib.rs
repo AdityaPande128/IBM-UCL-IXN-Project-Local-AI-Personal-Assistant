@@ -5,7 +5,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::TrayIconBuilder;
@@ -30,12 +30,6 @@ fn socket_token(path: Option<String>) -> Result<String, String> {
     fs::read_to_string(token_path(path))
         .map(|t| t.trim().to_string())
         .map_err(|e| e.to_string())
-}
-
-#[link(name = "CoreGraphics", kind = "framework")]
-extern "C" {
-    fn CGPreflightScreenCaptureAccess() -> bool;
-    fn CGRequestScreenCaptureAccess() -> bool;
 }
 
 // The menu-bar half of the mic-privacy contract: whenever the microphone is
@@ -81,16 +75,6 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-#[tauri::command]
-fn ensure_screen_access() -> bool {
-    unsafe {
-        if CGPreflightScreenCaptureAccess() {
-            return true;
-        }
-        CGRequestScreenCaptureAccess()
-    }
-}
-
 #[derive(Clone, Deserialize)]
 struct ServiceSpec {
     name: String,
@@ -124,16 +108,66 @@ fn rotate_log(path: &PathBuf, max_bytes: u64) {
     }
 }
 
+// A Finder launch starts at "/", so the current directory only finds the
+// repo in dev; the bundled app falls back to its own executable's ancestry,
+// and an installed copy to where it was built.
 fn project_root() -> PathBuf {
-    let mut dir = std::env::current_dir().unwrap_or_default();
-    loop {
-        if dir.join("config.json").is_file() {
-            return dir;
-        }
-        if !dir.pop() {
-            return std::env::current_dir().unwrap_or_default();
+    let mut starts: Vec<PathBuf> = Vec::new();
+    if let Ok(dir) = std::env::current_dir() {
+        starts.push(dir);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        starts.push(exe);
+    }
+    starts.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    for start in starts {
+        let mut dir = start;
+        loop {
+            if dir.join("config.json").is_file() {
+                return dir;
+            }
+            if !dir.pop() {
+                break;
+            }
         }
     }
+    std::env::current_dir().unwrap_or_default()
+}
+
+// A Finder launch carries only the system PATH; the user's login shell
+// knows where the runtimes actually live, so ask it once.
+fn augmented_path() -> String {
+    static PATH: OnceLock<String> = OnceLock::new();
+    PATH.get_or_init(|| {
+        let mut path = Command::new("/bin/zsh")
+            .args(["-lc", "printf %s \"$PATH\""])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())
+            .and_then(|out| String::from_utf8(out.stdout).ok())
+            .filter(|p| !p.trim().is_empty())
+            .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
+        for extra in ["/opt/homebrew/bin", "/usr/local/bin"] {
+            if !path.split(':').any(|p| p == extra) {
+                path = format!("{path}:{extra}");
+            }
+        }
+        path
+    })
+    .clone()
+}
+
+fn resolve_program(name: &str) -> PathBuf {
+    if name.contains('/') {
+        return PathBuf::from(name);
+    }
+    for dir in augmented_path().split(':') {
+        let candidate = PathBuf::from(dir).join(name);
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    PathBuf::from(name)
 }
 
 fn port_open(port: u16) -> bool {
@@ -180,9 +214,10 @@ fn supervise(
             .open(&log_path)
             .and_then(|log| {
                 let err = log.try_clone()?;
-                Command::new(&spec.argv[0])
+                Command::new(resolve_program(&spec.argv[0]))
                     .args(&spec.argv[1..])
                     .current_dir(&cwd)
+                    .env("PATH", augmented_path())
                     .stdout(Stdio::from(log))
                     .stderr(Stdio::from(err))
                     .spawn()
@@ -327,7 +362,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             socket_token,
             start_services,
-            ensure_screen_access,
             set_wake_indicator
         ])
         .setup(|app| {

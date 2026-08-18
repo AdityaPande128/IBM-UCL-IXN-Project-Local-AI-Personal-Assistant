@@ -1682,6 +1682,21 @@ body {
   background: rgba(79, 209, 197, 0.04);
 }
 
+.ob-feature--info {
+  border: none;
+  border-radius: 0;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ob-feature--info:last-child {
+  border-bottom: none;
+}
+
+.ob-feature--info .ob-grants {
+  margin-left: 0;
+}
+
 .ob-feature-title {
   display: block;
   font-size: 13.5px;

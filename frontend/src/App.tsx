@@ -124,10 +124,6 @@ function App() {
   // turns voice off.
   const voiceEnabled = profile ? profile.voice.enabled : true;
 
-  useEffect(() => {
-    invoke("ensure_screen_access").catch(() => {});
-  }, []);
-
   // The wizard owns the screen from the moment a profile is missing until
   // its hello animation has played — not merely until onboarded flips.
   useEffect(() => {

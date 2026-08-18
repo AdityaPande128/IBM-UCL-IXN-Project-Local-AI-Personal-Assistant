@@ -506,30 +506,23 @@ export function Onboarding({
             else on this page is just the map.
           </p>
           <div className="ob-features">
-            {FEATURES.map((feature) => {
-              const toggle = feature.id === "voice";
-              return (
-                <div key={feature.id} className="ob-feature ob-feature--on">
-                  {toggle ? (
-                    <label className="ob-check ob-check--head">
-                      <input
-                        type="checkbox"
-                        checked={voiceOn}
-                        onChange={(e) => setVoiceOn(e.target.checked)}
-                      />
-                      <span>
-                        <span className="ob-feature-title">{feature.title}</span>
-                        <span className="ob-feature-what">{feature.what}</span>
-                      </span>
-                    </label>
-                  ) : (
-                    <div className="ob-check ob-check--head">
-                      <span>
-                        <span className="ob-feature-title">{feature.title}</span>
-                        <span className="ob-feature-what">{feature.what}</span>
-                      </span>
-                    </div>
-                  )}
+            {FEATURES.map((feature) =>
+              feature.id === "voice" ? (
+                <div
+                  key={feature.id}
+                  className={`ob-feature ${voiceOn ? "ob-feature--on" : ""}`}
+                >
+                  <label className="ob-check ob-check--head">
+                    <input
+                      type="checkbox"
+                      checked={voiceOn}
+                      onChange={(e) => setVoiceOn(e.target.checked)}
+                    />
+                    <span>
+                      <span className="ob-feature-title">{feature.title}</span>
+                      <span className="ob-feature-what">{feature.what}</span>
+                    </span>
+                  </label>
                   <div className="ob-grants">
                     {feature.grants.map((grant) => (
                       <div key={grant.name} className="ob-grant">
@@ -539,8 +532,21 @@ export function Onboarding({
                     ))}
                   </div>
                 </div>
-              );
-            })}
+              ) : (
+                <div key={feature.id} className="ob-feature ob-feature--info">
+                  <span className="ob-feature-title">{feature.title}</span>
+                  <span className="ob-feature-what">{feature.what}</span>
+                  <div className="ob-grants">
+                    {feature.grants.map((grant) => (
+                      <div key={grant.name} className="ob-grant">
+                        <span className="ob-grant-name">{grant.name}</span>
+                        <span className="ob-grant-how">{grant.how}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
           </div>
           <div className="ob-nav">
             <button className="ob-back" onClick={() => setStep("risk")}>Back</button>
