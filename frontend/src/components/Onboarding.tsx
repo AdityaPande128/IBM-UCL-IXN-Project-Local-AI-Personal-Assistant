@@ -95,8 +95,8 @@ const FEATURES: Feature[] = [
   },
   {
     id: "screen",
-    title: "Reading the screen when asked",
-    what: "The screen-capture skill can look at what is on screen, only when you ask.",
+    title: "Capturing the screen when asked",
+    what: "The screen-capture skill saves a screenshot to the Desktop, only when you ask. Jarvis cannot see or read the image — no vision model runs.",
     grants: [
       {
         name: "Screen Recording",
