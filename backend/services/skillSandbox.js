@@ -179,10 +179,11 @@ function buildProfile(skill, tempDir, parameters = {}) {
     lines.push('', '; The skill cannot modify itself.');
     lines.push(`(deny file-write* (subpath ${sbplString(skill.directory)}))`);
 
-    lines.push('', '; Never readable, whatever the invocation asked for.');
+    lines.push('', '; Never readable or writable, whatever the invocation asked for.');
     for (const sensitive of SENSITIVE_READ_PATHS) {
         const resolved = resolvePath(sensitive);
         lines.push(`(deny file-read* (subpath ${sbplString(resolved)}))`);
+        lines.push(`(deny file-write* (subpath ${sbplString(resolved)}))`);
     }
 
     lines.push('', '; The assistant\'s own profile and stores are not the skill\'s to touch.');

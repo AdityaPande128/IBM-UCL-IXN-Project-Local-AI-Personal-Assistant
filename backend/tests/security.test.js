@@ -282,6 +282,45 @@ test('ATTACK: an approval cannot be replayed against a second payload', () => {
     assert.match(replay.reason, /already been used/i);
 });
 
+test('an approved disclosure authorises exactly one retry of the same flow', () => {
+    freshStore();
+    const flow = {
+        channel: egress.CHANNEL.NETWORK, action: 'http.post',
+        destination: 'api.example.com',
+        inputs: [labels.label(ORIGIN.FILE, SENSITIVITY.PERSONAL)],
+        summary: 'send the summary'
+    };
+    const first = egress.guard(flow);
+    assert.strictEqual(first.decision, egress.DECISION.APPROVE);
+
+    assert.strictEqual(egress.resolve(first.approvalId, true).allowed, true);
+
+    const retry = egress.guard(flow);
+    assert.strictEqual(retry.decision, egress.DECISION.ALLOW);
+    assert.strictEqual(retry.approvalId, first.approvalId);
+
+    const third = egress.guard(flow);
+    assert.strictEqual(third.decision, egress.DECISION.APPROVE,
+        'a grant is consumed by use; the next identical flow asks again');
+    assert.notStrictEqual(third.approvalId, first.approvalId);
+});
+
+test('ATTACK: a granted approval for one destination opens nothing else', () => {
+    freshStore();
+    const flow = {
+        channel: egress.CHANNEL.MESSAGE, action: 'mail.send',
+        destination: 'alice@example.com',
+        inputs: [labels.label(ORIGIN.FILE, SENSITIVITY.PERSONAL)],
+        summary: 'send the summary'
+    };
+    const blocked = egress.guard(flow);
+    assert.strictEqual(egress.resolve(blocked.approvalId, true).allowed, true);
+
+    const elsewhere = egress.guard({ ...flow, destination: 'mallory@example.com' });
+    assert.strictEqual(elsewhere.decision, egress.DECISION.APPROVE,
+        'the grant names a destination; a different one asks afresh');
+});
+
 test('ATTACK: a denied approval does not allow the flow', () => {
     freshStore();
     const { approvalId } = egress.guard({

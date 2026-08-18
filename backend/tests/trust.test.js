@@ -30,6 +30,7 @@ const skillRegistry = require('../services/skillRegistry');
 
 const auditView = require('../services/auditView');
 const permissionsView = require('../services/permissionsView');
+const channelAdapter = require('../services/channelAdapter');
 const stateBundle = require('../services/stateBundle');
 
 test('the audit digest reports what actually happened, from the stores that enforce it', () => {
@@ -86,9 +87,15 @@ test('the permissions dashboard reads every grant from the store that enforces i
         security: { enforce_capabilities: 'generated' },
         web: { desktop_browser: 'Google Chrome', blocked_hosts: ['paypal.com'] },
         mail: { provider: 'gmail', accounts: { work: 'outlook-work' } },
-        channel: { telegram: { enabled: true, chat_id: 12345 } }
+        channel: { telegram: { enabled: true } }
     };
+    // The binding lives in the adapter's own store, not in config — the
+    // dashboard must read the file that actually gates incoming messages.
+    const bindingPath = path.join(scratch, 'telegram-chat.json');
+    fs.writeFileSync(bindingPath, JSON.stringify({ chat_id: 12345 }));
+    channelAdapter.useBinding(bindingPath);
     const snapshot = permissionsView.snapshot(config);
+    channelAdapter.useBinding(null);
 
     assert.ok(snapshot.web.sites.some(s => s.host === 'mail.google.com'));
     assert.deepStrictEqual(snapshot.web.blocked_hosts, ['paypal.com']);
@@ -97,6 +104,7 @@ test('the permissions dashboard reads every grant from the store that enforces i
     assert.strictEqual(snapshot.mail.accounts[0].provider, 'outlook-work');
     assert.strictEqual(snapshot.channel.telegram.enabled, true);
     assert.strictEqual(snapshot.channel.telegram.bound_chat, '12345');
+    assert.strictEqual(typeof snapshot.channel.telegram.token_present, 'boolean');
     assert.strictEqual(typeof snapshot.memory.incognito, 'boolean');
     assert.strictEqual(snapshot.enforce_mode, 'generated');
 });

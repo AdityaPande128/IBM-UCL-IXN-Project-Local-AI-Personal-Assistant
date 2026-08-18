@@ -176,7 +176,9 @@ function createManager(options = {}) {
         const job = jobs.get(model);
         if (!job) return { status: 'unknown_model', model };
         if (job.status === 'downloading' && child) {
-            job.status = 'stopped';   // the close handler persists it
+            // Persist before killing: a settings restart exits the process
+            // before the async close handler would have written the pause.
+            setStatus(job, 'stopped');
             child.kill('SIGTERM');
         } else if (job.status === 'queued') {
             setStatus(job, 'stopped');

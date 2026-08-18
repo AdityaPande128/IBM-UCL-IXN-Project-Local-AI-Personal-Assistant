@@ -63,6 +63,7 @@ function App() {
     settingsResult,
     brief,
     requestBrief,
+    resolveApproval,
     markNoticesSeen,
     memory,
     wipePreview,
@@ -404,6 +405,7 @@ function App() {
                 brief={brief}
                 onRefresh={requestBrief}
                 onDecision={sendDecision}
+                onResolveApproval={resolveApproval}
                 onMarkSeen={markNoticesSeen}
               />
             )}

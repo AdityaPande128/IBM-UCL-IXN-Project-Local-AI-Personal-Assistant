@@ -29,6 +29,9 @@ fs.copyFileSync(path.resolve(__dirname, '../../config.json'), process.env.JARVIS
 process.env.JARVIS_SETTINGS_RESTART = 'off';
 process.env.JARVIS_CHECKPOINTS_DIR = path.join(scratch, 'checkpoints');
 process.env.JARVIS_DOWNLOADS_PATH = path.join(scratch, 'downloads.json');
+process.env.JARVIS_SECURITY_DB = path.join(scratch, 'security.db');
+process.env.JARVIS_TELEGRAM_TOKEN_PATH = path.join(scratch, 'telegram-token');
+process.env.JARVIS_TELEGRAM_BINDING_PATH = path.join(scratch, 'telegram-chat.json');
 
 const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
@@ -708,6 +711,32 @@ test('a rejected onboarding selection reports why and writes nothing', async () 
     assert.strictEqual(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'), before,
         'a refused apply must not touch the config');
     client.ws.close();
+});
+
+test('an egress approval is answered over the wire and unblocks one retry', async () => {
+    const client = await authed();
+    try {
+        const egress = require('../security/egress');
+        const labels = require('../security/labels');
+        const flow = {
+            channel: egress.CHANNEL.MESSAGE, action: 'mail.send',
+            destination: 'wire-test@example.com',
+            inputs: [labels.label(labels.ORIGIN.FILE, labels.SENSITIVITY.PERSONAL)],
+            summary: 'send the summary'
+        };
+        const blocked = egress.guard(flow);
+        assert.strictEqual(blocked.allowed, false);
+        assert.ok(blocked.approvalId);
+
+        client.send({ type: 'egress_resolve', id: blocked.approvalId, decision: 'yes' });
+        const answered = await client.next(m => m.type === 'egress_resolve_result');
+        assert.strictEqual(answered.allowed, true);
+
+        const retry = egress.guard(flow);
+        assert.strictEqual(retry.allowed, true, 'the grant lets the retry through');
+    } finally {
+        client.ws.close();
+    }
 });
 
 test('the phone channel is configured over the wire and refuses a junk token', async () => {

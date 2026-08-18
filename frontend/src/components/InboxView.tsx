@@ -6,10 +6,11 @@ interface InboxViewProps {
   brief: BriefData | null;
   onRefresh: () => void;
   onDecision: (id: string, decision: "yes" | "no") => void;
+  onResolveApproval: (id: number, decision: "yes" | "no") => void;
   onMarkSeen: (ids: number[]) => void;
 }
 
-export function InboxView({ brief, onRefresh, onDecision, onMarkSeen }: InboxViewProps) {
+export function InboxView({ brief, onRefresh, onDecision, onResolveApproval, onMarkSeen }: InboxViewProps) {
   useEffect(() => {
     onRefresh();
   }, [onRefresh]);
@@ -93,14 +94,34 @@ export function InboxView({ brief, onRefresh, onDecision, onMarkSeen }: InboxVie
       {brief.approvals.length > 0 && (
         <section className="inbox-section">
           <div className="inbox-section-head">
-            <h2>Approvals in flight</h2>
+            <h2>Waiting to disclose</h2>
+          </div>
+          <div className="inbox-section-note">
+            Personal data would leave this Mac. Approving lets the same request
+            through when you ask it again.
           </div>
           {brief.approvals.map((approval) => (
-            <article key={approval.id} className="inbox-card">
+            <article key={approval.id} className="inbox-card inbox-card--consent">
               <div className="inbox-card-title">{approval.summary}</div>
               <div className="inbox-card-detail">
-                {approval.action} over {approval.channel} — answer it where it was
-                asked
+                {approval.action} over {approval.channel}
+              </div>
+              {approval.preview && (
+                <pre className="inbox-card-body">{approval.preview}</pre>
+              )}
+              <div className="inbox-card-actions">
+                <button
+                  className="inbox-approve"
+                  onClick={() => onResolveApproval(approval.id, "yes")}
+                >
+                  Approve
+                </button>
+                <button
+                  className="inbox-decline"
+                  onClick={() => onResolveApproval(approval.id, "no")}
+                >
+                  Decline
+                </button>
               </div>
             </article>
           ))}

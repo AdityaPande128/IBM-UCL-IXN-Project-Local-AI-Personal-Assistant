@@ -40,6 +40,31 @@ function guard(flow) {
 
     let approvalId = null;
     if (decision === DECISION.APPROVE) {
+        const grant = store.takeGrant({
+            channel: flow.channel,
+            action: flow.action,
+            destination: flow.destination
+        });
+        if (grant) {
+            const auditId = store.recordDecision({
+                channel: flow.channel,
+                action: flow.action,
+                decision: DECISION.ALLOW,
+                label,
+                destination: flow.destination,
+                summary: flow.summary,
+                detail: { reason: `approved by the user (#${grant.id})` },
+                approvalId: grant.id
+            });
+            return {
+                decision: DECISION.ALLOW,
+                reason: 'approved by the user',
+                label,
+                auditId,
+                approvalId: grant.id,
+                allowed: true
+            };
+        }
         approvalId = store.requestApproval({
             channel: flow.channel,
             action: flow.action,

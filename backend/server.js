@@ -23,6 +23,7 @@ const modelTiers = require('./services/modelTiers');
 const availability = require('./services/availability');
 const watchers = require('./services/watchers');
 const morningBrief = require('./services/morningBrief');
+const egress = require('./security/egress');
 const channelAdapter = require('./services/channelAdapter');
 const memoryStore = require('./services/memoryStore');
 const memoryService = require('./services/memoryService');
@@ -355,6 +356,15 @@ wss.on('connection', (ws) => {
                             parsed.decision === 'yes' ? 'yes' : 'no', { signal })));
                 const result = await job.result;
                 ws.send(JSON.stringify({ type: 'intent_result', id: job.id, ...result }));
+                return;
+            }
+
+            if (parsed.type === 'egress_resolve' && parsed.id) {
+                const outcome = egress.resolve(Number(parsed.id), parsed.decision === 'yes');
+                ws.send(JSON.stringify({
+                    type: 'egress_resolve_result', id: Number(parsed.id),
+                    allowed: outcome.allowed, reason: outcome.reason
+                }));
                 return;
             }
 

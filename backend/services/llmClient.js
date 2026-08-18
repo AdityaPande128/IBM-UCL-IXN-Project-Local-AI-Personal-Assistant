@@ -4,6 +4,9 @@ const modelTiers = require('./modelTiers');
 
 const config = configReader.readConfig();
 
+const INFERENCE = new URL(process.env.INFERENCE_URL
+    || `http://127.0.0.1:${(config.ports || {}).inference || 8787}`);
+
 const TIER_SETTINGS = {
     guard: config.router || {},
     engine: config.engine || {},
@@ -33,8 +36,8 @@ function complete(messages, opts = {}) {
         });
 
         const req = http.request({
-            hostname: '127.0.0.1',
-            port: config.ports.inference,
+            hostname: INFERENCE.hostname,
+            port: Number(INFERENCE.port) || 80,
             path: '/v1/chat/completions',
             method: 'POST',
             headers: {

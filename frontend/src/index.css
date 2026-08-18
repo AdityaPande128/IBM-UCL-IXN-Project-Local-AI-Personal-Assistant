@@ -1162,6 +1162,13 @@ body {
   justify-content: space-between;
 }
 
+.inbox-section-note {
+  font-size: 12px;
+  color: var(--text-3);
+  margin: -4px 0 10px;
+  line-height: 1.5;
+}
+
 .inbox-section-head h2 {
   font-size: 12px;
   font-weight: 600;

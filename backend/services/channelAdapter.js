@@ -13,9 +13,11 @@ const SETTINGS = (config.channel && config.channel.telegram) || {};
 
 // The bot token is a credential: it lives in its own untracked file (or the
 // environment), never in config.json, which is committed.
-const TOKEN_PATH = SETTINGS.token_path
+const TOKEN_PATH = process.env.JARVIS_TELEGRAM_TOKEN_PATH
+    || SETTINGS.token_path
     || path.join(__dirname, '..', 'data', 'telegram-token');
-const BINDING_PATH = SETTINGS.binding_path
+const BINDING_PATH = process.env.JARVIS_TELEGRAM_BINDING_PATH
+    || SETTINGS.binding_path
     || path.join(__dirname, '..', 'data', 'telegram-chat.json');
 
 const ENABLED = SETTINGS.enabled !== false;
@@ -30,6 +32,8 @@ let pairingCode = null;
 let pairingAttempts = 0;
 let offset = 0;
 let running = false;
+let generation = 0;
+let unsubscribe = null;
 let deps = {};
 
 // A pairing code is a short secret guessed over the network, so it cannot be
@@ -305,10 +309,13 @@ async function handleUpdate(update) {
     if (update.callback_query) return handleCallback(update.callback_query);
 }
 
-async function poll() {
+async function poll(alive = () => true) {
     const updates = await call('getUpdates', {
         offset, timeout: POLL_TIMEOUT_S, allowed_updates: ['message', 'callback_query']
     });
+    // A stop() or token change mid-poll orphans this call: its updates
+    // belong to the next loop, not to a consumer that no longer exists.
+    if (!alive()) return 0;
     for (const update of updates || []) {
         offset = Math.max(offset, update.update_id + 1);
         try {
@@ -321,11 +328,13 @@ async function poll() {
 }
 
 async function loop() {
-    while (running) {
+    const gen = generation;
+    const alive = () => running && gen === generation;
+    while (alive()) {
         try {
-            await poll();
+            await poll(alive);
         } catch (err) {
-            if (!running) break;
+            if (!alive()) break;
             console.warn(`[Channel] poll failed: ${err.message}`);
             await new Promise(resolve => {
                 const timer = setTimeout(resolve, RETRY_MS);
@@ -350,20 +359,28 @@ function start(dependencies = {}) {
     if (running) return { status: 'running' };
 
     running = true;
+    generation += 1;
     currentPairingCode();
     loop();
 
-    activityBus.subscribe(event => {
-        if (event.source === 'brief' && event.event === 'ready' && boundChat()) {
-            say(boundChat(), event.text).catch(() => null);
-        }
-    });
+    if (!unsubscribe) {
+        unsubscribe = activityBus.subscribe(event => {
+            if (event.source === 'brief' && event.event === 'ready' && boundChat()) {
+                say(boundChat(), event.text).catch(() => null);
+            }
+        });
+    }
 
     return { status: 'running', paired: Boolean(boundChat()) };
 }
 
 function stop() {
     running = false;
+    generation += 1;
+    if (unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+    }
     deps = {};
 }
 

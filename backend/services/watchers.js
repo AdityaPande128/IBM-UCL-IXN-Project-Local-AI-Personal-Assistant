@@ -5,6 +5,7 @@ const { DatabaseSync } = require('node:sqlite');
 
 const configReader = require('../utils/configReader');
 const activityBus = require('./activityBus');
+const intentQueue = require('./intentQueue');
 const procedureStore = require('./procedureStore');
 const webPolicy = require('../security/webPolicy');
 
@@ -242,14 +243,19 @@ async function runOne(watcher, now = Date.now()) {
     return { status: 'success', changed, first };
 }
 
+// A watcher drives the same browser page interactive work uses, so its
+// runs queue behind whatever the user has in flight instead of navigating
+// underneath it.
 async function tick(now = Date.now()) {
     const ran = [];
     for (const watcher of due(now)) {
-        try {
-            ran.push({ id: watcher.id, ...(await runOne(watcher, now)) });
-        } catch (err) {
-            console.warn(`[Watchers] "${watcher.name}" failed: ${err.message}`);
-            ran.push({ id: watcher.id, status: 'failed', reason: err.message });
+        const job = intentQueue.submit(() => runOne(watcher, now));
+        const result = await job.result;
+        if (result && (result.status === 'error' || result.status === 'aborted')) {
+            console.warn(`[Watchers] "${watcher.name}" failed: ${result.response}`);
+            ran.push({ id: watcher.id, status: 'failed', reason: result.response });
+        } else {
+            ran.push({ id: watcher.id, ...result });
         }
     }
     return ran;

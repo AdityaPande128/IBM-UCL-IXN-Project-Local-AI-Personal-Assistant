@@ -4,7 +4,8 @@ const { DatabaseSync } = require('node:sqlite');
 
 const labels = require('./labels');
 
-const DEFAULT_PATH = path.join(__dirname, '..', 'data', 'security.db');
+const DEFAULT_PATH = process.env.JARVIS_SECURITY_DB
+    || path.join(__dirname, '..', 'data', 'security.db');
 
 const SCHEMA_VERSION = 1;
 
@@ -34,7 +35,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     destination TEXT,
     summary     TEXT    NOT NULL,   -- what the user is being asked to allow
     preview     TEXT,               -- what would actually leave
-    status      TEXT    NOT NULL DEFAULT 'pending',  -- pending | granted | denied | expired
+    status      TEXT    NOT NULL DEFAULT 'pending',  -- pending | granted | denied | expired | used
     resolved_ts TEXT
 );
 
@@ -170,6 +171,35 @@ function getApproval(id) {
     return row ? { ...row, label: labels.deserialise(row.label) } : null;
 }
 
+// An approval the user granted authorises exactly one retry of the same
+// disclosure, and only for a short while: the grant is consumed on use.
+const GRANT_TTL_MS = 10 * 60 * 1000;
+
+function takeGrant(request) {
+    const destination = request.destination ?? null;
+    const row = handle().prepare(`
+        SELECT * FROM approvals
+        WHERE status = 'granted' AND channel = ? AND action = ?
+          AND destination IS ?
+        ORDER BY id DESC LIMIT 1
+    `).get(
+        String(request.channel || 'unknown'),
+        String(request.action || 'unknown'),
+        destination
+    );
+    if (!row) return null;
+    if (Date.now() - Date.parse(row.resolved_ts) > GRANT_TTL_MS) {
+        handle().prepare("UPDATE approvals SET status = 'expired' WHERE id = ? AND status = 'granted'")
+            .run(row.id);
+        return null;
+    }
+    const taken = handle()
+        .prepare("UPDATE approvals SET status = 'used' WHERE id = ? AND status = 'granted'")
+        .run(row.id);
+    if (taken.changes === 0) return null;
+    return { ...row, label: labels.deserialise(row.label) };
+}
+
 function resolveApproval(id, granted) {
     const result = handle().prepare(`
         UPDATE approvals SET status = ?, resolved_ts = ?
@@ -274,6 +304,7 @@ module.exports = {
     pendingApprovals,
     getApproval,
     resolveApproval,
+    takeGrant,
     grantRoot,
     revokeRoot,
     grantedRoots,

@@ -101,6 +101,7 @@ export interface BriefApproval {
   channel: string;
   action: string;
   summary: string;
+  preview?: string | null;
 }
 
 export interface BriefData {
@@ -336,6 +337,7 @@ interface UseWebSocketReturn {
   settingsResult: SettingsResult | null;
   brief: BriefData | null;
   requestBrief: () => void;
+  resolveApproval: (id: number, decision: "yes" | "no") => void;
   markNoticesSeen: (ids: number[]) => void;
   memory: MemoryData | null;
   wipePreview: WipePreview | null;
@@ -616,15 +618,31 @@ export function useWebSocket(): UseWebSocketReturn {
           addMessage("user", msg.text);
           return;
         }
-        if (msg.type === "llm_result") {
-          addMessage("assistant", msg.text);
-          return;
-        }
         if (msg.type === "pipeline_complete") {
           return;
         }
         if (msg.type === "pipeline_error") {
           addMessage("error", msg.error);
+          return;
+        }
+        if (msg.type === "error") {
+          addMessage("error", msg.error);
+          return;
+        }
+        if (msg.type === "speech_unavailable") {
+          addMessage("system", msg.message);
+          return;
+        }
+        if (msg.type === "egress_resolve_result") {
+          addMessage(
+            "system",
+            msg.allowed
+              ? "Approved — ask for it again and it will go through."
+              : `Declined — ${msg.reason ?? "that disclosure stays blocked"}.`
+          );
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: "brief" }));
+          }
           return;
         }
         if (msg.type === "state_sync") {
@@ -840,6 +858,12 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const resolveApproval = useCallback((id: number, decision: "yes" | "no") => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "egress_resolve", id, decision }));
+    }
+  }, []);
+
   const requestBrief = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "brief" }));
@@ -1032,6 +1056,7 @@ export function useWebSocket(): UseWebSocketReturn {
     settingsResult,
     brief,
     requestBrief,
+    resolveApproval,
     markNoticesSeen,
     memory,
     wipePreview,

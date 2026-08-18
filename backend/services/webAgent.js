@@ -473,15 +473,17 @@ async function act(surface, decision, observation, context, options) {
                 if (verdict.allowed) {
                     const landed = await surface.navigate(verdict.url);
                     const arrival = checkArrival(landed.url, options);
-                    if (!arrival) {
-                        return {
-                            ok: true,
-                            detail: `followed "${name}" to ${landed.url} — the control itself `
-                                + 'would not take a click',
-                            anchor: { url: verdict.url },
-                            before: found.observation
-                        };
+                    if (arrival) {
+                        return { ok: false, fatal: true, refusal: arrival.refusal,
+                            detail: arrival.reason, before: found.observation };
                     }
+                    return {
+                        ok: true,
+                        detail: `followed "${name}" to ${landed.url} — the control itself `
+                            + 'would not take a click',
+                        anchor: { url: verdict.url },
+                        before: found.observation
+                    };
                 }
             }
 
@@ -1528,7 +1530,10 @@ async function browse(goal, options = {}) {
 
     const moves = [];
 
-    const record = (ordinal, entry) => recordAction(tracing, planId, ordinal, entry, surface.TIER);
+    // Ordinals order the trace; handing out loop indices let two records
+    // claim the same slot and fail the run on the steps UNIQUE constraint.
+    let nextOrdinal = 0;
+    const record = (entry) => recordAction(tracing, planId, nextOrdinal++, entry, surface.TIER);
 
     let challenged = false;
 
@@ -2024,7 +2029,7 @@ async function browse(goal, options = {}) {
                                       + '.';
                                 actions.push({ action: 'done',
                                     reason: 'read the thread\'s own standing', answer });
-                                record(0, {
+                                record({
                                     capability: 'web.done', status: 'success',
                                     label: contextLabel, summary: answer,
                                     durationMs: Date.now() - startedAt
@@ -2112,7 +2117,7 @@ async function browse(goal, options = {}) {
                                     reason: 'the event details came from the email, so booking '
                                         + 'them needs your word',
                                     detail: plainGoal });
-                                record(0, {
+                                record({
                                     capability: 'web.propose', status: 'blocked',
                                     label: contextLabel, summary: failure,
                                     durationMs: Date.now() - startedAt
@@ -2136,7 +2141,7 @@ async function browse(goal, options = {}) {
                                     + `"${said.replace(/\s*\n\s*/g, ' ').slice(0, 400)}"`;
                                 actions.push({ action: 'done',
                                     reason: 'read their newest message', answer });
-                                record(0, {
+                                record({
                                     capability: 'web.done', status: 'success',
                                     label: contextLabel, summary: answer,
                                     durationMs: Date.now() - startedAt
@@ -2192,7 +2197,7 @@ async function browse(goal, options = {}) {
                         : `No — nothing from ${who} is newer than the last message you sent them, `
                           + 'so they have not replied to it yet.';
                     actions.push({ action: 'done', reason: 'compared both sides', answer });
-                    record(0, {
+                    record({
                         capability: 'web.done', status: 'success', label: contextLabel,
                         summary: answer, durationMs: Date.now() - startedAt
                     });
@@ -2206,7 +2211,7 @@ async function browse(goal, options = {}) {
                     + 'this system carries out on its own, so the values in the request were not '
                     + 'entered anywhere.';
                 actions.push({ action: 'fill', ok: false, refusal: 'unmandated', detail: why });
-                record(0, {
+                record({
                     capability: 'web.fill', status: 'blocked', label: contextLabel,
                     error: why, durationMs: 0
                 });
@@ -2398,7 +2403,7 @@ async function browse(goal, options = {}) {
             answer = intent.completes
                 || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
             actions.push({ action: 'done', reason: 'the request is carried out', answer });
-            record(0, {
+            record({
                 capability: 'web.done', status: 'success', label: contextLabel,
                 summary: answer, durationMs: Date.now() - startedAt
             });
@@ -2444,7 +2449,7 @@ async function browse(goal, options = {}) {
             const decision = parseAction(raw);
             if (!decision.action) {
                 history.push(`your reply could not be read (${decision.error}) — reply with one JSON action`);
-                record(step, {
+                record({
                     capability: 'web.decide', status: 'failed',
                     error: decision.error, durationMs: Date.now() - stepStartedAt
                 });
@@ -2463,7 +2468,7 @@ async function browse(goal, options = {}) {
                 status = 'success';
                 answer = decision.answer
                     || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
-                record(step, {
+                record({
                     capability: 'web.done', status: 'success',
                     label: observation.label, summary: answer,
                     durationMs: Date.now() - stepStartedAt
@@ -2499,7 +2504,7 @@ async function browse(goal, options = {}) {
                     why = 'not done: nothing has been sent. Pressing Enter in a message body starts a '
                         + 'new line; only the Send control sends. Find it and press it.';
                 }
-                history.push({ step, action: 'done', detail: why });
+                history.push(`done refused: ${why}`);
                 continue;
             }
 
@@ -2517,7 +2522,7 @@ async function browse(goal, options = {}) {
                         status = 'success';
                         answer = 'I searched and found nothing about '
                             + `${sought.map(term => `"${term}"`).join(' or ')}.`;
-                        record(step, {
+                        record({
                             capability: 'web.done', status: 'success',
                             label: contextLabel, summary: answer,
                             durationMs: Date.now() - stepStartedAt
@@ -2529,7 +2534,7 @@ async function browse(goal, options = {}) {
                     history.push('your answer was not accepted: that is the page\'s '
                         + 'no-results notice, not an answer — search for what the '
                         + 'request names, then conclude from what the search shows');
-                    record(step, {
+                    record({
                         capability: 'web.done', status: 'skipped',
                         error: 'answer was the page\'s own no-results notice',
                         durationMs: Date.now() - stepStartedAt
@@ -2550,7 +2555,7 @@ async function browse(goal, options = {}) {
                         status = 'success';
                         answer = 'I searched and found nothing about '
                             + `${missing.map(term => `"${term}"`).join(' or ')}.`;
-                        record(step, {
+                        record({
                             capability: 'web.done', status: 'success',
                             label: contextLabel, summary: answer,
                             durationMs: Date.now() - stepStartedAt
@@ -2561,7 +2566,7 @@ async function browse(goal, options = {}) {
 
                     status = 'gap';
                     failure = `it could not answer this from the page it was on: ${shaky}`;
-                    record(step, {
+                    record({
                         capability: 'web.done', status: 'skipped',
                         error: failure, durationMs: Date.now() - stepStartedAt
                     });
@@ -2573,7 +2578,7 @@ async function browse(goal, options = {}) {
                 doubted = true;
                 steer = shaky;
                 history.push(`your answer was not accepted: ${shaky}`);
-                record(step, {
+                record({
                     capability: 'web.done', status: 'skipped',
                     error: `answer not supported by the page: ${shaky}`,
                     durationMs: Date.now() - stepStartedAt
@@ -2584,7 +2589,7 @@ async function browse(goal, options = {}) {
             if (decision.action === 'done') {
                 status = 'success';
                 answer = decision.answer || null;
-                record(step, {
+                record({
                     capability: 'web.done', status: 'success',
                     label: observation.label, summary: answer,
                     durationMs: Date.now() - stepStartedAt
@@ -2600,7 +2605,7 @@ async function browse(goal, options = {}) {
                     'into. Fill it with what you are looking for and press the search button. ' +
                     'Only give up after that has been tried.'
                 );
-                record(step, {
+                record({
                     capability: 'web.give_up', status: 'blocked',
                     error: 'gave up with an unused search box on the page',
                     durationMs: Date.now() - stepStartedAt
@@ -2613,7 +2618,7 @@ async function browse(goal, options = {}) {
 
                 status = 'gap';
                 failure = decision.reason || 'the goal could not be achieved on this site';
-                record(step, {
+                record({
                     capability: 'web.give_up', status: 'skipped',
                     error: failure, durationMs: Date.now() - stepStartedAt
                 });
@@ -2646,7 +2651,7 @@ async function browse(goal, options = {}) {
                 history.push(`click was not carried out: "${element.name}" starts a new message, `
                     + `and this request is a reply. ${wrongOpener ? `Use "${wrongOpener.name}".`
                         : 'Open the message being replied to first.'}`);
-                record(step, {
+                record({
                     capability: 'web.click', status: 'skipped',
                     error: `"${element.name}" composes where a reply was asked for`,
                     durationMs: Date.now() - stepStartedAt
@@ -2682,7 +2687,7 @@ async function browse(goal, options = {}) {
                         ? `"${next.name}" is the next field on this form that is still empty.`
                         : 'Every field on this form is filled in — what is left is to press '
                           + 'the control that sends it.'));
-                record(step, {
+                record({
                     capability: 'web.fill', status: 'skipped',
                     error: `"${element.name}" already holds that text`,
                     durationMs: Date.now() - stepStartedAt
@@ -2712,7 +2717,7 @@ async function browse(goal, options = {}) {
                     + 'this form and is still empty. Fill the fields from the top — a form may '
                     + 'put away a field you leave empty, and then there is no way back to it. '
                     + `Fill "${outOfOrder.name}" first.`);
-                record(step, {
+                record({
                     capability: 'web.fill', status: 'skipped',
                     error: `"${outOfOrder.name}" was skipped`,
                     durationMs: Date.now() - stepStartedAt
@@ -2726,7 +2731,7 @@ async function browse(goal, options = {}) {
             if (repeated) {
                 status = 'blocked';
                 failure = repeated;
-                record(step, {
+                record({
                     capability: `web.${decision.action}`, status: 'blocked',
                     error: repeated, durationMs: Date.now() - stepStartedAt
                 });
@@ -2738,7 +2743,7 @@ async function browse(goal, options = {}) {
             const pointless = stuck(identity, here);
             if (pointless) {
                 history.push(`${decision.action} was not carried out again: ${pointless}`);
-                record(step, {
+                record({
                     capability: `web.${decision.action}`, status: 'skipped',
                     error: pointless, durationMs: Date.now() - stepStartedAt
                 });
@@ -2786,7 +2791,7 @@ async function browse(goal, options = {}) {
                 status = 'success';
                 answer = `Done: ${[...performed].join(', ')}`
                     + (filled.length ? ` — ${filled.join(', ')} filled.` : '.');
-                record(step, {
+                record({
                     capability: `web.${decision.action}`, status: 'success',
                     label: contextLabel, summary: `${outcome.detail} — the request is carried out`,
                     inputs: { ...(outcome.anchor || {}), ref: decision.ref },
@@ -2801,7 +2806,7 @@ async function browse(goal, options = {}) {
             if (outcome.fatal) {
                 status = 'blocked';
                 failure = outcome.detail;
-                record(step, {
+                record({
                     capability: `web.${decision.action}`, status: 'blocked',
                     error: outcome.detail, durationMs: actedMs
                 });
@@ -2815,7 +2820,7 @@ async function browse(goal, options = {}) {
                 failure = outcome.detail;
                 approval = { id: outcome.approvalId, preview: outcome.preview,
                              action: `${decision.action} "${decision.ref}"` };
-                record(step, {
+                record({
                     capability: `web.${decision.action}`, status: 'blocked',
                     error: outcome.detail, durationMs: actedMs
                 });
@@ -2865,12 +2870,10 @@ async function browse(goal, options = {}) {
                 if (backedOut.has(identity) && await lookElsewhere()) continue;
                 backedOut.add(identity);
 
-                history.push({
-                    step, action: decision.action,
-                    detail: 'that opened a form for creating something new, and this request only '
-                        + 'asks a question, so it has been closed again. Look for what is already '
-                        + 'there — a list, a day or a search result — and read the answer off it.'
-                });
+                history.push(`${decision.action} undone: that opened a form for creating `
+                    + 'something new, and this request only asks a question, so it has been '
+                    + 'closed again. Look for what is already there — a list, a day or a '
+                    + 'search result — and read the answer off it.');
                 continue;
             }
 
@@ -2919,7 +2922,7 @@ async function browse(goal, options = {}) {
                     ? `${decision.action} did not happen: ${outcome.detail}`
                     : `${decision.action} was refused: ${outcome.detail}`));
 
-            record(step, {
+            record({
                 capability: `web.${decision.action}`,
                 status: outcome.ok
                     ? (achieved ? 'success' : 'skipped')

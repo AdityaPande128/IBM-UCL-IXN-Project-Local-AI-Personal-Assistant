@@ -9,6 +9,11 @@ import numpy as np
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.responses import Response, StreamingResponse
 
+
+# What crosses the model is the most personal data in the system; the
+# log keeps sizes, not contents, unless debugging explicitly asks.
+LOG_CONTENT = os.environ.get("JARVIS_LOG_PROMPTS") == "1"
+
 app = FastAPI(title="Jarvis Inference Server")
 
 import json
@@ -367,7 +372,10 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
     if not prompt:
         return None
     
-    print(f"[Inference LLM Prompt]\n{prompt}\n[End Inference LLM Prompt]", flush=True)
+    if LOG_CONTENT:
+        print(f"[Inference LLM Prompt]\n{prompt}\n[End Inference LLM Prompt]", flush=True)
+    else:
+        print(f"[Inference] prompt {len(prompt)} chars", flush=True)
     
     max_tokens = req.get("max_tokens") or req.get("max_output_tokens") or 512
 
@@ -459,7 +467,10 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
             except Exception as e:
                 print(f"[Inference Server] Argument sanitization failed: {e}")
             
-    print(f"[Inference LLM Response]\n{response}\n[End Inference LLM Response]", flush=True)
+    if LOG_CONTENT:
+        print(f"[Inference LLM Response]\n{response}\n[End Inference LLM Response]", flush=True)
+    else:
+        print(f"[Inference] response {len(response)} chars", flush=True)
     return response
 
 

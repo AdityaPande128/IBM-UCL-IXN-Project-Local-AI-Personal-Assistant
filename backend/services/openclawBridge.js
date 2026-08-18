@@ -27,7 +27,7 @@ async function initialize() {
     return true;
 }
 
-function callOpenClawAgent(userMessage) {
+function callOpenClawAgent(userMessage, signal) {
     return new Promise((resolve, reject) => {
         const argv = [
             'agent',
@@ -40,7 +40,8 @@ function callOpenClawAgent(userMessage) {
 
         execFile('openclaw', argv, {
             timeout: OPENCLAW_TIMEOUT_MS,
-            maxBuffer: MAX_OPENCLAW_OUTPUT_BYTES
+            maxBuffer: MAX_OPENCLAW_OUTPUT_BYTES,
+            ...(signal ? { signal } : {})
         }, (err, stdout, stderr) => {
             if (err) {
                 reject(new Error(`OpenClaw execution failed: ${err.message}`));
@@ -88,7 +89,7 @@ async function executeSkill(decision, originalText, options = {}) {
 }
 
 function maybeDelegate(text, options = {}, why = 'nothing installed covers this') {
-    if (!options.interactive) return runOpenClaw(text, null);
+    if (!options.interactive) return runOpenClaw(text, null, options.signal);
 
     const offer = proposals.create('delegate', {
         request: text,
@@ -97,7 +98,7 @@ function maybeDelegate(text, options = {}, why = 'nothing installed covers this'
             + 'machine. It can use its full toolset, but outside this app\'s '
             + 'guarantees: its outcomes are not independently verified, and '
             + 'its actions are not mandate-checked'
-    }, () => runOpenClaw(text, null));
+    }, (context = {}) => runOpenClaw(text, null, context.signal));
 
     activityBus.publish('bridge', 'proposal', { kind: 'delegate', id: offer.id, why });
 
@@ -111,9 +112,9 @@ function maybeDelegate(text, options = {}, why = 'nothing installed covers this'
     };
 }
 
-async function runOpenClaw(text, attemptedSkill) {
+async function runOpenClaw(text, attemptedSkill, signal) {
     try {
-        const response = await callOpenClawAgent(text);
+        const response = await callOpenClawAgent(text, signal);
         return {
             status: 'success',
             response,
@@ -280,7 +281,7 @@ async function executeIntent(intentText, options = {}) {
     }
 
     if (options.executor === 'openclaw') {
-        const delegated = await runOpenClaw(intentText, null);
+        const delegated = await runOpenClaw(intentText, null, options.signal);
         return { ...delegated, decision: { action: 'openclaw' }, durationMs: Date.now() - startedAt };
     }
 
@@ -410,11 +411,17 @@ function disconnect() { }
 
 async function answerProposal(id, decision, context = {}) {
     if (decision === 'yes') {
-        activityBus.publish('bridge', 'proposal_approved', { id });
-        return proposals.approve(id, context);
+        const result = await proposals.approve(id, context);
+        if (result && result.status !== 'unknown_proposal') {
+            activityBus.publish('bridge', 'proposal_approved', { id });
+        }
+        return result;
     }
-    activityBus.publish('bridge', 'proposal_declined', { id });
-    return proposals.decline(id);
+    const result = proposals.decline(id);
+    if (result && result.status !== 'unknown_proposal') {
+        activityBus.publish('bridge', 'proposal_declined', { id });
+    }
+    return result;
 }
 
 module.exports = {

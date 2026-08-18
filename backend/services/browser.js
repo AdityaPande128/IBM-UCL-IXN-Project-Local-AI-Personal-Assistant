@@ -13,10 +13,6 @@ const USER_AGENT =
     'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 ' +
     '(KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36';
 
-const ATTACH_ENDPOINT = process.env.JARVIS_BROWSER_CDP
-    || webConfig.attach_endpoint
-    || 'http://127.0.0.1:9222';
-
 const MODE = { EPHEMERAL: 'ephemeral', ATTACHED: 'attached' };
 
 const SETTLE_QUIET_MS = webConfig.settle_quiet_ms ?? 600;
@@ -257,7 +253,6 @@ module.exports = {
     whyNotAttached,
     touch,
     MODE,
-    ATTACH_ENDPOINT,
     NAVIGATION_TIMEOUT_MS,
     ACTION_TIMEOUT_MS
 };

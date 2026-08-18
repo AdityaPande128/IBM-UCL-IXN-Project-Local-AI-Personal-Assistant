@@ -14,7 +14,7 @@ const config = configReader.readConfig();
 const TIER = 'engine';
 const TEMPERATURE = 0.3;
 const MAX_TOKENS = 400;
-const TIMEOUT_MS = config.router.timeout_ms ?? 30000;
+const TIMEOUT_MS = (config.router || {}).timeout_ms ?? 30000;
 
 const MAX_CONTEXT_CHARS = 4000;
 

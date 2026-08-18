@@ -6,6 +6,7 @@
 // enforces it, so what it shows is what is actually permitted.
 
 const fs = require('fs');
+const channelAdapter = require('./channelAdapter');
 const os = require('os');
 const path = require('path');
 
@@ -60,15 +61,14 @@ function rootLines() {
     return byCollection;
 }
 
-function channelLines(config) {
-    const settings = (config.channel && config.channel.telegram) || {};
-    const tokenPath = settings.token_path
-        || path.join(__dirname, '..', 'data', 'telegram-token');
+function channelLines() {
+    const state = channelAdapter.status();
+    const chat = channelAdapter.boundChat();
     return {
         telegram: {
-            enabled: settings.enabled === true,
-            bound_chat: settings.chat_id ? String(settings.chat_id) : null,
-            token_present: fs.existsSync(tokenPath)
+            enabled: state.enabled,
+            bound_chat: chat ? String(chat) : null,
+            token_present: state.has_token
         }
     };
 }
