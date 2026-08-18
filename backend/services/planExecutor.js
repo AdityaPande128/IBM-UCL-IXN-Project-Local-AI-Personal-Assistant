@@ -59,19 +59,21 @@ function starvation(resolved) {
 
 
 function checkDisclosure(capability, label, step) {
+    let verdict = null;
     for (const effect of capability.effects) {
         const channel = DISCLOSURE_CHANNEL[effect];
         if (!channel) continue;
 
-        return egress.guard({
+        verdict = egress.guard({
             channel,
             action: capability.id,
             inputs: [label],
             summary: `plan step ${step.id}: ${capability.id}${step.reason ? ` — ${step.reason}` : ''}`,
             policy: capability.disclosurePolicy || undefined
         });
+        if (!verdict.allowed) return verdict;
     }
-    return null;
+    return verdict && verdict.allowed ? verdict : null;
 }
 
 function checkConsent(capability) {
@@ -203,7 +205,8 @@ async function run(plan, options = {}) {
         let values;
         try {
             values = await capability.run(bound, {
-                label: inputLabel, step, planId, request: options.request || ''
+                label: inputLabel, step, planId, request: options.request || '',
+                signal: options.signal
             });
         } catch (err) {
             const durationMs = Date.now() - stepStartedAt;

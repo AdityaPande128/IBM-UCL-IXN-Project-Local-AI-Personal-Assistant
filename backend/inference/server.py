@@ -350,10 +350,12 @@ def _generate_llm(req: dict):
 
     with RESIDENCY.use(requested) as (target_model, target_tokenizer):
         return _generate_with(target_model, target_tokenizer, req,
-                              formatted_messages, tools)
+                              formatted_messages, tools,
+                              model_id=RESIDENCY.resolve(requested))
 
 
-def _generate_with(target_model, target_tokenizer, req, formatted_messages, tools):
+def _generate_with(target_model, target_tokenizer, req, formatted_messages, tools,
+                   model_id=None):
     """Render the prompt and generate, with the model held against eviction."""
     from mlx_lm import generate
 
@@ -419,7 +421,9 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
     if PREFIX_CACHE is not None and draft is None:
         try:
             prompt_tokens = _encode_prompt(target_tokenizer, prompt)
-            cache_key = id(target_model)
+            # id(model) is recycled by the allocator after an eviction; a new
+            # model at the old address would inherit a stale KV cache.
+            cache_key = model_id or id(target_model)
             cache, feed, reused = PREFIX_CACHE.begin(cache_key, target_model, prompt_tokens)
             if cache is not None:
                 generate_kwargs["prompt_cache"] = cache
@@ -490,7 +494,10 @@ async def responses_api(req: dict):
         if content is None:
             return {"error": "Failed to extract prompt"}
 
-        print(f"[Responses API] Generated: {content!r}", flush=True)
+        if LOG_CONTENT:
+            print(f"[Responses API] Generated: {content!r}", flush=True)
+        else:
+            print(f"[Responses API] generated {len(content)} chars", flush=True)
         
         resp_id = f"resp_{int(time.time())}_{os.urandom(4).hex()}"
         item_id = f"item_{int(time.time())}_{os.urandom(4).hex()}"
@@ -778,7 +785,10 @@ async def chat_completions(req: dict):
         if content is None:
             return {"error": "Failed to extract prompt"}
 
-        print(f"[Chat Completions] Generated: {content!r}", flush=True)
+        if LOG_CONTENT:
+            print(f"[Chat Completions] Generated: {content!r}", flush=True)
+        else:
+            print(f"[Chat Completions] generated {len(content)} chars", flush=True)
 
         tool_calls = _as_tool_calls(content)
         message = {"role": "assistant", "content": None if tool_calls else content}
@@ -870,7 +880,10 @@ async def speech_to_text(audio: UploadFile = File(...)):
         else:
             transcript = result.get("text", "").strip()
 
-        print(f"[STT] Transcribed: \"{transcript}\"")
+        if LOG_CONTENT:
+            print(f"[STT] Transcribed: \"{transcript}\"")
+        else:
+            print(f"[STT] transcribed {len(transcript)} chars")
         return {"text": transcript}
     finally:
         os.unlink(tmp_path)

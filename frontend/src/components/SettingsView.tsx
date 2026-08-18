@@ -25,6 +25,7 @@ interface SettingsViewProps {
   onClearChannel: () => void;
   diagnostics: DiagnosticsResult | null;
   settingsResult: SettingsResult | null;
+  profileError: string | null;
   profile: ProfileData | null;
   downloads: DownloadsData | null;
   incognito: boolean;
@@ -83,7 +84,7 @@ function readAvatar(file: File): Promise<string> {
 }
 
 export function SettingsView({
-  connected, abilities, channel, diagnostics, settingsResult, profile,
+  connected, abilities, channel, diagnostics, settingsResult, profile, profileError,
   downloads, incognito, onRefresh, onRequestChannel, onSetChannelToken,
   onClearChannel, onSaveDiagnostics, onUpdateSettings, onUpdateProfile,
   onSetIncognito, onDownloadAction, onClose,
@@ -135,23 +136,49 @@ export function SettingsView({
     setNameEdit(null);
   }, [nameEdit, profile, onUpdateProfile]);
 
+  const changedTiers: SettingsUpdate["tiers"] = {};
+  if (abilities) {
+    for (const tier of abilities.tiers) {
+      const edit = tierEdits[tier.tier];
+      if (!edit) continue;
+      const changed: { model?: string; policy?: string } = {};
+      if (edit.model !== undefined && edit.model !== tier.model) changed.model = edit.model;
+      if (edit.policy !== undefined && edit.policy !== tier.policy) changed.policy = edit.policy;
+      if (Object.keys(changed).length) changedTiers[tier.tier] = changed;
+    }
+  }
+  const browserChanged =
+    browserEdit !== null && browserEdit !== abilities?.browser.current;
+  const mailChanged = mailEdit !== null && mailEdit !== abilities?.mail.current;
+  const dirty =
+    Object.keys(changedTiers).length > 0 || browserChanged || mailChanged;
+
+  // Closing discards the half-typed name; only Enter or blur commits it.
   const close = useCallback(() => {
-    commitName();
+    setNameEdit(null);
     onClose();
-  }, [commitName, onClose]);
+  }, [onClose]);
+
+  // Every way out goes through the same door: unapplied edits arm the
+  // Discard/Stay choice whether you press Done, Esc, or the backdrop.
+  const requestClose = useCallback(() => {
+    if (dirty) setCloseArmed(true);
+    else close();
+  }, [dirty, close]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        close();
+        requestClose();
         return;
       }
       if (e.key !== "Tab") return;
       const dialog = dialogRef.current;
       if (!dialog) return;
-      const focusables = dialog.querySelectorAll<HTMLElement>(
+      const focusables = Array.from(dialog.querySelectorAll<HTMLElement>(
         'button, input, select, [tabindex]:not([tabindex="-1"])'
-      );
+      )).filter((el) =>
+        !(el as HTMLButtonElement).disabled && !el.hidden && el.offsetParent !== null);
       if (!focusables.length) return;
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
@@ -165,7 +192,7 @@ export function SettingsView({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close]);
+  }, [requestClose]);
 
   const openDashboard = async () => {
     if (!abilities) return;
@@ -191,22 +218,6 @@ export function SettingsView({
     (j) => j.model === smithModel && j.status === "done")
     || abilities?.catalog?.smiths.find((e) => e.model === smithModel)?.downloaded;
 
-  const changedTiers: SettingsUpdate["tiers"] = {};
-  if (abilities) {
-    for (const tier of abilities.tiers) {
-      const edit = tierEdits[tier.tier];
-      if (!edit) continue;
-      const changed: { model?: string; policy?: string } = {};
-      if (edit.model !== undefined && edit.model !== tier.model) changed.model = edit.model;
-      if (edit.policy !== undefined && edit.policy !== tier.policy) changed.policy = edit.policy;
-      if (Object.keys(changed).length) changedTiers[tier.tier] = changed;
-    }
-  }
-  const browserChanged =
-    browserEdit !== null && browserEdit !== abilities?.browser.current;
-  const mailChanged = mailEdit !== null && mailEdit !== abilities?.mail.current;
-  const dirty =
-    Object.keys(changedTiers).length > 0 || browserChanged || mailChanged;
 
   const applyRow = (dirty || settingsResult) && (
     <div className="settings-field">
@@ -251,7 +262,7 @@ export function SettingsView({
 
   return (
     <div className="settings-backdrop" onMouseDown={(e) => {
-      if (e.target === e.currentTarget) close();
+      if (e.target === e.currentTarget) requestClose();
     }}>
       <div
         className="settings-modal"
@@ -283,13 +294,7 @@ export function SettingsView({
               </button>
             </div>
           ) : (
-            <button
-              className="settings-close"
-              onClick={() => {
-                if (dirty) setCloseArmed(true);
-                else close();
-              }}
-            >
+            <button className="settings-close" onClick={requestClose}>
               Done
             </button>
           )}
@@ -329,16 +334,19 @@ export function SettingsView({
                     {avatarError && <span className="diag-error">{avatarError}</span>}
                   </div>
                   <div className="settings-field">
-                    <span className="settings-label">Name</span>
+                    <label className="settings-label" htmlFor="settings-name">Name</label>
                     <input
+                      id="settings-name"
                       ref={nameRef}
                       className="settings-input"
                       value={nameEdit ?? profile.name}
                       maxLength={80}
                       onChange={(e) => setNameEdit(e.target.value)}
                       onBlur={commitName}
-                      onKeyDown={(e) => e.key === "Enter" && commitName()}
+                      onKeyDown={(e) =>
+                        e.key === "Enter" && !e.nativeEvent.isComposing && commitName()}
                     />
+                    {profileError && <span className="diag-error">{profileError}</span>}
                   </div>
                   <div className="settings-field">
                     <span className="settings-label">Theme</span>
@@ -580,8 +588,8 @@ export function SettingsView({
                   <div className="settings-field">
                     <span className="settings-label">Linked browser</span>
                     <span className="diag-note">
-                      Web tasks that need your signed-in sessions drive this browser on
-                      your desktop, visibly.
+                      Jarvis drives its own window of this browser on your desktop,
+                      visibly, for web tasks that need your signed-in sessions.
                     </span>
                     <select
                       className="settings-select"
@@ -633,7 +641,8 @@ export function SettingsView({
                           value={tokenDraft}
                           onChange={(e) => setTokenDraft(e.target.value)}
                           onKeyDown={(e) => {
-                            if (e.key === "Enter" && tokenDraft.trim()) {
+                            if (e.key === "Enter" && !e.nativeEvent.isComposing
+                                && tokenDraft.trim()) {
                               onSetChannelToken(tokenDraft.trim());
                               setTokenDraft("");
                             }

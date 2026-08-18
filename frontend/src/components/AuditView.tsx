@@ -65,8 +65,11 @@ export function AuditView({ audit, onRefresh }: AuditViewProps) {
           <span className="build-meta">
             {audit.summary.plans} {audit.summary.plans === 1 ? "task" : "tasks"} ·{" "}
             {audit.summary.succeeded} succeeded · {audit.summary.failed} failed ·{" "}
+            {audit.summary.decisions} {audit.summary.decisions === 1 ? "decision" : "decisions"} ·{" "}
             {audit.summary.denied} {audit.summary.denied === 1 ? "refusal" : "refusals"} ·{" "}
-            {audit.summary.builds} {audit.summary.builds === 1 ? "build" : "builds"}
+            {audit.summary.approvals} {audit.summary.approvals === 1 ? "approval" : "approvals"} ·{" "}
+            {audit.summary.builds} {audit.summary.builds === 1 ? "build" : "builds"} ·{" "}
+            {audit.summary.notices} {audit.summary.notices === 1 ? "notice" : "notices"}
           </span>
         </div>
       </section>
@@ -85,7 +88,8 @@ export function AuditView({ audit, onRefresh }: AuditViewProps) {
               <div key={index} className="build-row">
                 <span
                   className={`ability-chip ability-chip--${
-                    plan.status === "success" ? "ok" : "bad"
+                    plan.status === "success" ? "ok"
+                      : plan.status === "failed" ? "bad" : "mid"
                   }`}
                 >
                   {plan.status}

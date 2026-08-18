@@ -325,6 +325,7 @@ interface UseWebSocketReturn {
   clearChannel: () => void;
   conversations: ConversationSummary[];
   activeConversation: number | null;
+  profileError: string | null;
   selectConversation: (id: number | null) => void;
   deleteConversation: (id: number) => void;
   openclawConnected: boolean;
@@ -376,7 +377,7 @@ interface UseWebSocketReturn {
   onboardingApply: OnboardingApplyResult | null;
   requestOnboarding: () => void;
   applyOnboarding: (payload: OnboardingApplyPayload) => void;
-  completeOnboarding: () => void;
+  completeOnboarding: (fresh?: boolean) => void;
   updateProfile: (update: ProfileUpdate) => void;
   downloadAction: (action: "start" | "stop" | "status", model?: string) => void;
 }
@@ -433,6 +434,10 @@ export function useWebSocket(): UseWebSocketReturn {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [channel, setChannel] = useState<ChannelStatus | null>(null);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
+  const activeConversationRef = useRef<number | null>(null);
+  useEffect(() => {
+    activeConversationRef.current = activeConversation;
+  }, [activeConversation]);
   const [activities, setActivities] = useState<ActivityEvent[]>([]);
   const [proposal, setProposal] = useState<Proposal | null>(null);
   const [activeIntents, setActiveIntents] = useState<string[]>([]);
@@ -450,6 +455,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [downloads, setDownloads] = useState<DownloadsData | null>(null);
   const [voiceReady, setVoiceReady] = useState(false);
   const [onboardingApply, setOnboardingApply] = useState<OnboardingApplyResult | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
@@ -507,6 +513,12 @@ export function useWebSocket(): UseWebSocketReturn {
           // is fetched on every (re)connect rather than on demand.
           ws.send(JSON.stringify({ type: "onboarding" }));
           ws.send(JSON.stringify({ type: "conversations_list" }));
+          ws.send(JSON.stringify({ type: "brief" }));
+          // The daemon's side of "which conversation is open" died with the
+          // old socket; re-select or the next message starts a new one.
+          if (activeConversationRef.current !== null) {
+            ws.send(JSON.stringify({ type: "conversation_select", id: activeConversationRef.current }));
+          }
           return;
         }
         if (msg.type === "onboarding_result") {
@@ -526,9 +538,12 @@ export function useWebSocket(): UseWebSocketReturn {
         }
         if (msg.type === "onboarding_complete_result" || msg.type === "profile_update_result") {
           if (msg.status === "applied" && msg.profile) {
+            setProfileError(null);
             setOnboarding((prev) =>
               prev ? { ...prev, profile: msg.profile as ProfileData } : prev
             );
+          } else if (msg.status === "invalid") {
+            setProfileError(msg.error ?? "That change was not accepted.");
           }
           return;
         }
@@ -750,6 +765,7 @@ export function useWebSocket(): UseWebSocketReturn {
           return;
         }
         if (msg.type === "abort_result") {
+          setActiveIntents((prev) => (msg.id ? prev.filter((id) => id !== msg.id) : []));
           return;
         }
         if (msg.type === "intent_result") {
@@ -805,16 +821,12 @@ export function useWebSocket(): UseWebSocketReturn {
     [addMessage]
   );
 
-  const sendDecision = useCallback(
-    (id: string, decision: "yes" | "no") => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: "approval", id, decision }));
-        setProposal(null);
-        addMessage("user", decision === "yes" ? "Approved." : "Declined.");
-      }
-    },
-    [addMessage]
-  );
+  const sendDecision = useCallback((id: string, decision: "yes" | "no") => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "approval", id, decision }));
+      setProposal(null);
+    }
+  }, []);
 
   const requestChannel = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -1013,9 +1025,9 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
-  const completeOnboarding = useCallback(() => {
+  const completeOnboarding = useCallback((fresh: boolean = true) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "onboarding_complete" }));
+      wsRef.current.send(JSON.stringify({ type: "onboarding_complete", fresh }));
     }
   }, []);
 
@@ -1044,6 +1056,7 @@ export function useWebSocket(): UseWebSocketReturn {
     clearChannel,
     conversations,
     activeConversation,
+    profileError,
     selectConversation,
     deleteConversation,
     openclawConnected,

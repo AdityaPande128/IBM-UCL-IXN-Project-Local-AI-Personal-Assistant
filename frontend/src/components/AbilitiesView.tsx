@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { ArmButton } from "./Confirm";
+import { Pending } from "./Pending";
 import type { AbilitiesData } from "../hooks/useWebSocket";
 
 interface AbilitiesViewProps {
@@ -16,7 +17,7 @@ export function AbilitiesView({ abilities, onRefresh, onRemoveSkill }: Abilities
   if (!abilities) {
     return (
       <div className="abilities">
-        <div className="abilities-empty">Loading skills…</div>
+        <Pending label="Loading the skills…" onRetry={() => onRefresh()} />
       </div>
     );
   }

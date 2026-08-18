@@ -111,7 +111,7 @@ async function transcribeAudio(audioBuffer) {
     try {
         const result = await httpPost('/stt', multipartBody, `multipart/form-data; boundary=${boundary}`);
         if (result.type === 'json' && result.data.text) {
-            console.log(`[STT: mlx-whisper] Transcribed: "${result.data.text}"`);
+            console.log(`[STT: mlx-whisper] transcribed ${result.data.text.length} chars`);
             return result.data.text;
         }
         console.log(`[STT: mlx-whisper] No transcription returned, falling back to stub.`);
@@ -123,7 +123,7 @@ async function transcribeAudio(audioBuffer) {
 }
 
 async function synthesizeChunk(textChunk, chunkIndex) {
-    console.log(`[TTS: Kokoro-82M] Synthesizing chunk ${chunkIndex}: "${textChunk}"`);
+    console.log(`[TTS: Kokoro-82M] synthesizing chunk ${chunkIndex} (${textChunk.length} chars)`);
 
     const formBody = `text=${encodeURIComponent(textChunk)}&voice=af_heart`;
 
@@ -202,7 +202,7 @@ async function respondTo(transcribedText, ws) {
                 || "Sorry, the intent execution failed.";
             llmResult = { ...llmResult, response: responseText };
 
-            console.log(`[Pipeline] Response (${llmResult.status}): "${responseText.substring(0, 100)}..."`);
+            console.log(`[Pipeline] Response (${llmResult.status}): ${responseText.length} chars`);
             send(ws, { type: 'intent_result', id: job.id, ...llmResult });
             record(ws, llmResult.status === 'error' ? 'error' : 'assistant',
                 llmResult.response, llmResult.artifacts);

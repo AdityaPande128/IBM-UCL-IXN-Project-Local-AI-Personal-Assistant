@@ -31,7 +31,8 @@ function relativeDay(iso: string) {
   const then = new Date(iso);
   const today = new Date();
   const days = Math.floor((today.setHours(0, 0, 0, 0) - new Date(then).setHours(0, 0, 0, 0)) / 86400000);
-  if (days <= 0) return then.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (days === 0) return then.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (days < 0) return then.toLocaleDateString([], { day: "numeric", month: "short" });
   if (days === 1) return "Yesterday";
   if (days < 7) return then.toLocaleDateString([], { weekday: "short" });
   return then.toLocaleDateString([], { day: "numeric", month: "short" });
@@ -118,7 +119,7 @@ export function Sidebar({
                   aria-label={`Delete “${c.title}”`}
                   onClick={() => { onDeleteConversation(c.id); setArming(null); }}
                 >
-                  Delete
+                  Really delete
                 </button>
                 <button
                   className="sidebar-chat-confirm-no"
@@ -180,6 +181,20 @@ export function Sidebar({
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize the sidebar"
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={MAX_WIDTH}
+        aria-valuenow={width}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+          e.preventDefault();
+          setWidth((current) => {
+            const next = Math.min(MAX_WIDTH,
+              Math.max(MIN_WIDTH, current + (e.key === "ArrowRight" ? 16 : -16)));
+            localStorage.setItem(WIDTH_KEY, String(next));
+            return next;
+          });
+        }}
         onMouseDown={startDrag}
       />
     </aside>

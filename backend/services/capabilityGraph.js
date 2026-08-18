@@ -189,7 +189,8 @@ function fromProcedure(procedure) {
                     request: context.request || '',
                     given: context.step ? context.step.inputs : null,
                     parentPlanId: context.planId ?? null,
-                    parentStep: context.step ? context.step.id : null
+                    parentStep: context.step ? context.step.id : null,
+                    signal: context.signal
                 });
             } catch (err) {
                 if (!err.notApplicable) throw err;
@@ -454,7 +455,8 @@ function builtins() {
                     label: context.label,
                     request: context.request || '',
                     parentPlanId: context.planId ?? null,
-                    parentStep: context.step ? context.step.id : null
+                    parentStep: context.step ? context.step.id : null,
+                    signal: context.signal
                 });
 
                 if (result.status === 'success') {

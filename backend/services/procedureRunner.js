@@ -143,6 +143,9 @@ async function replay(target, args = {}, options = {}) {
         }
 
         for (const [ordinal, step] of (procedure.steps || []).entries()) {
+            if (options.signal && options.signal.aborted) {
+                throw decline('stopped by the user');
+            }
             const stepStartedAt = Date.now();
             browser.touch();
             const outcome = await perform(page, step, observation,

@@ -298,8 +298,12 @@ async function execute(skill, supplied = {}) {
             `${enforced ? ' [sandboxed]' : ''} → ${JSON.stringify(argv)}`
         );
 
+        // A minimal environment, not the daemon's: the sandbox denies reading
+        // the token file, so it must not hand the same secrets over via env.
         result = await runProcess(sandboxed.argv, skill.exec.timeout_ms, skill.directory, {
-            ...process.env,
+            PATH: process.env.PATH || '/usr/bin:/bin',
+            HOME: process.env.HOME || '',
+            LANG: process.env.LANG || 'en_US.UTF-8',
             TMPDIR: tempDir
         });
     } finally {

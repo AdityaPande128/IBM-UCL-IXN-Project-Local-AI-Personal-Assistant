@@ -15,7 +15,12 @@ const CODER3B = 'mlx-community/Qwen2.5-Coder-3B-Instruct-4bit';
 const CODER14B = 'mlx-community/Qwen2.5-Coder-14B-Instruct-4bit';
 
 function testConfig() {
-    return JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'config.json'), 'utf8'));
+    const config = JSON.parse(
+        fs.readFileSync(path.join(__dirname, '..', '..', 'config.json'), 'utf8'));
+    // The machine this suite runs on has a real profile; the tests reason
+    // about a Mac that has none.
+    delete config.profile;
+    return config;
 }
 
 

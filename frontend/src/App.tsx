@@ -52,6 +52,7 @@ function App() {
     clearChannel,
     conversations,
     activeConversation,
+    profileError,
     selectConversation,
     deleteConversation,
     busy,
@@ -117,6 +118,11 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [wizardActive, setWizardActive] = useState(false);
+  const [splashLate, setSplashLate] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSplashLate(true), 10000);
+    return () => clearTimeout(timer);
+  }, []);
   const [view, setView] = useState<View>("chat");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -166,6 +172,7 @@ function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (wizardActive) return;
       const meta = e.metaKey || e.ctrlKey;
       // Inside the shell the native menu owns these accelerators.
       if (!inShell && meta && e.key === "n") {
@@ -184,11 +191,12 @@ function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [inShell, newChat, settingsOpen]);
+  }, [inShell, newChat, settingsOpen, wizardActive]);
 
   useEffect(() => {
     if (!inShell) return;
     const ready = listen<string>("jarvis-menu", (event) => {
+      if (wizardActive) return;
       if (event.payload === "new-chat") newChat();
       else if (event.payload === "settings") setSettingsOpen(true);
       else if (event.payload === "toggle-sidebar") setSidebarOpen((open) => !open);
@@ -197,7 +205,7 @@ function App() {
     return () => {
       ready.then((unlisten) => unlisten());
     };
-  }, [inShell, newChat]);
+  }, [inShell, newChat, wizardActive]);
 
   const voiceNotReady = () => {
     pushToast(
@@ -212,7 +220,10 @@ function App() {
       voiceNotReady();
       return;
     }
-    await startRecording();
+    if (!(await startRecording())) {
+      pushToast("The microphone could not be opened — allow it in "
+        + "System Settings → Privacy & Security → Microphone.");
+    }
   };
 
   const handleStop = () => {
@@ -244,7 +255,11 @@ function App() {
         <div className="splash">
           <span className="chat-empty-orb" />
           <div className="chat-empty-title">Jarvis</div>
-          <div className="chat-empty-hint">{banner ?? "Starting up…"}</div>
+          <div className="chat-empty-hint">
+            {banner ?? (splashLate
+              ? "The assistant's core is not answering. Quit and reopen Jarvis; if it persists, check ~/.jarvis/logs."
+              : "Starting up…")}
+          </div>
         </div>
       </div>
     );
@@ -282,7 +297,9 @@ function App() {
         conversations={conversations}
         activeConversation={activeConversation}
         view={view}
-        inboxCount={brief ? brief.notices.length + brief.proposals.length : 0}
+        inboxCount={brief
+          ? brief.notices.length + brief.proposals.length + brief.approvals.length
+          : 0}
         incognito={memory?.incognito ?? false}
         profileName={profile?.name ?? ""}
         profileAvatar={profile?.avatar ?? ""}
@@ -329,6 +346,10 @@ function App() {
               <button
                 className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
                 onClick={toggleWake}
+                aria-pressed={listening && wakeMode}
+                aria-label={listening && wakeMode
+                  ? "Stop listening for Hey Jarvis"
+                  : "Start listening for Hey Jarvis"}
                 title={listening
                   ? "Listening for “Hey Jarvis” — click to close the microphone"
                   : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
@@ -400,6 +421,11 @@ function App() {
                 {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
               </>
             )}
+            {proposal && view !== "chat" && (
+              <div className="proposal-float">
+                <ApprovalCard proposal={proposal} onDecision={sendDecision} />
+              </div>
+            )}
             {view === "inbox" && (
               <InboxView
                 brief={brief}
@@ -469,7 +495,8 @@ function App() {
               placeholder={connected ? "Message Jarvis…" : "Reconnecting…"}
               disabled={!connected}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && e.currentTarget.value.trim() !== "") {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing
+                    && e.currentTarget.value.trim() !== "") {
                   sendIntent(e.currentTarget.value);
                   e.currentTarget.value = "";
                   if (view !== "chat") setView("chat");
@@ -523,6 +550,7 @@ function App() {
           diagnostics={diagnostics}
           settingsResult={settingsResult}
           profile={profile}
+          profileError={profileError}
           downloads={downloads}
           incognito={memory?.incognito ?? false}
           onRefresh={requestAbilities}

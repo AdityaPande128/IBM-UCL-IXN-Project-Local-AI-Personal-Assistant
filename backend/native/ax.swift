@@ -450,7 +450,12 @@ func fill(ref: String, value: String, app appName: String) -> [String: Any] {
 
     AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
     usleep(60_000)
-    if !(bool(element, kAXFocusedAttribute as String) ?? false), let box = rect(element) {
+    if !(bool(element, kAXFocusedAttribute as String) ?? false) {
+        // Typing lands wherever focus is; without a frame to click there is
+        // no way to put focus on this field, so refuse rather than type blind.
+        guard let box = rect(element) else {
+            return ["error": "the field would not take focus and has no frame to click"]
+        }
         if let why = clickAt(CGPoint(x: box.midX, y: box.midY), in: appName) { return ["error": why] }
         usleep(120_000)
     }
@@ -465,7 +470,9 @@ func fill(ref: String, value: String, app appName: String) -> [String: Any] {
     usleep(150_000)
 
     let landed = text(element, kAXValueAttribute as String) ?? ""
-    if landed.contains(value) || value.contains(landed), !landed.isEmpty {
+    let echoed = landed.contains(value)
+        || (value.contains(landed) && landed.count * 2 >= value.count)
+    if echoed, !landed.isEmpty {
         return ["ok": true, "how": "typed"]
     }
 

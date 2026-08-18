@@ -22,8 +22,10 @@ function age(fact: MemoryFact): string {
   const days = Math.floor((Date.now() - fact.created_at) / 86400000);
   if (days < 1) return "today";
   if (days < 14) return `${days} day${days === 1 ? "" : "s"} ago`;
-  if (days < 60) return `${Math.round(days / 7)} weeks ago`;
-  return `${Math.round(days / 30)} months ago`;
+  const weeks = Math.round(days / 7);
+  if (days < 60) return `${weeks} week${weeks === 1 ? "" : "s"} ago`;
+  const months = Math.round(days / 30);
+  return `${months} month${months === 1 ? "" : "s"} ago`;
 }
 
 export function MemoryView({
@@ -102,7 +104,7 @@ export function MemoryView({
             placeholder="Something to remember…"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && remember()}
+            onKeyDown={(e) => e.key === "Enter" && !e.nativeEvent.isComposing && remember()}
             disabled={memory.incognito}
           />
           <button className="inbox-approve" onClick={remember} disabled={memory.incognito}>
@@ -235,10 +237,10 @@ export function MemoryView({
                   setArmWipeAll(false);
                 }}
               >
-                Yes — erase every memory, unrecoverably
+                Really erase every memory, unrecoverably
               </button>
               <button className="inbox-clear" onClick={() => setArmWipeAll(false)}>
-                Cancel
+                Keep
               </button>
             </>
           )}

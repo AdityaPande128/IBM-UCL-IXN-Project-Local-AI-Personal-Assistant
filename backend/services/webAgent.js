@@ -1739,7 +1739,12 @@ async function browse(goal, options = {}) {
         };
     }
 
-    const grantedOnly = surface.grantedOnly();
+    // The containment mode is a per-run decision; the surface's own flag
+    // still holds the previous run's mode until start() runs.
+    const mode = await modeFor(surface, options.url, options);
+    const grantedOnly = surface === domSurface
+        ? mode === browser.MODE.ATTACHED
+        : surface.grantedOnly();
     options = { ...options, grantedOnly };
 
     if (options.url) {
@@ -1767,7 +1772,6 @@ async function browse(goal, options = {}) {
     }
 
     try {
-        const mode = await modeFor(surface, options.url, options);
         try {
             await surface.start({ mode });
         } catch (err) {
@@ -2410,6 +2414,11 @@ async function browse(goal, options = {}) {
         }
 
         for (let step = 0; step < budget && !complete() && status !== 'success'; step++) {
+            if (options.signal && options.signal.aborted) {
+                status = 'aborted';
+                failure = 'stopped by the user';
+                break;
+            }
             const stepStartedAt = Date.now();
 
             await carryOut();

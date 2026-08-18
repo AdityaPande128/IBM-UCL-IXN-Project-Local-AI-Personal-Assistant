@@ -8,6 +8,9 @@ import { fileURLToPath } from "node:url";
 const jarvisConfig = JSON.parse(
   readFileSync(fileURLToPath(new URL("../config.json", import.meta.url)), "utf8")
 );
+// The profile arrives over the socket; freezing it into the bundle would
+// bake one user's name and photo into the build.
+delete jarvisConfig.profile;
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -18,7 +21,14 @@ function devSocketToken(): Plugin {
     name: "jarvis-dev-socket-token",
     apply: "serve",
     configureServer(server) {
-      server.middlewares.use("/__socket-token", (_req, res) => {
+      server.middlewares.use("/__socket-token", (req, res) => {
+        // Same-origin fetches carry no Origin header; anything that does is
+        // another local page trying to borrow the daemon's credential.
+        if (req.headers.origin) {
+          res.statusCode = 403;
+          res.end("");
+          return;
+        }
         try {
           const token = readFileSync(
             join(homedir(), ".jarvis", "socket-token"), "utf8").trim();
@@ -44,6 +54,7 @@ export default defineConfig(async () => ({
   server: {
     port: 1420,
     strictPort: true,
+    cors: false,
     host: host || false,
     hmr: host
       ? {

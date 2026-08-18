@@ -163,7 +163,14 @@ function buildProfile(skill, tempDir, parameters = {}) {
         lines.push(`(allow file-write* (subpath ${sbplString(target)}))`);
     }
     lines.push('(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))');
-    lines.push('(allow file-write* (subpath "/private/var/folders"))');
+    // TMPDIR is a symlink into /private/var/folders; the grant follows the
+    // job's own directory there, not the whole per-user temp universe.
+    let realTemp = tempDir;
+    try { realTemp = fs.realpathSync(tempDir); } catch { }
+    if (realTemp !== tempDir) {
+        lines.push(`(allow file-write* (subpath ${sbplString(realTemp)}))`);
+        lines.push(`(allow file-read* (subpath ${sbplString(realTemp)}))`);
+    }
 
     lines.push('', '; Readable despite the home-directory denial.');
     lines.push(`(allow file-read* (subpath ${sbplString(skill.directory)}))`);

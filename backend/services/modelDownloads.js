@@ -99,8 +99,9 @@ function createManager(options = {}) {
             if (isDownloaded(model)) {
                 job.status = 'done';
                 if (job.total_bytes) job.received_bytes = job.total_bytes;
-            } else if (job.status === 'done') {
-                // Marked done once, but the weights are gone from disk.
+            } else if (job.status === 'done' || job.status === 'stopped') {
+                // Done-but-gone re-downloads; a pause yields to the explicit
+                // re-selection that asked for the model again.
                 job.status = 'queued';
             }
             emit(job);

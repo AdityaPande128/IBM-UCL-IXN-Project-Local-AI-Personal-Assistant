@@ -84,11 +84,26 @@ function open(target = DEFAULT_PATH) {
     db.exec(SCHEMA);
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 
+    prune();
+
     return db;
 }
 
 function handle() {
     return db || open();
+}
+
+// The audit table is append-only by design — this module offers no way to
+// rewrite what happened. Settled approvals, though, age out: they are
+// working state, not testimony.
+const RETAIN_DAYS = 90;
+
+function prune(now = Date.now()) {
+    const cutoff = new Date(now - RETAIN_DAYS * 24 * 3600 * 1000).toISOString();
+    const approvals = handle()
+        .prepare("DELETE FROM approvals WHERE status != 'pending' AND ts < ?")
+        .run(cutoff).changes;
+    return { approvals };
 }
 
 function close() {
@@ -177,15 +192,18 @@ const GRANT_TTL_MS = 10 * 60 * 1000;
 
 function takeGrant(request) {
     const destination = request.destination ?? null;
+    // The summary is what the approval card showed; a grant redeems only the
+    // exact disclosure the user read, not any action sharing its shape.
     const row = handle().prepare(`
         SELECT * FROM approvals
         WHERE status = 'granted' AND channel = ? AND action = ?
-          AND destination IS ?
-        ORDER BY id DESC LIMIT 1
+          AND destination IS ? AND summary = ?
+        ORDER BY resolved_ts DESC LIMIT 1
     `).get(
         String(request.channel || 'unknown'),
         String(request.action || 'unknown'),
-        destination
+        destination,
+        String(request.summary || request.action || 'unnamed action')
     );
     if (!row) return null;
     if (Date.now() - Date.parse(row.resolved_ts) > GRANT_TTL_MS) {
@@ -305,6 +323,7 @@ module.exports = {
     getApproval,
     resolveApproval,
     takeGrant,
+    prune,
     grantRoot,
     revokeRoot,
     grantedRoots,

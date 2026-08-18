@@ -23,6 +23,7 @@ fs.copyFileSync(path.resolve(__dirname, '../../config.json'), process.env.JARVIS
     // hardware-default tiers, not whatever engine is currently selected.
     const seeded = JSON.parse(fs.readFileSync(process.env.JARVIS_CONFIG_PATH, 'utf8'));
     delete seeded.mail;
+    delete seeded.profile;
     if (seeded.models) delete seeded.models.tiers;
     fs.writeFileSync(process.env.JARVIS_CONFIG_PATH, JSON.stringify(seeded, null, 2));
 }
@@ -687,7 +688,7 @@ test('onboarding round-trip: profile, tiers, queue and completion', async () => 
     conversationStore.append({}, 'user', 'a pre-profile stray');
     assert.ok(conversationStore.list().length >= 1);
 
-    client.send({ type: 'onboarding_complete' });
+    client.send({ type: 'onboarding_complete', fresh: true });
     const done = await client.next(m => m.type === 'onboarding_complete_result');
     assert.strictEqual(done.status, 'applied');
     assert.strictEqual(done.profile.onboarded, true);

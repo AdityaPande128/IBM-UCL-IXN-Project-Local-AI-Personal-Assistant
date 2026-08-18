@@ -89,17 +89,24 @@ export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceE
   const logRef = useRef<HTMLDivElement>(null);
 
   // Follow new output only while the reader is already at the bottom; a
-  // scroll back into history is never yanked away.
+  // scroll back into history is never yanked away. Position is sampled as
+  // the reader scrolls — measuring after the append would count the new
+  // message's own height against them.
+  const followRef = useRef(true);
   useEffect(() => {
-    const log = logRef.current;
-    if (!log) return;
-    const nearBottom =
-      log.scrollHeight - log.scrollTop - log.clientHeight < 120;
-    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (followRef.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   return (
-    <div className="chat-log" ref={logRef}>
+    <div
+      className="chat-log"
+      ref={logRef}
+      onScroll={(e) => {
+        const log = e.currentTarget;
+        followRef.current =
+          log.scrollHeight - log.scrollTop - log.clientHeight < 120;
+      }}
+    >
       <div className="chat-log-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
@@ -119,6 +126,10 @@ export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceE
                     {prompt}
                   </button>
                 ))}
+                <div className="chat-suggestions-note">
+                  These act for real — mail and calendar ones open Jarvis's
+                  browser window on your desktop.
+                </div>
               </div>
             )}
           </div>

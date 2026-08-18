@@ -52,6 +52,32 @@ function useBinding(target) {
     binding = null;
 }
 
+// The daemon exits on purpose after a settings apply; an offset held only in
+// memory would re-deliver — and re-execute — every command since the last
+// poll round-trip. Confirmed offsets live next to the binding.
+function offsetPath() {
+    return bindingPath.replace(/\.json$/, '') + '-offset';
+}
+
+function loadOffset() {
+    try {
+        return Number(fs.readFileSync(offsetPath(), 'utf8').trim()) || 0;
+    } catch {
+        return 0;
+    }
+}
+
+function persistOffset() {
+    try {
+        fs.writeFileSync(offsetPath(), String(offset) + '\n');
+    } catch { }
+}
+
+function resetOffset() {
+    offset = 0;
+    persistOffset();
+}
+
 function token() {
     if (process.env.JARVIS_TELEGRAM_TOKEN) return process.env.JARVIS_TELEGRAM_TOKEN.trim();
     try {
@@ -316,8 +342,13 @@ async function poll(alive = () => true) {
     // A stop() or token change mid-poll orphans this call: its updates
     // belong to the next loop, not to a consumer that no longer exists.
     if (!alive()) return 0;
+    // Advance and persist before executing: at-most-once for commands with
+    // side effects — a restart mid-handling drops rather than repeats.
     for (const update of updates || []) {
         offset = Math.max(offset, update.update_id + 1);
+    }
+    if ((updates || []).length) persistOffset();
+    for (const update of updates || []) {
         try {
             await handleUpdate(update);
         } catch (err) {
@@ -360,6 +391,7 @@ function start(dependencies = {}) {
 
     running = true;
     generation += 1;
+    offset = Math.max(offset, loadOffset());
     currentPairingCode();
     loop();
 
@@ -394,7 +426,7 @@ function status() {
 }
 
 module.exports = {
-    start, stop, status, poll, handleUpdate, unpair, wire,
+    start, stop, status, poll, handleUpdate, unpair, wire, resetOffset,
     setTransport, useBinding, currentPairingCode, boundChat,
     downloadFile, sendVoiceNote,
     TOKEN_PATH

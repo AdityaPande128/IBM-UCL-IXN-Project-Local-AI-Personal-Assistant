@@ -251,8 +251,8 @@ function search(query = {}) {
     }
     if (dir) {
         const base = path.resolve(expandHome(dir));
-        where.push('(f.dir = ? OR f.dir LIKE ?)');
-        params.push(base, `${base}${path.sep}%`);
+        where.push("(f.dir = ? OR f.dir LIKE ? ESCAPE '\\')");
+        params.push(base, `${base.replace(/[\\%_]/g, '\\$&')}${path.sep}%`);
     }
     if (modifiedAfter) { where.push('f.mtime >= ?'); params.push(modifiedAfter); }
     if (modifiedBefore) { where.push('f.mtime <= ?'); params.push(modifiedBefore); }

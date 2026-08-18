@@ -9,11 +9,9 @@ export function ActivityPanel({ activities }: ActivityPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const followRef = useRef(true);
   useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const nearBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
-    if (nearBottom) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (followRef.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activities]);
 
   return (
@@ -22,7 +20,15 @@ export function ActivityPanel({ activities }: ActivityPanelProps) {
         <span className="activity-panel-title">Activity</span>
         <span className="activity-panel-count">{activities.length}</span>
       </div>
-      <div className="activity-panel-entries" ref={listRef}>
+      <div
+        className="activity-panel-entries"
+        ref={listRef}
+        onScroll={(e) => {
+          const list = e.currentTarget;
+          followRef.current =
+            list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+        }}
+      >
         {activities.length === 0 && (
           <div className="activity-empty">Nothing happening yet</div>
         )}

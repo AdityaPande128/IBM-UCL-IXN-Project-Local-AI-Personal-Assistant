@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 
 interface UseAudioRecorderReturn {
   recording: boolean;
-  startRecording: () => Promise<void>;
+  startRecording: () => Promise<boolean>;
   stopRecording: () => ArrayBuffer | null;
 }
 
@@ -37,9 +37,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       processorRef.current = processor;
       audioCtxRef.current = audioCtx;
       setRecording(true);
+      return true;
     } catch (err: any) {
       console.error("Microphone access error:", err);
-      alert(`Microphone access failed: ${err.message || String(err)}. Please ensure microphone permissions are granted in System Settings.`);
+      return false;
     }
   }, []);
 

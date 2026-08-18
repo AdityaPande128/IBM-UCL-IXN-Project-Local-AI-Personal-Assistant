@@ -125,11 +125,13 @@ export function PermissionsView({
         </div>
       </section>
 
-      {Object.keys(permissions.roots).length > 0 && (
-        <section className="abilities-section">
-          <h2>Granted folders</h2>
-          <div className="build-list">
-            {Object.entries(permissions.roots).map(([collection, roots]) =>
+      <section className="abilities-section">
+        <h2>Granted folders</h2>
+        <div className="build-list">
+          {Object.keys(permissions.roots).length === 0 ? (
+            <div className="abilities-empty">No folders have been granted.</div>
+          ) : (
+            Object.entries(permissions.roots).map(([collection, roots]) =>
               roots.map((root) => (
                 <div key={`${collection}:${root.path}`} className="build-row">
                   <span className="ability-name">{root.path}</span>
@@ -138,13 +140,13 @@ export function PermissionsView({
                   </span>
                 </div>
               ))
-            )}
-          </div>
-        </section>
-      )}
+            )
+          )}
+        </div>
+      </section>
 
       <section className="abilities-section">
-        <h2>Mail and phone</h2>
+        <h2>Mail, phone and memory</h2>
         <div className="build-list">
           <div className="build-row">
             <span className="ability-name">mail</span>
@@ -169,7 +171,7 @@ export function PermissionsView({
           <div className="build-row">
             <span className="ability-name">memory</span>
             <span className="build-meta">
-              {permissions.memory.incognito ? "incognito — recording nothing" : "recording"}
+              {permissions.memory.incognito ? "private mode — recording nothing" : "recording"}
               {permissions.memory.secure_delete ? " · secure delete on" : ""}
             </span>
           </div>
@@ -189,6 +191,9 @@ export function PermissionsView({
           <button className="diag-button" disabled={working} onClick={onCreateCheckpoint}>
             Take a checkpoint now
           </button>
+          {checkpointResult?.status === "created" && (
+            <span className="diag-path">Checkpoint taken.</span>
+          )}
           {checkpointResult?.status === "staged" && (
             <span className="diag-path">
               Restore staged — the core is restarting onto it…

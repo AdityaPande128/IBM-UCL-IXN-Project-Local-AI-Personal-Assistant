@@ -43,7 +43,8 @@ function guard(flow) {
         const grant = store.takeGrant({
             channel: flow.channel,
             action: flow.action,
-            destination: flow.destination
+            destination: flow.destination,
+            summary: flow.summary || `${flow.action} to ${flow.destination || 'an external destination'}`
         });
         if (grant) {
             const auditId = store.recordDecision({

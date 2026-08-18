@@ -12,6 +12,7 @@
   --blue: #60a5fa;
   --amber: #f5b95a;
   --red: #f87171;
+  --on-red: #2b0707;
   --green: #4ade80;
   --grad: linear-gradient(135deg, #4fd1c5, #60a5fa);
   --accent-tint: 79, 209, 197;
@@ -34,6 +35,7 @@
   --blue: #2563eb;
   --amber: #b45309;
   --red: #dc2626;
+  --on-red: #ffffff;
   --green: #15803d;
   --grad: linear-gradient(135deg, #0f766e, #1d4ed8);
   --accent-tint: 15, 118, 110;
@@ -877,7 +879,7 @@ body {
 
 .ptt-button--active {
   background: var(--red);
-  color: #2b0707;
+  color: var(--on-red);
   box-shadow: 0 0 26px rgba(248, 113, 113, 0.45);
   transform: scale(1.05);
 }
@@ -1368,6 +1370,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 44px 32px 24px;
+  overflow-y: auto;
 }
 
 .ob-progress-wrap {
@@ -1412,10 +1415,13 @@ body {
   width: min(680px, 100%);
   flex: 0 1 auto;
   min-height: 0;
-  max-height: calc(100vh - 150px);
-  overflow-y: auto;
+  margin: auto 0;
   padding: 26px 4px 32px;
   animation: rise 0.3s ease-out;
+}
+
+.ob-input:focus-visible {
+  outline: none;
 }
 
 .ob-card--wide {
@@ -1510,6 +1516,7 @@ body {
 }
 
 .ob-choice-row {
+  flex-wrap: wrap;
   display: flex;
   gap: 14px;
   align-items: stretch;
@@ -2219,7 +2226,7 @@ body {
 
 .sidebar-chat-confirm-yes {
   background: var(--red);
-  color: #2b0707;
+  color: var(--on-red);
 }
 
 .sidebar-chat-confirm-no {
@@ -2602,6 +2609,28 @@ body {
   background: transparent;
 }
 
+.proposal-float {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 96px;
+  z-index: 30;
+  width: min(640px, calc(100% - 48px));
+}
+
+.chat-suggestions-note {
+  width: 100%;
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.ability-chip--mid {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-2);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
@@ -2639,7 +2668,7 @@ body {
 
 .arm-confirm-yes {
   background: var(--red);
-  color: #2b0707;
+  color: var(--on-red);
   border: none;
   border-radius: 7px;
   font-size: 12px;
@@ -2718,7 +2747,9 @@ body {
 .toast-dismiss:hover { color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
+  .ob-hello { animation: none !important; opacity: 1 !important; }
   .ob-hello-text { animation: none !important; opacity: 1 !important; }
+  .ob-hello-sub { animation: none !important; opacity: 1 !important; }
 }
 
 .ob-skip {

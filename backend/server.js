@@ -255,6 +255,7 @@ wss.on('connection', (ws) => {
                     return;
                 }
                 channelAdapter.stop();
+                channelAdapter.resetOffset();
                 fs.writeFileSync(channelAdapter.TOKEN_PATH, secret + '\n', { mode: 0o600 });
                 channelAdapter.start(channelDeps());
                 ws.send(JSON.stringify({ type: 'channel_status_result',
@@ -332,10 +333,10 @@ wss.on('connection', (ws) => {
             // and borrows only the execution surface. Same token, same queue,
             // same web policy — only the planning brain is the caller's.
             if (parsed.type === 'browse' && parsed.goal) {
-                const job = intentQueue.submit(() =>
+                const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
                         webAgent.browse(String(parsed.goal),
-                            parsed.url ? { url: String(parsed.url) } : {})));
+                            { ...(parsed.url ? { url: String(parsed.url) } : {}), signal })));
                 ws.send(JSON.stringify({ type: 'browse_accepted', id: job.id }));
 
                 const result = await job.result;
@@ -715,8 +716,10 @@ wss.on('connection', (ws) => {
 
             if (parsed.type === 'onboarding_complete') {
                 // A first completion starts the profile's story clean: chats
-                // recorded before anyone was onboarded belong to nobody.
-                const firstRun = !profile.current().onboarded;
+                // recorded before anyone was onboarded belong to nobody. The
+                // wizard says so explicitly — a lost onboarded flag alone
+                // must never cost a real profile its history.
+                const firstRun = !profile.current().onboarded && parsed.fresh === true;
                 const applied = profile.apply({ onboarded: true });
                 if (firstRun && applied.status === 'applied') {
                     conversationStore.clear();

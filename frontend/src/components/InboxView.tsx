@@ -74,18 +74,39 @@ export function InboxView({ brief, onRefresh, onDecision, onResolveApproval, onM
               {item.goal && <div className="inbox-card-detail">{item.goal}</div>}
               <div className="inbox-card-actions">
                 <button
-                  className="inbox-approve"
+                  className="approval-button approval-button--approve"
                   onClick={() => onDecision(item.id, "yes")}
                 >
                   Approve
                 </button>
                 <button
-                  className="inbox-decline"
+                  className="approval-button approval-button--decline"
                   onClick={() => onDecision(item.id, "no")}
                 >
                   Decline
                 </button>
               </div>
+            </article>
+          ))}
+        </section>
+      )}
+
+      {brief.drafts.length > 0 && (
+        <section className="inbox-section">
+          <div className="inbox-section-head">
+            <h2>Suggested while you were away</h2>
+          </div>
+          <div className="inbox-section-note">
+            Nothing here has been sent or booked — ask for one in chat to act on it.
+          </div>
+          {brief.drafts.map((draft) => (
+            <article key={draft.id} className="inbox-card">
+              <div className="inbox-card-title">{draft.summary ?? draft.kind}</div>
+              {(draft.who || draft.subject || draft.goal) && (
+                <div className="inbox-card-detail">
+                  {[draft.who, draft.subject, draft.goal].filter(Boolean).join(" · ")}
+                </div>
+              )}
             </article>
           ))}
         </section>
@@ -111,13 +132,13 @@ export function InboxView({ brief, onRefresh, onDecision, onResolveApproval, onM
               )}
               <div className="inbox-card-actions">
                 <button
-                  className="inbox-approve"
+                  className="approval-button approval-button--approve"
                   onClick={() => onResolveApproval(approval.id, "yes")}
                 >
                   Approve
                 </button>
                 <button
-                  className="inbox-decline"
+                  className="approval-button approval-button--decline"
                   onClick={() => onResolveApproval(approval.id, "no")}
                 >
                   Decline

@@ -245,8 +245,21 @@ async function runOne(watcher, now = Date.now()) {
 
 // A watcher drives the same browser page interactive work uses, so its
 // runs queue behind whatever the user has in flight instead of navigating
-// underneath it.
+// underneath it. One tick at a time: the queued jobs from a slow tick must
+// finish before the interval fires a second round for the same watchers.
+let ticking = false;
+
 async function tick(now = Date.now()) {
+    if (ticking) return [];
+    ticking = true;
+    try {
+        return await runDue(now);
+    } finally {
+        ticking = false;
+    }
+}
+
+async function runDue(now) {
     const ran = [];
     for (const watcher of due(now)) {
         const job = intentQueue.submit(() => runOne(watcher, now));

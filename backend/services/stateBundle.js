@@ -150,6 +150,10 @@ function importBundle(bundlePath, { checkpointRoot } = {}) {
 
         const files = {};
         for (const rel of Object.keys(manifest.files)) {
+            // A pin vouches for content this machine inspected; one carried
+            // inside the bundle would vouch for whatever the bundle says.
+            // Imported skills arrive unpinned and re-pin on first run.
+            if (rel === path.join('data', 'skill-pins.json')) continue;
             const target = path.join(dir, rel);
             fs.mkdirSync(path.dirname(target), { recursive: true });
             fs.copyFileSync(path.join(staging, rel), target);

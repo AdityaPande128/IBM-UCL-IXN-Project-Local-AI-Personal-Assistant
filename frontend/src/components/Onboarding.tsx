@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   DownloadJob,
   DownloadsData,
@@ -28,7 +28,7 @@ const STEPS: Step[] = [
 const STEP_NAMES: Record<Step, string> = {
   theme: "Appearance", name: "Your name", mode: "Executor", risk: "Ground rules",
   permissions: "Permissions", voice: "Voice", phone: "Phone", models: "Models",
-  download: "Models", hello: "",
+  download: "Download", hello: "",
 };
 
 interface Feature {
@@ -119,8 +119,8 @@ const TERMS = [
   "Everything runs on this Mac. Your words, files and models never leave it, "
     + "and there is no account and no cloud.",
   "Actions that change things — sending, booking, deleting, spending — always "
-    + "stop and ask you first. Skills Jarvis writes for itself run sandboxed and "
-    + "are checked that it hasn't been altered before every run.",
+    + "stop and ask you first. Skills Jarvis writes for itself run sandboxed, and "
+    + "each is checked against its pinned content before every run.",
   "You choose what Jarvis can reach. Only grant access to files and folders "
     + "that are backed up; keep anything irreplaceable out of its reach.",
   "Jarvis is provided as-is, without warranty of any kind. The developer "
@@ -190,7 +190,7 @@ interface OnboardingProps {
   onRequestChannel: () => void;
   onSetChannelToken: (token: string) => void;
   onApply: (payload: OnboardingApplyPayload) => void;
-  onComplete: () => void;
+  onComplete: (fresh?: boolean) => void;
   onDownloadAction: (action: "start" | "stop" | "status", model?: string) => void;
   onFinished: () => void;
 }
@@ -215,13 +215,20 @@ export function Onboarding({
   const resumed = Boolean(profile.name) && (data.downloads.queue.length > 0);
   const [step, setStep] = useState<Step>(resumed ? "download" : "theme");
 
-  const [theme, setTheme] = useState<Theme>(storedTheme());
+  // A resume carries the profile's recorded choices, not the defaults the
+  // first run started from.
+  const [theme, setTheme] = useState<Theme>(resumed ? profile.theme : storedTheme());
   const [name, setName] = useState(profile.name);
   const [mode, setMode] = useState<"jarvis" | "openclaw">(profile.mode);
   const [agreed, setAgreed] = useState(false);
-  const [voiceOn, setVoiceOn] = useState(true);
-  const [tts, setTts] = useState(true);
-  const [improvement, setImprovement] = useState(true);
+  const [voiceOn, setVoiceOn] = useState(resumed ? profile.voice.enabled : true);
+  const [tts, setTts] = useState(resumed ? profile.voice.tts : true);
+  const [improvement, setImprovement] = useState(resumed ? profile.improvement : true);
+
+  useEffect(() => {
+    if (resumed) applyTheme(profile.theme);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const recommendedEngine = catalog.engines.find((e) => e.recommended)
     ?? catalog.engines[0];
@@ -292,7 +299,7 @@ export function Onboarding({
       if (job.kind !== "engine") return `${entry.label} — the improver`;
       return entry.model === engine
           ? `${entry.label} — the assistant`
-          : `${entry.label} — the safety guard, always installed`;
+          : `${entry.label} — the safety floor, always kept on disk`;
     }
     if (catalog.voice.stt?.model === job.model) return `${catalog.voice.stt.label} — hearing`;
     if (catalog.voice.tts?.model === job.model) return `${catalog.voice.tts.label} — speaking`;
@@ -305,6 +312,17 @@ export function Onboarding({
     const timer = setTimeout(onFinished, still ? 900 : 3400);
     return () => clearTimeout(timer);
   }, [step, onFinished]);
+
+  // A resumed wizard with every model on disk has nothing left to ask; it
+  // finishes itself instead of trapping the user on the download page.
+  const autoCompleted = useRef(false);
+  useEffect(() => {
+    if (!resumed || autoCompleted.current) return;
+    if (step !== "download" || !connected || !allDone) return;
+    autoCompleted.current = true;
+    onComplete(false);
+    setStep("hello");
+  }, [resumed, step, connected, allDone, onComplete]);
 
   const [tokenDraft, setTokenDraft] = useState("");
 
@@ -346,14 +364,17 @@ export function Onboarding({
     }
   }, [step, applyResult?.status]);
 
-  const index = STEPS.indexOf(step);
+  const flow = STEPS.filter(
+    (name) => name !== "voice" || voiceOn || step === "voice"
+  );
+  const index = flow.indexOf(step);
 
   return (
     <div className="onboarding">
       {step !== "hello" && (
         <div className="ob-progress-wrap">
           <div className="ob-progress">
-            {STEPS.slice(0, -1).map((s, i) => (
+            {flow.slice(0, -1).map((s, i) => (
               <span
                 key={s}
                 className={`ob-dot ${i === index ? "ob-dot--now" : i < index ? "ob-dot--done" : ""}`}
@@ -361,7 +382,7 @@ export function Onboarding({
             ))}
           </div>
           <div className="ob-step-label">
-            Step {index + 1} of {STEPS.length - 1} · {STEP_NAMES[step]}
+            Step {index + 1} of {flow.length - 1} · {STEP_NAMES[step]}
           </div>
         </div>
       )}
@@ -373,6 +394,7 @@ export function Onboarding({
           <div className="ob-choice-row">
             <button
               className={`ob-theme-card ob-theme-card--dark ${theme === "dark" ? "ob-choice--picked" : ""}`}
+              aria-pressed={theme === "dark"}
               onClick={() => pickTheme("dark")}
             >
               <span className="ob-theme-swatch ob-theme-swatch--dark" />
@@ -380,6 +402,7 @@ export function Onboarding({
             </button>
             <button
               className={`ob-theme-card ob-theme-card--light ${theme === "light" ? "ob-choice--picked" : ""}`}
+              aria-pressed={theme === "light"}
               onClick={() => pickTheme("light")}
             >
               <span className="ob-theme-swatch ob-theme-swatch--light" />
@@ -396,7 +419,11 @@ export function Onboarding({
       {step === "name" && (
         <div className="ob-card">
           <h1 className="ob-title">What should Jarvis call you?</h1>
-          <p className="ob-lead">This creates your profile on this Mac. Nothing is sent anywhere.</p>
+          <p className="ob-lead">
+            {resumed
+              ? "Your profile is already on this Mac — check the name and continue."
+              : "This creates your profile on this Mac. Nothing is sent anywhere."}
+          </p>
           <input
             className="ob-input"
             autoFocus
@@ -405,7 +432,7 @@ export function Onboarding({
             maxLength={80}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && name.trim()) setStep("mode");
+              if (e.key === "Enter" && !e.nativeEvent.isComposing && name.trim()) setStep("mode");
             }}
           />
           <div className="ob-nav">
@@ -425,6 +452,7 @@ export function Onboarding({
             <button
               className={`ob-mode-card ${mode === "jarvis" ? "ob-choice--picked" : ""}`}
               aria-label="Jarvis — recommended, every action checked and approved"
+              aria-pressed={mode === "jarvis"}
               onClick={() => setMode("jarvis")}
             >
               <div className="ob-mode-head">
@@ -444,6 +472,7 @@ export function Onboarding({
             <button
               className={`ob-mode-card ${mode === "openclaw" ? "ob-choice--picked" : ""}`}
               aria-label="OpenClaw with Jarvis enhancements — intermediate, fewer guardrails"
+              aria-pressed={mode === "openclaw"}
               onClick={() => setMode("openclaw")}
             >
               <div className="ob-mode-head">
@@ -551,7 +580,7 @@ export function Onboarding({
           </div>
           <div className="ob-nav">
             <button className="ob-back" onClick={() => setStep("risk")}>Back</button>
-            <button className="ob-next" onClick={() => setStep(voiceOn ? "voice" : "models")}>
+            <button className="ob-next" onClick={() => setStep(voiceOn ? "voice" : "phone")}>
               Continue
             </button>
           </div>
@@ -623,7 +652,7 @@ export function Onboarding({
               value={tokenDraft}
               onChange={(e) => setTokenDraft(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && tokenDraft.trim()) {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing && tokenDraft.trim()) {
                   onSetChannelToken(tokenDraft.trim());
                   setTokenDraft("");
                 }
@@ -684,6 +713,8 @@ export function Onboarding({
           <div className="ob-choice-row">
             <button
               className={`ob-mode-card ${!improvement ? "ob-choice--picked" : ""}`}
+              aria-label="Just an assistant — one model, no self-improvement"
+              aria-pressed={!improvement}
               onClick={() => setImprovement(false)}
             >
               <div className="ob-mode-head">
@@ -696,6 +727,8 @@ export function Onboarding({
             </button>
             <button
               className={`ob-mode-card ${improvement ? "ob-choice--picked" : ""}`}
+              aria-label="An assistant that improves — a second model writes new skills"
+              aria-pressed={improvement}
               onClick={() => setImprovement(true)}
             >
               <div className="ob-mode-head">
@@ -713,6 +746,7 @@ export function Onboarding({
             <select
               className="settings-select ob-select"
               value={engine}
+              title={engineEntry ? `${engineEntry.label} — ${engineEntry.ram_gb.toFixed(1)} GB memory · ${engineEntry.disk_gb.toFixed(1)} GB disk` : undefined}
               onChange={(e) => setEngine(e.target.value)}
             >
               {catalog.engines.map((entry) => (
@@ -730,6 +764,7 @@ export function Onboarding({
               <select
                 className="settings-select ob-select"
                 value={smith}
+                title={smithEntry ? `${smithEntry.label} — ${smithEntry.ram_gb.toFixed(1)} GB memory · ${smithEntry.disk_gb.toFixed(1)} GB disk` : undefined}
                 onChange={(e) => setSmith(e.target.value)}
               >
                 {catalog.smiths.map((entry) => (
@@ -786,6 +821,9 @@ export function Onboarding({
                   ? "The base model is ready — you can step in now while the rest finishes in the background."
                   : "The base model comes first; everything else follows."}
           </p>
+          {resumed && (
+            <p className="ob-hint">Picking up where setup left off.</p>
+          )}
           {applyResult?.status === "invalid" && (
             <div className="ob-verdict ob-verdict--bad">{applyResult.error}</div>
           )}
@@ -811,7 +849,7 @@ export function Onboarding({
               className="ob-next"
               disabled={!connected || !baseReady}
               onClick={() => {
-                onComplete();
+                onComplete(!resumed);
                 setStep("hello");
               }}
             >
