@@ -24,6 +24,12 @@ const STEPS: Step[] = [
   "theme", "name", "mode", "risk", "permissions", "voice", "phone", "models", "download", "hello",
 ];
 
+const STEP_NAMES: Record<Step, string> = {
+  theme: "Appearance", name: "Your name", mode: "Executor", risk: "Ground rules",
+  permissions: "Permissions", voice: "Voice", phone: "Phone", models: "Models",
+  download: "Models", hello: "",
+};
+
 interface Feature {
   id: string;
   title: string;
@@ -113,7 +119,7 @@ const TERMS = [
     + "and there is no account and no cloud.",
   "Actions that change things — sending, booking, deleting, spending — always "
     + "stop and ask you first. Skills Jarvis writes for itself run sandboxed and "
-    + "are checked against a fingerprint before every run.",
+    + "are checked that it hasn't been altered before every run.",
   "You choose what Jarvis can reach. Only grant access to files and folders "
     + "that are backed up; keep anything irreplaceable out of its reach.",
   "Jarvis is provided as-is, without warranty of any kind. The developer "
@@ -282,7 +288,10 @@ export function Onboarding({
     const entry = catalog.engines.find((e) => e.model === job.model)
       ?? catalog.smiths.find((e) => e.model === job.model);
     if (entry) {
-      return `${entry.label}${job.kind === "engine" ? " — the assistant" : " — the improver"}`;
+      if (job.kind !== "engine") return `${entry.label} — the improver`;
+      return entry.model === engine
+          ? `${entry.label} — the assistant`
+          : `${entry.label} — the safety guard, always installed`;
     }
     if (catalog.voice.stt?.model === job.model) return `${catalog.voice.stt.label} — hearing`;
     if (catalog.voice.tts?.model === job.model) return `${catalog.voice.tts.label} — speaking`;
@@ -341,13 +350,18 @@ export function Onboarding({
   return (
     <div className="onboarding">
       {step !== "hello" && (
-        <div className="ob-progress">
-          {STEPS.slice(0, -1).map((s, i) => (
-            <span
-              key={s}
-              className={`ob-dot ${i === index ? "ob-dot--now" : i < index ? "ob-dot--done" : ""}`}
-            />
-          ))}
+        <div className="ob-progress-wrap">
+          <div className="ob-progress">
+            {STEPS.slice(0, -1).map((s, i) => (
+              <span
+                key={s}
+                className={`ob-dot ${i === index ? "ob-dot--now" : i < index ? "ob-dot--done" : ""}`}
+              />
+            ))}
+          </div>
+          <div className="ob-step-label">
+            Step {index + 1} of {STEPS.length - 1} · {STEP_NAMES[step]}
+          </div>
         </div>
       )}
 
@@ -404,11 +418,12 @@ export function Onboarding({
 
       {step === "mode" && (
         <div className="ob-card ob-card--wide">
-          <h1 className="ob-title">How do you want to run it?</h1>
+          <h1 className="ob-title">How should your assistant run?</h1>
           <p className="ob-lead">Both live on this Mac and use the same local models. You can switch later from settings.</p>
           <div className="ob-choice-row">
             <button
               className={`ob-mode-card ${mode === "jarvis" ? "ob-choice--picked" : ""}`}
+              aria-label="Jarvis — recommended, every action checked and approved"
               onClick={() => setMode("jarvis")}
             >
               <div className="ob-mode-head">
@@ -427,6 +442,7 @@ export function Onboarding({
             </button>
             <button
               className={`ob-mode-card ${mode === "openclaw" ? "ob-choice--picked" : ""}`}
+              aria-label="OpenClaw with Jarvis enhancements — intermediate, fewer guardrails"
               onClick={() => setMode("openclaw")}
             >
               <div className="ob-mode-head">
@@ -435,7 +451,7 @@ export function Onboarding({
               </div>
               <ul className="ob-pros">
                 <li>A mature general agent that attempts almost anything</li>
-                <li>Borrows Jarvis's safer browser lane and phone channel</li>
+                <li>Uses Jarvis's checked web browsing and its phone channel</li>
                 <li>Large ecosystem of community tooling</li>
               </ul>
               <ul className="ob-cons">
@@ -463,10 +479,11 @@ export function Onboarding({
               <p key={i}>{t}</p>
             ))}
           </div>
-          <label className="ob-check">
+          <label className="ob-check ob-check--consent">
             <input
               type="checkbox"
               checked={agreed}
+              aria-label="I understand the risks and accept these terms"
               onChange={(e) => setAgreed(e.target.checked)}
             />
             I understand the risks and accept these terms.
@@ -484,9 +501,9 @@ export function Onboarding({
         <div className="ob-card ob-card--wide">
           <h1 className="ob-title">What Jarvis will ask macOS for</h1>
           <p className="ob-lead">
-            Nothing is switched on here — this is the map of what each feature
-            needs and exactly where macOS grants it. The first real use will
-            also prompt you.
+            macOS grants these later, at the paths below, and the first real
+            use also prompts you. The one choice made now is voice — everything
+            else on this page is just the map.
           </p>
           <div className="ob-features">
             {FEATURES.map((feature) => {
@@ -736,7 +753,14 @@ export function Onboarding({
               disabled={!verdict.ok || !engine || applyResult?.status === "applying"}
               onClick={submit}
             >
-              {applyResult?.status === "applying" ? "Setting up…" : "Download and set up"}
+              {applyResult?.status === "applying"
+                ? "Setting up…"
+                : (engineEntry?.downloaded ?? false)
+                    && (!improvement || (smithEntry?.downloaded ?? false))
+                    && (!voiceOn || ((catalog.voice.stt?.downloaded ?? true)
+                        && (!tts || (catalog.voice.tts?.downloaded ?? true))))
+                  ? "Set up"
+                  : "Download and set up"}
             </button>
           </div>
         </div>
@@ -744,7 +768,7 @@ export function Onboarding({
 
       {step === "download" && (
         <div className="ob-card ob-card--wide">
-          <h1 className="ob-title">Downloading your models</h1>
+          <h1 className="ob-title">{allDone ? "Your models are ready" : "Downloading your models"}</h1>
           <p className="ob-lead">
             {!connected
               ? "The assistant's core is restarting with your choices — one moment…"

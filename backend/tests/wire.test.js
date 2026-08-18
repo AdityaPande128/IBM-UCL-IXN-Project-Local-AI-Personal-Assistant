@@ -678,10 +678,18 @@ test('onboarding round-trip: profile, tiers, queue and completion', async () => 
     const status = await client.next(m => m.type === 'download_status');
     assert.ok(Array.isArray(status.queue) && status.queue.length >= 1);
 
+    // A chat recorded before anyone finished onboarding is nobody's history:
+    // the first completion starts the profile clean.
+    const conversationStore = require('../services/conversationStore');
+    conversationStore.append({}, 'user', 'a pre-profile stray');
+    assert.ok(conversationStore.list().length >= 1);
+
     client.send({ type: 'onboarding_complete' });
     const done = await client.next(m => m.type === 'onboarding_complete_result');
     assert.strictEqual(done.status, 'applied');
     assert.strictEqual(done.profile.onboarded, true);
+    assert.strictEqual(conversationStore.list().length, 0,
+        'the first completion cleared pre-profile chats');
     client.ws.close();
 });
 

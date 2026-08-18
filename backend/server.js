@@ -704,7 +704,15 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'onboarding_complete') {
+                // A first completion starts the profile's story clean: chats
+                // recorded before anyone was onboarded belong to nobody.
+                const firstRun = !profile.current().onboarded;
                 const applied = profile.apply({ onboarded: true });
+                if (firstRun && applied.status === 'applied') {
+                    conversationStore.clear();
+                    ws.conversationId = null;
+                    ws.send(JSON.stringify({ type: 'conversations_result', conversations: [] }));
+                }
                 activityBus.publish('daemon', 'onboarded', {});
                 ws.send(JSON.stringify({ type: 'onboarding_complete_result', ...applied }));
                 return;

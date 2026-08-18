@@ -117,6 +117,12 @@ function exists(conversationId) {
         .get(Number(conversationId)));
 }
 
+function clear() {
+    const store = ready();
+    store.prepare('DELETE FROM messages').run();
+    store.prepare('DELETE FROM conversations').run();
+}
+
 function remove(conversationId) {
     const store = ready();
     store.prepare('DELETE FROM messages WHERE conversation_id = ?').run(Number(conversationId));
@@ -124,4 +130,4 @@ function remove(conversationId) {
     return gone.changes > 0;
 }
 
-module.exports = { open, append, list, messages, exists, remove, titleFrom, DEFAULT_PATH };
+module.exports = { open, append, list, messages, exists, remove, clear, titleFrom, DEFAULT_PATH };

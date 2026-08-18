@@ -1359,13 +1359,29 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 56px 32px 0;
+  justify-content: center;
+  padding: 44px 32px 24px;
+}
+
+.ob-progress-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 18px;
 }
 
 .ob-progress {
   display: flex;
   gap: 8px;
-  margin-bottom: 22px;
+}
+
+.ob-step-label {
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-3);
+  text-transform: uppercase;
 }
 
 .ob-dot {
@@ -1387,10 +1403,11 @@ body {
 
 .ob-card {
   width: min(680px, 100%);
-  flex: 1;
+  flex: 0 1 auto;
   min-height: 0;
+  max-height: calc(100vh - 150px);
   overflow-y: auto;
-  padding: 26px 4px 48px;
+  padding: 26px 4px 32px;
   animation: rise 0.3s ease-out;
 }
 
@@ -1651,9 +1668,6 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  max-height: calc(100vh - 380px);
-  min-height: 200px;
-  overflow-y: auto;
 }
 
 .ob-feature {
@@ -2672,4 +2686,16 @@ body {
 .ob-skip:hover {
   color: var(--text);
   background: var(--surface);
+}
+
+.ob-check--consent input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+/* An enabled continue must never dress like a disabled one. */
+.ob-next:not(:disabled) {
+  opacity: 1;
+  box-shadow: 0 6px 18px rgba(var(--accent-tint), 0.25);
 }

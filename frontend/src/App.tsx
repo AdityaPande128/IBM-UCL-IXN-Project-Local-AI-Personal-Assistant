@@ -54,7 +54,6 @@ function App() {
     activeConversation,
     selectConversation,
     deleteConversation,
-    openclawConnected,
     busy,
     messages,
     activities,
@@ -366,11 +365,7 @@ function App() {
             <span
               className={`status-dot ${connected ? "status-dot--on" : "status-dot--off"}`}
               role="status"
-              title={connected
-                ? openclawConnected || profile?.mode === "openclaw"
-                  ? "Connected · OpenClaw available"
-                  : "Connected"
-                : "Reconnecting…"}
+              title={connected ? "Connected" : "Reconnecting…"}
             >
               <span className="sr-only">
                 {connected ? "Connected to the assistant" : "Reconnecting to the assistant"}
