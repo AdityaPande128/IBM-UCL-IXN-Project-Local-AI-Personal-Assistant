@@ -6,6 +6,7 @@ const skillGenerator = require('./skillGenerator');
 const answerService = require('./answerService');
 const planner = require('./planner');
 const planExecutor = require('./planExecutor');
+const skillCare = require('./skillCare');
 const traceStore = require('./traceStore');
 const routerTraces = require('./routerTraces');
 const proposals = require('./proposals');

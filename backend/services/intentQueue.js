@@ -13,7 +13,12 @@ function pump() {
     running = job;
     Promise.resolve()
         .then(() => inside.run(job, () => job.run({ signal: job.controller.signal })))
-        .catch(err => ({ status: 'error', response: err.message, action: 'error' }))
+        .catch(err => {
+            console.error(`[IntentQueue] job crashed: ${err.stack || err.message}`);
+            return { status: 'error', action: 'error',
+                response: 'Something went wrong on my side with that one. '
+                    + 'The details are in the log.' };
+        })
         .then(result => {
             const final = job.controller.signal.aborted
                 ? { status: 'aborted', response: 'Stopped.', action: 'aborted' }
@@ -34,7 +39,12 @@ function submit(run, meta = {}) {
     if (outer) {
         const result = Promise.resolve()
             .then(() => run({ signal: outer.controller.signal }))
-            .catch(err => ({ status: 'error', response: err.message, action: 'error' }));
+            .catch(err => {
+                console.error(`[IntentQueue] nested job crashed: ${err.stack || err.message}`);
+                return { status: 'error', action: 'error',
+                    response: 'Something went wrong on my side with that one. '
+                        + 'The details are in the log.' };
+            });
         return { id: crypto.randomUUID(), position: 0, result };
     }
 

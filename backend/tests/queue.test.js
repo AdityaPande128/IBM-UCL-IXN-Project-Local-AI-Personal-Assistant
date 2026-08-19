@@ -58,12 +58,14 @@ test('an aborted id that never existed reports not_found', () => {
     assert.strictEqual(intentQueue.abort('no-such-id').state, 'not_found');
 });
 
-test('a crashing job surfaces as an error and frees the queue', async () => {
+test('a crashing job speaks plainly, keeps its detail in the log, and frees the queue', async () => {
     intentQueue.reset();
     const a = intentQueue.submit(() => Promise.reject(new Error('boom')));
     const result = await a.result;
     assert.strictEqual(result.status, 'error');
-    assert.match(result.response, /boom/);
+    assert.match(result.response, /went wrong on my side/);
+    assert.ok(!/boom/.test(result.response),
+        'internals belong in the log, not the reply');
 
     const b = intentQueue.submit(() => Promise.resolve({ status: 'success' }));
     assert.strictEqual((await b.result).status, 'success');
