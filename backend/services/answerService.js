@@ -45,7 +45,11 @@ word on its own:
 ANSWERED     the context states what the question asks
 NOT_STATED   it does not, however close it comes
 
-After ANSWERED, give the answer from the second line on. After NOT_STATED,
+After ANSWERED, give the answer from the second line on — the answer to what
+was asked and nothing more. The rest of the context is scenery: do not list
+what else is there or bring up topics the question never raised. Never say
+"the retrieved content" or "the context" — name the real source instead: the
+page, the mailbox, the file. After NOT_STATED,
 write nothing else: no summary of what the context says instead, and no answer
 from memory. A question the context cannot settle is NOT_STATED even when you
 are sure you know the answer yourself.
