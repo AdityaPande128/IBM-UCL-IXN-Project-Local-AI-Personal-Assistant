@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const http = require('http');
+const os = require('os');
 const path = require('path');
 const fs = require('fs');
 const { verifySandboxInitialized } = require('./middleware/pathValidator');
@@ -24,6 +25,8 @@ const availability = require('./services/availability');
 const watchers = require('./services/watchers');
 const morningBrief = require('./services/morningBrief');
 const egress = require('./security/egress');
+const securityStore = require('./security/store');
+const filePlane = require('./services/filePlane');
 const channelAdapter = require('./services/channelAdapter');
 const memoryStore = require('./services/memoryStore');
 const memoryService = require('./services/memoryService');
@@ -152,7 +155,11 @@ function applyOnboarding(parsed) {
     return { status: 'applied', restarting: true };
 }
 
+const INBOX_DIR = process.env.JARVIS_INBOX_DIR
+    || path.join(os.homedir(), 'Jarvis_Sandbox', 'inbox');
+
 const server = http.createServer((req, res) => {
+    if (filePlane.route(req, res)) return;
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Personal Jarvis Backend Daemon Running.\n');
 });
@@ -161,6 +168,10 @@ const MAX_FRAME_BYTES = (config.limits && config.limits.max_frame_bytes) || 32 *
 const wss = new WebSocket.Server({ server, maxPayload: MAX_FRAME_BYTES });
 
 const clients = new Set();
+
+// One user, so one outstanding question: any surface's next clear spoken
+// yes or no may answer the proposal while this window is open.
+let pendingSpokenProposal = null;
 
 async function withActivity(ws, work) {
     const unsubscribe = activityBus.subscribe(event => {
@@ -183,6 +194,19 @@ function broadcast(data, excludeWs) {
         }
     }
 }
+
+// Every recorded message fans out to the other surfaces, so a phone and the
+// Mac window watch the same conversation grow. The origin socket already
+// rendered what it sent; it is the one client left out.
+conversationStore.notifyAppend(({ ws: origin, id, created, message }) => {
+    broadcast({
+        type: 'conversation_event',
+        kind: created ? 'started' : 'message',
+        conversation: { id, ...(created ? { title: created.title } : {}) },
+        message
+    }, origin);
+});
+aiPipeline.setBroadcast(broadcast);
 
 wss.on('connection', (ws) => {
     let authenticated = false;
@@ -245,6 +269,27 @@ wss.on('connection', (ws) => {
                     await withActivity(ws, () => aiPipeline.respondTo(probed.command, ws));
                 }
                 return;
+            }
+            // Push-to-talk keeps the same courtesy the wake path extends: a
+            // clear spoken yes or no inside a proposal's window answers the
+            // card; anything else is an ordinary request.
+            const pending = (ws.pendingVoiceApproval
+                    && Date.now() < ws.pendingVoiceApproval.until)
+                ? ws.pendingVoiceApproval
+                : (pendingSpokenProposal && Date.now() < pendingSpokenProposal.until
+                    ? pendingSpokenProposal : null);
+            if (pending) {
+                const heard = String(await aiPipeline.transcribeAudio(message)
+                    .catch(() => '') || '').toLowerCase();
+                const yes = /\b(yes|yeah|yep|sure|go ahead|do it|please do|build it)\b/.test(heard);
+                const no = /\b(no|nope|don't|do not|stop|leave it|cancel|skip)\b/.test(heard);
+                if (yes || no) {
+                    ws.pendingVoiceApproval = null;
+                    pendingSpokenProposal = null;
+                    await withActivity(ws, () =>
+                        aiPipeline.answerAloud(pending.id, yes && !no, ws, pending.kind));
+                    return;
+                }
             }
             await aiPipeline.handleIncomingAudio(message, ws);
             return;
@@ -330,6 +375,13 @@ wss.on('connection', (ws) => {
                 // The executor follows the profile's mode at the moment the
                 // intent arrives, so switching modes never needs a restart.
                 const mode = profile.current().mode;
+                // An attached upload becomes a real path the planner can
+                // read; the chat keeps the user's words and shows the file
+                // as an artifact chip on every surface.
+                const attached = filePlane.resolveAttachments(parsed.attachments);
+                const intentText = attached.length
+                    ? `${parsed.text}\n\n(The user attached: ${attached.map(a => a.path).join(', ')})`
+                    : parsed.text;
                 const history = ws.conversationId
                     ? conversationStore.messages(ws.conversationId).slice(-6)
                         .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -337,21 +389,44 @@ wss.on('connection', (ws) => {
                     : [];
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
-                        openclawBridge.executeIntent(parsed.text, {
+                        openclawBridge.executeIntent(intentText, {
                             interactive: true, signal, history,
                             ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
                         })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));
-                const started = conversationStore.append(ws, 'user', parsed.text);
+                const started = conversationStore.append(ws, 'user', parsed.text,
+                    attached.length ? { files: attached.map(a =>
+                        ({ id: a.id, name: a.name, path: a.path })) } : undefined);
                 if (started) ws.send(JSON.stringify({ type: 'conversation_started', ...started }));
+                // The reply belongs to the conversation the intent was born
+                // in, however the socket wanders while the work runs.
+                const convoId = ws.conversationId;
+                if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
+                    conversation: { id: convoId }, busy: true }, ws);
 
                 const result = await job.result;
-                ws.send(JSON.stringify({ type: 'intent_result', id: job.id, ...result }));
+                ws.send(JSON.stringify({ type: 'intent_result', id: job.id,
+                    conversation: convoId, ...result }));
                 conversationStore.append(ws, result.status === 'error' ? 'error' : 'assistant',
                     result.response ?? result.error ?? 'No response.', result.artifacts);
+                if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
+                    conversation: { id: convoId }, busy: false }, ws);
+                if (result && result.proposal) {
+                    broadcast({ type: 'conversation_event', kind: 'proposal',
+                        conversation: { id: convoId }, proposal: result.proposal,
+                        response: result.response || '' }, ws);
+                    pendingSpokenProposal = { id: result.proposal.id,
+                        kind: result.proposal.kind || null,
+                        until: Date.now() + 120000 };
+                }
 
                 broadcast({ type: 'state_sync', skill: result.skill || null,
                             status: result.status }, ws);
+
+                if (ws.speakReplies && result.response && voiceReady()) {
+                    try { await aiPipeline.speakText(result.response, ws); }
+                    catch { /* spoken replies are best-effort */ }
+                }
 
                 // Inference never writes memory: anything durable it spots in
                 // this exchange becomes a consent card, not a row.
@@ -387,21 +462,41 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'approval' && parsed.id) {
+                const decision = parsed.decision === 'yes' ? 'yes' : 'no';
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
-                        openclawBridge.answerProposal(parsed.id,
-                            parsed.decision === 'yes' ? 'yes' : 'no', { signal })));
+                        openclawBridge.answerProposal(parsed.id, decision, { signal })));
                 // The accepted id is what turns the thinking indicator on
                 // while the skill builds.
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id,
                     position: job.position }));
+                // The card asked every surface; the decision clears it on
+                // every surface, not just the one that was tapped.
+                broadcast({ type: 'proposal_taken', id: parsed.id, decision });
+                pendingSpokenProposal = null;
+                const convoId = ws.conversationId;
+                if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
+                    conversation: { id: convoId }, busy: true }, ws);
                 const result = await job.result;
-                ws.send(JSON.stringify({ type: 'intent_result', id: job.id, ...result }));
+                ws.send(JSON.stringify({ type: 'intent_result', id: job.id,
+                    conversation: convoId, ...result }));
                 if (result && result.response) {
                     conversationStore.append(ws,
                         result.status === 'error' ? 'error' : 'assistant',
                         result.response, result.artifacts);
                 }
+                if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
+                    conversation: { id: convoId }, busy: false }, ws);
+                if (ws.speakReplies && result && result.response && voiceReady()) {
+                    try { await aiPipeline.speakText(result.response, ws); }
+                    catch { /* spoken replies are best-effort */ }
+                }
+                return;
+            }
+
+            if (parsed.type === 'speak_replies') {
+                ws.speakReplies = !!parsed.on;
+                ws.send(JSON.stringify({ type: 'speak_replies_result', on: ws.speakReplies }));
                 return;
             }
 
@@ -927,7 +1022,21 @@ async function boot() {
 
     await openclawBridge.initialize();
 
-    server.listen(PORT, '127.0.0.1', () => {
+    // The phone's file lane: staged inside the hard sandbox root so file
+    // skills can reach what retrieval can, granted like any other folder.
+    try {
+        fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o700 });
+        securityStore.grantRoot(INBOX_DIR, 'documents');
+        filePlane.init({ token: SOCKET_TOKEN, inbox: INBOX_DIR });
+    } catch (err) {
+        console.warn(`[Files] inbox unavailable: ${err.message}`);
+    }
+
+    // Loopback unless the config opts into the LAN; the tailnet path never
+    // needs more than loopback, and the token gates either way.
+    const bindHost = (config.remote && config.remote.lan_bind === true)
+        ? '0.0.0.0' : '127.0.0.1';
+    server.listen(PORT, bindHost, () => {
         console.log(`[Jarvis] Backend daemon running on ws://localhost:${PORT}`);
         console.log(`[Jarvis] OpenClaw gateway: ${openclawBridge.isConnected() ? 'CONNECTED' : 'OFFLINE (standalone mode)'}`);
     });

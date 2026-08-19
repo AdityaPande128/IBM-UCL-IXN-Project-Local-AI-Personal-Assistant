@@ -12,6 +12,14 @@ const TIMEOUT_MS = (config.voice || {}).timeout_ms ?? 120000;
 
 const MAX_TTS_CHUNKS = 8;
 
+// Lent by the server at boot so voice decisions reach every surface; the
+// pipeline itself knows only its own socket.
+let broadcastFn = null;
+
+function setBroadcast(fn) {
+    broadcastFn = fn;
+}
+
 const MAX_SPOKEN_CHARS = 350;
 
 function speakableSummary(text) {
@@ -188,9 +196,11 @@ async function speakText(text, ws) {
 async function answerAloud(proposalId, approved, ws, kind = null) {
     record(ws, 'user', approved ? '“Yes.”' : '“No.”');
     // The card asked; the voice answered. It leaves the screen now, not
-    // after the minutes the build takes.
+    // after the minutes the build takes — and on every surface showing it.
     send(ws, { type: 'proposal_taken', id: proposalId,
         decision: approved ? 'yes' : 'no' });
+    if (broadcastFn) broadcastFn({ type: 'proposal_taken', id: proposalId,
+        decision: approved ? 'yes' : 'no' }, ws);
     if (approved && kind === 'build_skill') {
         await speakText('Building the skill now — this takes a minute or two.', ws);
     }
@@ -281,6 +291,7 @@ module.exports = {
     respondTo,
     speakText,
     answerAloud,
+    setBroadcast,
     chunkTextDynamically,
     speakableSummary,
     transcribeAudio,

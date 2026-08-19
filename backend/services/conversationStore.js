@@ -4,10 +4,32 @@
 // Incognito suspends recording entirely: reading old chats is fine, growing
 // them is not.
 
+const crypto = require('crypto');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const configReader = require('../utils/configReader');
 const memoryService = require('./memoryService');
+
+// Every surface records through append, so this is the one choke point where
+// a second surface can hear the conversation grow. The listener must never
+// be able to break the recording it is observing.
+let appendListener = null;
+
+function notifyAppend(fn) {
+    appendListener = fn;
+}
+
+// A file artifact gets a durable id the moment it is recorded; remote
+// surfaces download by id, never by path.
+function stampArtifacts(artifacts) {
+    if (!artifacts || !Array.isArray(artifacts.files)) return artifacts || null;
+    return {
+        ...artifacts,
+        files: artifacts.files.map(entry => entry && !entry.id
+            ? { ...entry, id: crypto.randomBytes(6).toString('hex') }
+            : entry)
+    };
+}
 
 const DEFAULT_PATH = process.env.JARVIS_CONVERSATIONS_DB
     || path.join(__dirname, '..', 'data', 'conversations.db');
@@ -86,14 +108,41 @@ function write(ws, role, text, artifacts) {
         created = { id: ws.conversationId, title: titleFrom(seed) };
     }
 
+    const stamped = stampArtifacts(artifacts);
     store.prepare(
         'INSERT INTO messages (conversation_id, ts, role, text, artifacts) VALUES (?, ?, ?, ?, ?)')
         .run(ws.conversationId, now, role, String(text),
-             artifacts ? JSON.stringify(artifacts) : null);
+             stamped ? JSON.stringify(stamped) : null);
     store.prepare('UPDATE conversations SET updated_at = ? WHERE id = ?')
         .run(now, ws.conversationId);
 
+    if (appendListener) {
+        try {
+            appendListener({
+                ws, id: ws.conversationId, created,
+                message: { ts: now, role, text: String(text),
+                           artifacts: stamped || undefined }
+            });
+        } catch (err) {
+            console.warn(`[Conversations] sync listener failed: ${err.message}`);
+        }
+    }
+
     return created;
+}
+
+// Resolve a minted artifact id back to the real file it named.
+function artifactPath(id) {
+    if (!/^[0-9a-f]{12,16}$/.test(String(id))) return null;
+    const rows = ready().prepare('SELECT artifacts FROM messages WHERE artifacts LIKE ?')
+        .all(`%${id}%`);
+    for (const row of rows) {
+        let parsed;
+        try { parsed = JSON.parse(row.artifacts); } catch { continue; }
+        const hit = (parsed.files || []).find(entry => entry && entry.id === id);
+        if (hit && hit.path) return { path: hit.path, name: hit.name || path.basename(hit.path) };
+    }
+    return null;
 }
 
 function list() {
@@ -220,4 +269,4 @@ const answerSource = {
 };
 
 module.exports = { open, append, list, messages, exists, remove, clear, titleFrom,
-    searchMessages, answerSource, DEFAULT_PATH };
+    searchMessages, answerSource, notifyAppend, artifactPath, DEFAULT_PATH };
