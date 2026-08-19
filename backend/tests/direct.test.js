@@ -85,6 +85,30 @@ test('a gapped or oversized stream is dropped whole, never delivered short', () 
     assert.equal(assemble(Buffer.from([9, 9])), null, 'garbage is refused');
 });
 
+test('the assembler evicts the eldest half-done stream, never growing without bound', () => {
+    const assemble = frames.assembler();
+    // Open 20 distinct streams, each a lone first frame that never completes.
+    for (let sid = 0; sid < 20; sid++) {
+        const [first] = frames.chunk(frames.TAG.WS_BINARY, { sid },
+            Buffer.alloc(3 * frames.CHUNK_BYTES));
+        assert.equal(assemble(first), null);
+    }
+    // The earliest streams were evicted, so their later frames find no home
+    // and are dropped rather than resurrecting a stale partial.
+    const [, secondOfSid0] = frames.chunk(frames.TAG.WS_BINARY, { sid: 0 },
+        Buffer.alloc(3 * frames.CHUNK_BYTES));
+    assert.equal(assemble(secondOfSid0), null,
+        'an evicted stream cannot be continued');
+    // A fresh, well-formed stream still assembles perfectly.
+    const body = Buffer.from('still working');
+    let whole = null;
+    for (const frame of frames.chunk(frames.TAG.FILE_REQ,
+        { sid: 999, op: 'put', reqId: 'r' }, body)) {
+        whole = assemble(frame) || whole;
+    }
+    assert.equal(whole.body.toString(), 'still working');
+});
+
 test('the pairing secret is minted once and reused forever after', () => {
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-pair-'));
     const where = path.join(scratch, 'pairing-secret');

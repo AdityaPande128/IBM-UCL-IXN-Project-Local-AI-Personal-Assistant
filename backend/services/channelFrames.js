@@ -45,6 +45,11 @@ function* chunk(tag, meta, body) {
     }
 }
 
+// One peer should not be able to park unbounded half-finished streams: an
+// ordered reliable channel never needs many in flight at once, so a sender
+// opening more than this is misbehaving and the oldest is evicted.
+const MAX_OPEN_STREAMS = 16;
+
 // Reassembles interleaved streams; returns a completed message or null.
 // A malformed or oversized stream is dropped whole — never delivered short.
 function assembler() {
@@ -56,6 +61,11 @@ function assembler() {
         const key = tag + ':' + header.sid;
         let stream = streams.get(key);
         if (header.seq === 0) {
+            // Insertion order is age order in a Map; evict the eldest to
+            // make room rather than letting the table grow without bound.
+            while (streams.size >= MAX_OPEN_STREAMS && !streams.has(key)) {
+                streams.delete(streams.keys().next().value);
+            }
             stream = { meta: header, parts: [], bytes: 0, next: 0 };
             streams.set(key, stream);
         }

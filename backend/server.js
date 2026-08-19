@@ -276,13 +276,16 @@ wss.on('connection', (ws) => {
             const pending = (ws.pendingVoiceApproval
                     && Date.now() < ws.pendingVoiceApproval.until)
                 ? ws.pendingVoiceApproval
-                : (pendingSpokenProposal && Date.now() < pendingSpokenProposal.until
+                : (pendingSpokenProposal && pendingSpokenProposal.owner === ws
+                    && Date.now() < pendingSpokenProposal.until
                     ? pendingSpokenProposal : null);
             if (pending) {
                 const heard = String(await aiPipeline.transcribeAudio(message)
-                    .catch(() => '') || '').toLowerCase();
-                const yes = /\b(yes|yeah|yep|sure|go ahead|do it|please do|build it)\b/.test(heard);
-                const no = /\b(no|nope|don't|do not|stop|leave it|cancel|skip)\b/.test(heard);
+                    .catch(() => '') || '').trim().toLowerCase();
+                // The utterance must BE a yes or no, not merely contain one —
+                // "sure, what's the weather" is a question, not an approval.
+                const yes = /^(yes|yeah|yep|sure|okay|ok|go ahead|do it|please do|build it)[.!]?$/.test(heard);
+                const no = /^(no|nope|don'?t|do not|stop|leave it|cancel|skip)[.!]?$/.test(heard);
                 if (yes || no) {
                     ws.pendingVoiceApproval = null;
                     pendingSpokenProposal = null;
@@ -415,8 +418,10 @@ wss.on('connection', (ws) => {
                     broadcast({ type: 'conversation_event', kind: 'proposal',
                         conversation: { id: convoId }, proposal: result.proposal,
                         response: result.response || '' }, ws);
+                    // Only the surface that raised the card may answer it by
+                    // voice; another socket's spoken "yes" is not consent here.
                     pendingSpokenProposal = { id: result.proposal.id,
-                        kind: result.proposal.kind || null,
+                        kind: result.proposal.kind || null, owner: ws,
                         until: Date.now() + 120000 };
                 }
 

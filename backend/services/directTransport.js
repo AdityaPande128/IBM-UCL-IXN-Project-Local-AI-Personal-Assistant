@@ -73,24 +73,30 @@ function handleSignal(raw) {
     const signal = opened.payload;
     if (signal.kind === 'offer' && typeof signal.sdp === 'string') {
         answerOffer(signal);
-    } else if (signal.kind === 'candidate' && state.pc && typeof signal.candidate === 'string') {
-        try { state.pc.addRemoteCandidate(signal.candidate, signal.mid || '0'); }
+    } else if (signal.kind === 'candidate' && typeof signal.candidate === 'string') {
+        // Candidates for an offer still being negotiated belong to that pc;
+        // once it is promoted, later candidates go to the live one.
+        const target = state.pending || state.pc;
+        if (!target) return;
+        try { target.addRemoteCandidate(signal.candidate, signal.mid || '0'); }
         catch (err) { log(`candidate refused: ${err.message}`); }
     }
 }
 
+function closeSession(session, pc, reason) {
+    if (session) {
+        log(`session closed (${reason})`);
+        try { session.ws.close(); } catch { /* closing */ }
+        try { session.dc.close(); } catch { /* closing */ }
+    }
+    if (pc) { try { pc.close(); } catch { /* closing */ } }
+}
+
 function teardown(reason) {
     if (!state) return;
-    if (state.session) {
-        log(`session closed (${reason})`);
-        try { state.session.ws.close(); } catch { /* closing */ }
-        try { state.session.dc.close(); } catch { /* closing */ }
-        state.session = null;
-    }
-    if (state.pc) {
-        try { state.pc.close(); } catch { /* closing */ }
-        state.pc = null;
-    }
+    closeSession(state.session, state.pc, reason);
+    state.session = null;
+    state.pc = null;
 }
 
 function answerOffer(signal) {
@@ -98,21 +104,33 @@ function answerOffer(signal) {
     try { nodeDataChannel = require('node-datachannel'); }
     catch (err) { return log(`node-datachannel unavailable: ${err.message}`); }
 
-    // One phone, one session: a fresh offer is the phone reconnecting, and
-    // the stale session must not linger holding the old channel.
-    teardown('replaced by a new offer');
     log('offer received; answering');
-
+    // The replacement is negotiated alongside the live session, not on its
+    // grave: a garbage or dead-on-arrival offer — which any secret-holder
+    // can publish — must not drop a phone that is still connected. Only when
+    // the new channel actually opens does the old session retire.
     const pc = new nodeDataChannel.PeerConnection('jarvis-mac', { iceServers: STUN });
-    state.pc = pc;
+    state.pending = pc;
     pc.onLocalDescription((sdp, type) => publish({ kind: type, sdp }));
     pc.onLocalCandidate((candidate, mid) => publish({ kind: 'candidate', candidate, mid }));
-    pc.onDataChannel(dc => bridge(dc));
+    pc.onDataChannel(dc => {
+        // The new peer is really here now: retire whatever was live, then
+        // promote this one and bridge it.
+        if (state.pc && state.pc !== pc) {
+            closeSession(state.session, state.pc, 'replaced by a live connection');
+            state.session = null;
+        }
+        state.pc = pc;
+        state.pending = null;
+        bridge(dc);
+    });
     pc.onStateChange(pcState => {
-        // A replaced connection announces its own death after the next one
-        // is already alive; only the current session may tear itself down.
-        if ((pcState === 'failed' || pcState === 'closed')
-            && state && state.pc === pc) {
+        if (pcState !== 'failed' && pcState !== 'closed') return;
+        if (state && state.pending === pc) {
+            // A negotiation that never arrived: drop it, keep the live one.
+            try { pc.close(); } catch { /* closing */ }
+            state.pending = null;
+        } else if (state && state.pc === pc) {
             teardown(`peer ${pcState}`);
         }
     });
@@ -120,7 +138,8 @@ function answerOffer(signal) {
         pc.setRemoteDescription(signal.sdp, 'offer');
     } catch (err) {
         log(`offer rejected: ${err.message}`);
-        teardown('bad offer');
+        try { pc.close(); } catch { /* closing */ }
+        if (state && state.pending === pc) state.pending = null;
     }
 }
 
@@ -132,7 +151,11 @@ function bridge(dc) {
     const ws = new WebSocket(`ws://127.0.0.1:${state.port}`);
     const assemble = frames.assembler();
     const queued = [];
-    const session = { dc, ws, sid: 1 };
+    // The channel opened because the peer had the pairing secret; that
+    // buys the tunnel, not Jarvis. The file lane stays shut until the
+    // bridged socket has proven the socket token — signalled by the
+    // daemon's own post-auth "connected" flowing back up the pipe.
+    const session = { dc, ws, sid: 1, authed: false };
     state.session = session;
 
     ws.on('open', () => {
@@ -149,7 +172,12 @@ function bridge(dc) {
         const whole = assemble(Buffer.from(message));
         if (!whole) return;
         if (whole.tag === frames.TAG.WS_BINARY) return forward(null, whole.body);
-        if (whole.tag === frames.TAG.FILE_REQ) return fileRequest(session, whole);
+        // A file op before the socket authenticated is a peer with the
+        // secret but not the token: refuse it, do not replay it.
+        if (whole.tag === frames.TAG.FILE_REQ) {
+            if (!session.authed) return log('file op refused: socket not authenticated');
+            return fileRequest(session, whole);
+        }
     });
     dc.onClosed(() => {
         if (state && state.session === session) teardown('channel closed');
@@ -157,7 +185,18 @@ function bridge(dc) {
 
     ws.on('message', (data, isBinary) => {
         try {
-            if (!isBinary) return dc.sendMessage(data.toString());
+            if (!isBinary) {
+                // The daemon sends "connected" only after a good token, so
+                // seeing it means this session cleared auth. A 4401 close
+                // (bad token) simply never flips the flag.
+                const text = data.toString();
+                if (!session.authed) {
+                    try {
+                        if (JSON.parse(text).type === 'connected') session.authed = true;
+                    } catch { /* not the frame we're watching for */ }
+                }
+                return dc.sendMessage(text);
+            }
             for (const frame of frames.chunk(frames.TAG.WS_BINARY,
                 { sid: session.sid++ }, Buffer.from(data))) {
                 dc.sendMessageBinary(frame);
@@ -223,13 +262,14 @@ function start({ secret, port, token }) {
         topic: directCrypto.topicFor(secret),
         port, token,
         seen: new Map(),
-        pc: null, session: null, stream: null, retry: null
+        pc: null, session: null, pending: null, stream: null, retry: null
     };
     subscribe();
 }
 
 function stop() {
     if (!state) return;
+    if (state.pending) { try { state.pending.close(); } catch { /* closing */ } }
     teardown('transport stopped');
     clearTimeout(state.retry);
     if (state.stream) try { state.stream.destroy(); } catch { /* closing */ }
