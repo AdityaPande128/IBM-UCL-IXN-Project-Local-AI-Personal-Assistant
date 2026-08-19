@@ -59,6 +59,7 @@ function options() {
         runs: Math.max(1, Number(value('runs', '1')) || 1),
         timeoutMs: Number(value('timeout', '600000')) || 600000,
         attended: !flag('yes'),
+        label: value('label', null),
         out: value('out', path.join(__dirname, '..', '..', 'docs', 'measurements',
             `unseen-${stamp}.jsonl`)),
         backendPort: config.ports.backend,
@@ -163,12 +164,19 @@ async function runJarvis(task, opts) {
                 .catch(() => ({ status: 'timeout', response: null }));
         }
 
+        const steps = (result.plan && result.plan.steps) || [];
+        const webSteps = steps.filter(s =>
+            /^(web\.browse|procedure\.)/.test(String(s.capability || '')));
         return {
             status: timedOut ? 'timeout' : result.status,
             answer: result.response ?? null,
             acceptedMs,
             firstActivityMs,
             totalMs: Date.now() - startedAt,
+            navigated: steps.length ? webSteps.some(s => s.status === 'success') : null,
+            navigationEvidence: webSteps.length
+                ? webSteps.map(s => `${s.capability}:${s.status}`).join(' ')
+                : (steps.length ? `plan without a web step: ${steps.map(s => s.capability).join(' ')}` : null),
             raw: result
         };
     } finally {
@@ -217,12 +225,18 @@ function runOpenClaw(task, opts) {
         child.on('close', (code, signalName) => {
             clearTimeout(timer);
             const timedOut = signalName === 'SIGKILL';
+            const transcript = out + err;
+            const browserMarks = transcript.match(
+                /tool[_ ]?call|browser|navigate|playwright|goto\(|page\./gi) || [];
             resolve({
                 status: timedOut ? 'timeout' : code === 0 ? 'completed' : 'error',
                 answer: answerFrom(out) ?? (err.trim().slice(0, 500) || null),
                 acceptedMs: null,
                 firstActivityMs: firstByteMs,
                 totalMs: Date.now() - startedAt,
+                navigated: browserMarks.length ? true : (transcript.trim() ? false : null),
+                navigationEvidence: browserMarks.length
+                    ? `${browserMarks.length} browser marker(s) in transcript` : null,
                 raw: { code, stdout: out.slice(-4000), stderr: err.slice(0, 2000) }
             });
         });
@@ -317,6 +331,10 @@ function summarise(rows) {
         if (spend.length) {
             console.log(`  model-seconds    ${median(spend).toFixed(1)} median per verified run`);
         }
+        const noNav = runs.filter(r =>
+            ['success', 'completed'].includes(r.status) && r.navigated === false);
+        console.log(`  navigated        ${runs.filter(r => r.navigated === true).length}/${runs.length}` +
+            (noNav.length ? `   (${noNav.length} claimed done without touching the web)` : ''));
     }
 }
 
@@ -385,6 +403,7 @@ async function main() {
     const inference = await armEvidence(opts.inferencePort);
     log({
         kind: 'header', at: new Date().toISOString(), arm: opts.arm,
+        label: opts.label,
         systems: Object.keys(opts.systems).filter(s => opts.systems[s]),
         tasks: opts.tasks.map(t => t.id), runs: opts.runs,
         timeoutMs: opts.timeoutMs, inference,
@@ -415,18 +434,26 @@ async function main() {
                     (outcome.firstActivityMs !== null
                         ? `  first sign ${(outcome.firstActivityMs / 1000).toFixed(1)}s` : ''));
                 if (outcome.answer) console.log(`    "${String(outcome.answer).slice(0, 160)}"`);
+                console.log(`    navigated: ${outcome.navigated === null ? 'undetermined'
+                    : outcome.navigated}${outcome.navigationEvidence
+                        ? ` (${outcome.navigationEvidence})` : ''}`);
                 console.log(`    truth: ${task.truth}`);
 
                 const { verdict, note } = await judge(opts);
 
+                const evidence = await armEvidence(opts.inferencePort);
                 const row = {
                     kind: 'run', at: new Date().toISOString(),
+                    label: opts.label,
                     task: task.id, sentence: task.sentence, system, run,
                     status: outcome.status, answer: outcome.answer,
                     acceptedMs: outcome.acceptedMs,
                     firstActivityMs: outcome.firstActivityMs,
                     totalMs: outcome.totalMs,
                     modelSeconds: modelSeconds(before, after),
+                    navigated: outcome.navigated ?? null,
+                    navigationEvidence: outcome.navigationEvidence ?? null,
+                    engine: evidence && evidence.tiers ? evidence.tiers.engine : null,
                     verdict, note, raw: outcome.raw
                 };
                 rows.push(row);
