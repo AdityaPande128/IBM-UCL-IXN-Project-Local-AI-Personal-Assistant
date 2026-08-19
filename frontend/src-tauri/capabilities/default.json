@@ -8,6 +8,9 @@
   "permissions": [
     "core:default",
     "opener:default",
-    "window-state:default"
+    "window-state:default",
+    "core:window:allow-unminimize",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }

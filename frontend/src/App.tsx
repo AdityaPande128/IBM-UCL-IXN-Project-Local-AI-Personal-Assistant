@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ChatLog } from "./components/ChatLog";
 import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
@@ -212,13 +213,26 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [voiceReady, profile, reportClientError]);
 
-  // A summons lights the pill for a moment, so being heard is visible.
+  // A summons lights the pill and calls the window back up: minimized or
+  // buried, saying the words brings Jarvis to the front.
   useEffect(() => {
     if (!wakeHeardAt) return;
     setWakeFlash(true);
-    const timer = setTimeout(() => setWakeFlash(false), 2500);
+    if (inShell) {
+      const win = getCurrentWindow();
+      win.unminimize().catch(() => {});
+      win.show().catch(() => {});
+      win.setFocus().catch(() => {});
+    }
+    const timer = setTimeout(() => setWakeFlash(false), 4000);
     return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wakeHeardAt]);
+
+  // The pill says Listening for as long as the summons is being worked on.
+  useEffect(() => {
+    if (!busy) setWakeFlash(false);
+  }, [busy]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_KEY, sidebarOpen ? "open" : "closed");
@@ -414,7 +428,7 @@ function App() {
                   aria-expanded={wakeMenuOpen}
                   title="“Hey Jarvis” settings"
                 >
-                  {wakeFlash ? "● Heard you" : listening && wakeMode ? "“Hey Jarvis” active" : "Hey Jarvis · off"}
+                  {wakeFlash ? "● Listening" : listening && wakeMode ? "“Hey Jarvis” active" : "Hey Jarvis · off"}
                 </button>
                 {wakeMenuOpen && (
                   <div className="wake-menu" role="menu">
