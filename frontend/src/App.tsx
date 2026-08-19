@@ -204,6 +204,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wakeWanted, connected, voiceReady, voiceEnabled]);
 
+  const setWake = useCallback((on: boolean) => {
+    reportClientError(`wake toggle -> ${on ? "on" : "off"}`, true);
+    setWakeWanted(on);
+    localStorage.setItem(WAKE_KEY, on ? "on" : "off");
+    if (on && !voiceReady && profile) voiceNotReady();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceReady, profile, reportClientError]);
+
   // A summons lights the pill for a moment, so being heard is visible.
   useEffect(() => {
     if (!wakeHeardAt) return;
@@ -415,13 +423,7 @@ function App() {
                         type="checkbox"
                         className="switch"
                         checked={wakeWanted}
-                        onChange={(e) => {
-                          const on = e.target.checked;
-                          reportClientError(`wake toggle clicked -> ${on ? "on" : "off"}`, true);
-                          setWakeWanted(on);
-                          localStorage.setItem(WAKE_KEY, on ? "on" : "off");
-                          if (on && !voiceReady && profile) voiceNotReady();
-                        }}
+                        onChange={(e) => setWake(e.target.checked)}
                       />
                       <span>Listen for “Hey Jarvis”</span>
                     </label>
@@ -629,6 +631,8 @@ function App() {
           diagnostics={diagnostics}
           settingsResult={settingsResult}
           profile={profile}
+          wakeWanted={wakeWanted}
+          onSetWake={setWake}
           profileError={profileError}
           downloads={downloads}
           incognito={memory?.incognito ?? false}

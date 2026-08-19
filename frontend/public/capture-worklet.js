@@ -1,0 +1,9 @@
+// Off the main thread: capture never misses a frame while the UI is busy.
+class CaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel) this.port.postMessage(channel.slice(0));
+    return true;
+  }
+}
+registerProcessor("capture", CaptureProcessor);

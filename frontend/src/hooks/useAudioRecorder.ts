@@ -10,6 +10,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const [recording, setRecording] = useState(false);
   const mediaStreamRef = useRef<MediaStream | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const workletRef = useRef<AudioWorkletNode | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const chunksRef = useRef<Float32Array[]>([]);
 
@@ -20,38 +21,45 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     try {
       chunksRef.current = [];
 
-      // Raw capture: macOS voice processing (echo cancellation, auto gain)
-      // ducks and clips dictated speech, which whisper then never sees.
-      // Nothing plays back during push-to-talk, so there is no echo to cancel.
+      // The processed capture path is the one WebKit keeps alive; asking it
+      // for raw audio stalls the stream after a few buffers.
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          sampleRate: 16000,
-          channelCount: 1,
-          echoCancellation: false,
-          noiseSuppression: false,
-          // Auto gain stays: without it the raw signal sits ~30x below the
-          // daemon's silence gate. It levels; it does not chop.
-          autoGainControl: true,
-        },
+        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true },
       });
 
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       const source = audioCtx.createMediaStreamSource(stream);
-      // Half-second buffers: fewer main-thread callbacks, fewer dropped
-      // frames while React is busy. Latency does not matter here — the
-      // audio only leaves when the user clicks stop.
-      const processor = audioCtx.createScriptProcessor(8192, 1, 1);
 
-      processor.onaudioprocess = (e) => {
-        const inputData = e.inputBuffer.getChannelData(0);
-        chunksRef.current.push(new Float32Array(inputData));
-      };
+      // The worklet captures off the main thread, so words no longer go
+      // missing while React is busy; the deprecated in-thread tap remains
+      // as the fallback.
+      let tapped = false;
+      try {
+        await audioCtx.audioWorklet.addModule("/capture-worklet.js");
+        const node = new AudioWorkletNode(audioCtx, "capture");
+        node.port.onmessage = (e) => {
+          chunksRef.current.push(new Float32Array(e.data));
+        };
+        source.connect(node);
+        node.connect(audioCtx.destination);
+        workletRef.current = node;
+        tapped = true;
+      } catch (err) {
+        console.warn("AudioWorklet unavailable, falling back:", err);
+      }
 
-      source.connect(processor);
-      processor.connect(audioCtx.destination);
+      if (!tapped) {
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (e) => {
+          const inputData = e.inputBuffer.getChannelData(0);
+          chunksRef.current.push(new Float32Array(inputData));
+        };
+        source.connect(processor);
+        processor.connect(audioCtx.destination);
+        processorRef.current = processor;
+      }
 
       mediaStreamRef.current = stream;
-      processorRef.current = processor;
       audioCtxRef.current = audioCtx;
       setRecording(true);
       return true;
@@ -65,8 +73,14 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     if (mediaStreamRef.current) {
       mediaStreamRef.current.getTracks().forEach((t) => t.stop());
     }
+    if (workletRef.current) {
+      workletRef.current.port.onmessage = null;
+      workletRef.current.disconnect();
+      workletRef.current = null;
+    }
     if (processorRef.current) {
       processorRef.current.disconnect();
+      processorRef.current = null;
     }
     if (audioCtxRef.current) {
       audioCtxRef.current.close();

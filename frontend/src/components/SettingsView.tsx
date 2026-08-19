@@ -28,6 +28,8 @@ interface SettingsViewProps {
   settingsResult: SettingsResult | null;
   profileError: string | null;
   profile: ProfileData | null;
+  wakeWanted: boolean;
+  onSetWake: (on: boolean) => void;
   downloads: DownloadsData | null;
   incognito: boolean;
   onRefresh: () => void;
@@ -86,6 +88,7 @@ function readAvatar(file: File): Promise<string> {
 
 export function SettingsView({
   connected, abilities, channel, diagnostics, settingsResult, profile, profileError,
+  wakeWanted, onSetWake,
   downloads, incognito, onRefresh, onRequestChannel, onSetChannelToken,
   onClearChannel, onSaveDiagnostics, onUpdateSettings, onUpdateProfile,
   onSetIncognito, onDownloadAction, onClose,
@@ -488,6 +491,17 @@ export function SettingsView({
                         onChange={(e) => onUpdateProfile({ voice: { tts: e.target.checked } })}
                       />
                       Jarvis speaks back
+                    </label>
+                  )}
+                  {profile.voice.enabled && (
+                    <label className="ob-check">
+                      <input
+                        type="checkbox"
+                        className="switch"
+                        checked={wakeWanted}
+                        onChange={(e) => onSetWake(e.target.checked)}
+                      />
+                      Answer to “Hey Jarvis”
                     </label>
                   )}
                   {profile.voice.enabled && profile.voice.tts && (
