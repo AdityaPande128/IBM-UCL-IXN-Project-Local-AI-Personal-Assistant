@@ -97,6 +97,7 @@ function App() {
     setIncognito,
     wakeMode,
     wakeHeardAt,
+    reportClientError,
     setWakeMode,
     sendBinary,
     sendIntent,
@@ -188,6 +189,7 @@ function App() {
       else {
         setWakeWanted(false);
         localStorage.setItem(WAKE_KEY, "off");
+        reportClientError(`Wake listening could not open the microphone: ${opened}`);
         pushToast(`The microphone could not be opened (${opened}). If it was `
           + "never asked for, check System Settings → Privacy & Security → Microphone.");
       }
@@ -278,6 +280,7 @@ function App() {
     }
     const opened = await startRecording();
     if (opened !== true) {
+      reportClientError(`The microphone could not be opened: ${opened}`);
       pushToast(`The microphone could not be opened (${opened}). If it was `
         + "never asked for, check System Settings → Privacy & Security → Microphone.");
     }

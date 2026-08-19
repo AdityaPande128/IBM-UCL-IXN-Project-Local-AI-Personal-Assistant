@@ -351,6 +351,7 @@ interface UseWebSocketReturn {
   setIncognito: (on: boolean) => void;
   wakeMode: boolean;
   wakeHeardAt: number | null;
+  reportClientError: (text: string) => void;
   setWakeMode: (on: boolean) => void;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
@@ -726,6 +727,10 @@ export function useWebSocket(): UseWebSocketReturn {
           setWakeModeState(Boolean(msg.on));
           return;
         }
+        if (msg.type === "system_note") {
+          addMessage("system", String(msg.text ?? ""));
+          return;
+        }
         if (msg.type === "wake") {
           setWakeHeardAt(Date.now());
           addMessage("user", msg.command ? `“Hey Jarvis, ${msg.command}”` : "“Hey Jarvis”");
@@ -881,6 +886,12 @@ export function useWebSocket(): UseWebSocketReturn {
   const requestBrief = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "brief" }));
+    }
+  }, []);
+
+  const reportClientError = useCallback((text: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "client_log", text }));
     }
   }, []);
 
@@ -1085,6 +1096,7 @@ export function useWebSocket(): UseWebSocketReturn {
     setIncognito,
     wakeMode,
     wakeHeardAt,
+    reportClientError,
     setWakeMode,
     sendBinary,
     sendIntent,

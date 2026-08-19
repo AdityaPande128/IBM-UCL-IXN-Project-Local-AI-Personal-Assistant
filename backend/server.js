@@ -409,6 +409,16 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            // The app's own view has no console anyone can read; what it
+            // reports lands in this log and goes straight back as a line
+            // the chat shows.
+            if (parsed.type === 'client_log') {
+                const note = String(parsed.text || '').slice(0, 500);
+                console.log(`[Client] ${note}`);
+                ws.send(JSON.stringify({ type: 'system_note', text: note }));
+                return;
+            }
+
             if (parsed.type === 'abort') {
                 ws.send(JSON.stringify({ type: 'abort_result', ...intentQueue.abort(parsed.id) }));
                 return;
