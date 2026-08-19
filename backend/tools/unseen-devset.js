@@ -244,6 +244,20 @@ function runOpenClaw(task, opts) {
 }
 
 
+// Between runs the daemon may still owe the server work (memory inference
+// after a success, a trailing generation): wait for the ledger to sit still
+// so the next run's baseline is not another run's spend.
+async function settle(port, capMs = 90000) {
+    const startedAt = Date.now();
+    let last = null;
+    while (Date.now() - startedAt < capMs) {
+        const now = await statsSnapshot(port);
+        if (now && last && now.requests === last.requests) return;
+        last = now;
+        await new Promise(beat => setTimeout(beat, 3000));
+    }
+}
+
 async function statsSnapshot(port) {
     try {
         const res = await fetch(`http://127.0.0.1:${port}/stats`);
@@ -426,6 +440,7 @@ async function main() {
                 if (!opts.systems[system]) continue;
 
                 console.log(`${task.id} ${system} (run ${run})  "${task.sentence}"`);
+                await settle(opts.inferencePort);
                 const before = await statsSnapshot(opts.inferencePort);
                 const outcome = await runners[system](task, opts);
                 const after = await statsSnapshot(opts.inferencePort);
