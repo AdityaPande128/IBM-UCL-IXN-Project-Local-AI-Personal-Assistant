@@ -91,7 +91,8 @@ async function executeSkill(decision, originalText, options = {}) {
             `"${target_skill}" is not installed`);
     }
 
-    const result = await skillExecutor.execute(skill, parameters);
+    const result = await skillCare.run(skill, parameters,
+        { request: originalText, signal: options.signal });
 
     return {
         status: result.status === 'success' ? 'success' : result.status,
@@ -100,6 +101,7 @@ async function executeSkill(decision, originalText, options = {}) {
         skill: result.skill,
         skillVersion: result.version,
         skillDurationMs: result.durationMs,
+        ...(result.proposal ? { proposal: result.proposal } : {}),
         ...(result.artifacts ? { artifacts: result.artifacts } : {})
     };
 }
@@ -243,7 +245,8 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
         const existing = skillRegistry.get(result.skill);
         if (existing) {
             const parameters = await router.extractParameters(existing, intentText);
-            const execution = await skillExecutor.execute(existing, parameters);
+            const execution = await skillCare.run(existing, parameters,
+                { request: intentText, signal: options.signal });
             return {
                 status: execution.status === 'success' ? 'success' : execution.status,
                 response: execution.response,
@@ -270,7 +273,8 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
     const skill = skillRegistry.get(result.skill);
 
     const parameters = await router.extractParameters(skill, intentText);
-    const execution = await skillExecutor.execute(skill, parameters);
+    const execution = await skillCare.run(skill, parameters,
+        { request: intentText, signal: options.signal });
 
     return {
         status: execution.status === 'success' ? 'success' : execution.status,

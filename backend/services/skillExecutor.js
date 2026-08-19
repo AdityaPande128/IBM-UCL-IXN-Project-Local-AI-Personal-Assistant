@@ -244,7 +244,7 @@ function runProcess(argv, timeoutMs, cwd, env) {
     });
 }
 
-async function execute(skill, supplied = {}) {
+async function execute(skill, supplied = {}, options = {}) {
     const startedAt = Date.now();
 
     if (skill.provenance && skill.provenance.author === 'generated') {
@@ -290,7 +290,8 @@ async function execute(skill, supplied = {}) {
     let result;
     let enforced = false;
     try {
-        const sandboxed = skillSandbox.wrap(skill, argv, tempDir, ENFORCE_MODE, coercion.parameters);
+        const sandboxed = skillSandbox.wrap(skill, argv, tempDir, ENFORCE_MODE,
+            coercion.parameters, options.allowRead || []);
         enforced = sandboxed.enforced;
 
         console.log(

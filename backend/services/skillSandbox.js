@@ -116,7 +116,7 @@ function shouldEnforce(skill, mode = 'generated') {
     return (skill.provenance && skill.provenance.author) === 'generated';
 }
 
-function buildProfile(skill, tempDir, parameters = {}) {
+function buildProfile(skill, tempDir, parameters = {}, allowRead = []) {
     const capabilities = skill.capabilities || {};
     const lines = [
         '(version 1)',
@@ -183,6 +183,11 @@ function buildProfile(skill, tempDir, parameters = {}) {
         lines.push(`(allow file-read* (subpath ${sbplString(target)}))`);
     }
 
+    for (const granted of allowRead) {
+        lines.push('; The user granted this run read access here.');
+        lines.push(`(allow file-read* (subpath ${sbplString(resolvePath(granted))}))`);
+    }
+
     lines.push('', '; The skill cannot modify itself.');
     lines.push(`(deny file-write* (subpath ${sbplString(skill.directory)}))`);
 
@@ -214,7 +219,7 @@ function buildProfile(skill, tempDir, parameters = {}) {
     return lines.join('\n') + '\n';
 }
 
-function wrap(skill, argv, tempDir, mode = 'generated', parameters = {}) {
+function wrap(skill, argv, tempDir, mode = 'generated', parameters = {}, allowRead = []) {
     if (!shouldEnforce(skill, mode)) {
         return { argv, profilePath: null, enforced: false };
     }

@@ -115,6 +115,11 @@ function fromSkill(skill, execute) {
         source: skill.name,
         async run(bound) {
             const result = await execute(skill, bound);
+            if (result.status === 'needs_approval' && result.proposal) {
+                const held = new Error(result.response);
+                held.proposal = result.proposal;
+                throw held;
+            }
             if (result.status !== 'success') {
                 throw new Error(result.response || `${skill.name} failed`);
             }
@@ -535,7 +540,7 @@ function build() {
         loaded.set(capability.id, capability);
     }
     for (const skill of skillRegistry.list()) {
-        const capability = fromSkill(skill, (s, p) => skillExecutor.execute(s, p));
+        const capability = fromSkill(skill, (s, p) => require('./skillCare').run(s, p));
         loaded.set(capability.id, capability);
     }
     const families = new Map();
