@@ -13,6 +13,9 @@ const proposals = require('./proposals');
 const activityBus = require('./activityBus');
 const profile = require('./profile');
 const llmClient = require('./llmClient');
+const securityStore = require('../security/store');
+const os = require('os');
+const path = require('path');
 
 const OPENCLAW_TIMEOUT_MS = 900000;
 const MAX_OPENCLAW_OUTPUT_BYTES = 16 * 1024 * 1024;
@@ -200,6 +203,40 @@ function isRealComposition(plan) {
     return true;
 }
 
+// The consent gate speaks approval, not shell. When a plan blocks on an
+// ungranted folder and the request names a well-known one, the grant becomes
+// a yes/no in whichever surface asked — never a command line.
+function wellKnownFolder(text) {
+    const named = String(text).toLowerCase()
+        .match(/\b(downloads|documents|desktop|pictures|movies|music)\b/);
+    if (!named) return null;
+    const name = named[1][0].toUpperCase() + named[1].slice(1);
+    return path.join(os.homedir(), name);
+}
+
+function proposeFolderAccess(intentText, folder, collection, options) {
+    const offer = proposals.create('folder_access', {
+        request: intentText,
+        summary: `Let Jarvis read ${folder}?`,
+        will: `remember ${folder} as a granted ${collection} folder and `
+            + 'finish this request with it',
+        estimate: 'a few seconds'
+    }, (context = {}) => {
+        securityStore.grantRoot(folder, collection);
+        return executeIntent(intentText, { ...options, signal: context.signal });
+    });
+    activityBus.publish('bridge', 'proposal',
+        { kind: 'folder_access', id: offer.id, folder });
+    return {
+        status: 'needs_approval',
+        action: 'proposed',
+        response: `I found what I need in ${folder}, but that folder has not `
+            + 'been opened to me. Want me to remember it as one I may read, '
+            + 'and finish the request?',
+        proposal: offer
+    };
+}
+
 async function composeThenGenerate(intentText, options = {}) {
     let plan;
     try {
@@ -211,6 +248,12 @@ async function composeThenGenerate(intentText, options = {}) {
 
     if (plan.status === 'planned' && isRealComposition(plan)) {
         const execution = await planExecutor.run(plan, { request: intentText, signal: options.signal });
+        const gate = execution.status !== 'success' && options.interactive
+            && String(execution.text || '').match(/no folder has been granted for (\w+)/);
+        if (gate) {
+            const offered = wellKnownFolder(intentText);
+            if (offered) return proposeFolderAccess(intentText, offered, gate[1], options);
+        }
         return {
             status: execution.status === 'success' ? 'success' : execution.status,
             response: execution.text,

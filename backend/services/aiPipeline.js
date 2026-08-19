@@ -185,13 +185,13 @@ async function speakText(text, ws) {
 
 // The spoken half of the approval card: acknowledge at once, run the
 // decision, then speak the outcome like any other reply.
-async function answerAloud(proposalId, approved, ws) {
+async function answerAloud(proposalId, approved, ws, kind = null) {
     record(ws, 'user', approved ? '“Yes.”' : '“No.”');
     // The card asked; the voice answered. It leaves the screen now, not
     // after the minutes the build takes.
     send(ws, { type: 'proposal_taken', id: proposalId,
         decision: approved ? 'yes' : 'no' });
-    if (approved) {
+    if (approved && kind === 'build_skill') {
         await speakText('Building the skill now — this takes a minute or two.', ws);
     }
     const job = intentQueue.submit(({ signal }) =>
@@ -261,6 +261,7 @@ async function respondTo(transcribedText, ws) {
         if (llmResult.status === 'needs_approval' && llmResult.proposal) {
             ws.pendingVoiceApproval = {
                 id: llmResult.proposal.id,
+                kind: llmResult.proposal.kind || null,
                 until: Date.now() + 45000
             };
         }

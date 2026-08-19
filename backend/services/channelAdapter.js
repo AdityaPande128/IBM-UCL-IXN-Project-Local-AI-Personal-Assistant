@@ -302,9 +302,9 @@ async function handleMessage(message) {
         const yes = SAYS_YES.test(text);
         const no = SAYS_NO.test(text);
         if (yes || no) {
-            const { id } = pendingApproval;
+            const { id, kind } = pendingApproval;
             pendingApproval = null;
-            if (yes && !no) {
+            if (yes && !no && kind === 'build_skill') {
                 await say(chatId, 'Building the skill now — this takes a minute or two.');
             }
             const outcome = await deps.answer(id, yes && !no ? 'yes' : 'no')
@@ -331,7 +331,8 @@ async function handleMessage(message) {
 
     if (result && result.status === 'needs_approval' && result.proposal) {
         await offerApproval(chatId, result.proposal);
-        pendingApproval = { id: result.proposal.id, until: Date.now() + 5 * 60000 };
+        pendingApproval = { id: result.proposal.id,
+            kind: result.proposal.kind || null, until: Date.now() + 5 * 60000 };
         return;
     }
 

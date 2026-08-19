@@ -224,7 +224,7 @@ wss.on('connection', (ws) => {
                     if (yes || no) {
                         ws.pendingVoiceApproval = null;
                         await withActivity(ws, () =>
-                            aiPipeline.answerAloud(pending.id, yes && !no, ws));
+                            aiPipeline.answerAloud(pending.id, yes && !no, ws, pending.kind));
                         return;
                     }
                     // Anything else falls through to the wake probe below;
