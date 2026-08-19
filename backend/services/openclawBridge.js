@@ -73,6 +73,11 @@ function callOpenClawAgent(userMessage, signal) {
 // into browse goals.
 async function resolveFollowUp(text, history) {
     if (!Array.isArray(history) || history.length === 0) return text;
+    // Asking the same thing again is a retry, not a follow-up: it already
+    // stands alone, and a rewrite can only make it worse.
+    if (history.some(m => m.role === 'user' && m.text.trim() === text.trim())) {
+        return text;
+    }
     const exchange = history
         .map(m => `${m.role === 'user' ? 'user' : 'assistant'}: ${m.text}`)
         .join('\n');
@@ -85,12 +90,16 @@ async function resolveFollowUp(text, history) {
                 + '"that" or "the website" refer to. If the newest message '
                 + 'already stands alone, or is not a request at all — a '
                 + 'greeting, thanks, chit-chat — return it EXACTLY as written. '
-                + 'Reply with that one line only: no quotes, no commentary.' },
+                + 'You speak AS the user, in their words: never describe them '
+                + '("The user wants") and never answer the request. Reply with '
+                + 'that one line only, no quotes, no commentary; when in doubt, '
+                + 'return it unchanged.' },
             { role: 'user', content: `${exchange}\n\nNewest message: ${text}` }
         ], { tier: 'guard', temperature: 0, max_tokens: 120, timeout_ms: 20000 });
         const resolved = String(raw || '').trim()
             .replace(/^["']|["']$/g, '').trim();
         if (!resolved || resolved.length > 300) return text;
+        if (/\bthe user\b/i.test(resolved)) return text;
         if (resolved !== text) {
             console.log(`[Bridge] Follow-up resolved (${text.length} -> ${resolved.length} chars)`);
         }
@@ -103,7 +112,7 @@ async function resolveFollowUp(text, history) {
 // A reply that only disclaims reach into the live web is not an answer;
 // the planner's browse lane has that reach, so the ask goes there instead.
 const DISCLAIMS_THE_WEB =
-    /\b(?:unable to|cannot|can't|do(?:es)?\s*n[o']t have|lack)\b[^.]{0,60}\b(?:internet|real[- ]?time|live|browse|browsing|web|current (?:information|data))\b/i;
+    /\b(?:unable to|cannot|can't|do(?:es)?\s*n[o']t have|lack)\b[^.]{0,60}\b(?:internet|real[- ]?time|live|browse|browsing|web|current (?:information|data)|system information|your (?:computer|mac|machine|device|files))\b/i;
 
 async function executeSkill(decision, originalText, options = {}) {
     const { target_skill, parameters } = decision;
