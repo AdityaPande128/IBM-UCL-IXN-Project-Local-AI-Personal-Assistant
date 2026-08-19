@@ -139,13 +139,32 @@ fn project_root() -> PathBuf {
 fn augmented_path() -> String {
     static PATH: OnceLock<String> = OnceLock::new();
     PATH.get_or_init(|| {
-        let mut path = Command::new("/bin/zsh")
-            .args(["-lc", "printf %s \"$PATH\""])
+        // The runtimes live where the user's real shell puts them: conda and
+        // friends initialise in .zshrc, which only an interactive shell
+        // reads. Markers keep rc noise out of the harvested value.
+        let interactive = Command::new("/bin/zsh")
+            .args(["-lic", "printf '@@%s@@' \"$PATH\""])
             .output()
             .ok()
             .filter(|out| out.status.success())
             .and_then(|out| String::from_utf8(out.stdout).ok())
-            .filter(|p| !p.trim().is_empty())
+            .and_then(|raw| {
+                let start = raw.find("@@")? + 2;
+                let end = raw[start..].find("@@")? + start;
+                Some(raw[start..end].to_string())
+            })
+            .filter(|p| !p.trim().is_empty());
+
+        let mut path = interactive
+            .or_else(|| {
+                Command::new("/bin/zsh")
+                    .args(["-lc", "printf %s \"$PATH\""])
+                    .output()
+                    .ok()
+                    .filter(|out| out.status.success())
+                    .and_then(|out| String::from_utf8(out.stdout).ok())
+                    .filter(|p| !p.trim().is_empty())
+            })
             .unwrap_or_else(|| std::env::var("PATH").unwrap_or_default());
         for extra in ["/opt/homebrew/bin", "/usr/local/bin"] {
             if !path.split(':').any(|p| p == extra) {
@@ -250,7 +269,17 @@ fn supervise(
                 let delay = std::cmp::min(1u64 << std::cmp::min(restarts, 5), 30);
                 std::thread::sleep(Duration::from_secs(delay));
             }
-            Err(_) => {
+            Err(err) => {
+                // A spawn that dies before its first byte must still leave
+                // a trace, or the failure is invisible from every log.
+                let _ = fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&log_path)
+                    .and_then(|mut log| {
+                        use std::io::Write;
+                        writeln!(log, "[supervisor] {} failed to spawn: {err}", spec.name)
+                    });
                 emit_status(&app, &spec.name, "failed", restarts);
                 restarts += 1;
                 std::thread::sleep(Duration::from_secs(10));
