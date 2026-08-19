@@ -290,6 +290,10 @@ wss.on('connection', (ws) => {
             if (parsed.type === 'conversation_delete' && parsed.id) {
                 const id = Number(parsed.id);
                 const removed = conversationStore.remove(id);
+                // Facts inferred from this chat go with it; what the user
+                // typed into the Remember box has no origin and stays.
+                const forgotten = memoryStore.deleteByOrigin(id);
+                if (forgotten) console.log(`[Memory] Forgot ${forgotten} fact(s) born in chat ${id}.`);
                 if (ws.conversationId === id) ws.conversationId = null;
                 ws.send(JSON.stringify({ type: 'conversation_delete_result', id, removed,
                     conversations: conversationStore.list() }));
@@ -327,7 +331,8 @@ wss.on('connection', (ws) => {
                 // this exchange becomes a consent card, not a row.
                 if (result.status === 'success') {
                     memoryService.inferFrom(
-                        `user: ${parsed.text}\nassistant: ${result.response || ''}`)
+                        `user: ${parsed.text}\nassistant: ${result.response || ''}`,
+                        ws.conversationId)
                         .catch(() => null);
                 }
                 return;

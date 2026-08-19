@@ -6,6 +6,7 @@
 
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
+const configReader = require('../utils/configReader');
 const memoryService = require('./memoryService');
 
 const DEFAULT_PATH = process.env.JARVIS_CONVERSATIONS_DB
@@ -130,4 +131,93 @@ function remove(conversationId) {
     return gone.changes > 0;
 }
 
-module.exports = { open, append, list, messages, exists, remove, clear, titleFrom, DEFAULT_PATH };
+// Demand paging for old chats. Every conversation already lives on disk in
+// this store; only the tail of the current one rides in the model's context.
+// When the user asks to recall an earlier discussion, the matching exchanges
+// are paged back in as answer passages — nothing is recalled unasked.
+const RECALL_SHAPE = new RegExp([
+    '\\b(remember|recall|last time|earlier|yesterday|last week|previous(ly)?',
+    '|our (chat|conversation)s?|we (said|spoke|talked|discussed|decided)',
+    '|did (i|we) (say|ask|mention|decide|talk)|what did (i|we)',
+    '|talk(ed)? about|discuss(ed)?)\\b'
+].join(''), 'i');
+
+const RECALL_STOP = new Set([
+    'the', 'and', 'that', 'this', 'with', 'from', 'what', 'when', 'where',
+    'which', 'about', 'have', 'does', 'did', 'was', 'were', 'you', 'your',
+    'our', 'has', 'how', 'for', 'are', 'can', 'could', 'would', 'tell',
+    'said', 'earlier', 'yesterday', 'remember', 'recall', 'chat',
+    'conversation', 'talked', 'talk', 'discussed', 'discuss', 'time'
+]);
+
+function recallWords(query) {
+    return [...new Set((String(query).toLowerCase().match(/[a-z0-9]{3,}/g) || []))]
+        .filter(word => !RECALL_STOP.has(word))
+        .slice(0, 8);
+}
+
+function searchMessages(query, { limit = 8 } = {}) {
+    ready();
+    const words = recallWords(query);
+    if (!words.length) return [];
+    const asked = String(query).trim().toLowerCase();
+    const clause = words.map(() => 'm.text LIKE ? COLLATE NOCASE').join(' OR ');
+    const rows = db.prepare(
+        `SELECT m.conversation_id, m.ts, m.role, m.text, c.title
+           FROM messages m JOIN conversations c ON c.id = m.conversation_id
+          WHERE m.role IN ('user', 'assistant') AND (${clause})
+          ORDER BY m.id DESC LIMIT 200`)
+        .all(...words.map(word => `%${word}%`));
+    return rows
+        // The question being asked has just been recorded; it is not a memory.
+        .filter(row => row.text.trim().toLowerCase() !== asked)
+        .map(row => ({
+            row,
+            hits: words.filter(word => row.text.toLowerCase().includes(word)).length
+        }))
+        .sort((a, b) => b.hits - a.hits)
+        .slice(0, limit)
+        .map(({ row }) => row);
+}
+
+const answerSource = {
+    name: 'conversations',
+    matches: query => RECALL_SHAPE.test(String(query || '')),
+    async retrieve(query) {
+        const rows = searchMessages(query);
+        if (!rows.length) return [];
+
+        const embedClient = require('./embedClient');
+        const memoryStore = require('./memoryStore');
+        const securityLabels = require('../security/labels');
+        const retrieval = (configReader.readConfig().retrieval || {});
+        const minScore = retrieval.corpus_min_score ?? 0.62;
+        const margin = retrieval.corpus_margin ?? 0.05;
+
+        const passages = rows.map(row => ({
+            text: `${row.role === 'user' ? 'The user' : 'The assistant'} said: ${row.text}`,
+            embedText: row.text,
+            cite: `past chat "${row.title}" (${String(row.ts).slice(0, 10)})`,
+            label: securityLabels.label(securityLabels.ORIGIN.USER,
+                securityLabels.SENSITIVITY.PERSONAL)
+        }));
+
+        const [queryVector, ...vectors] = await embedClient.embed(
+            [query, ...passages.map(p => p.embedText)]);
+        const scored = passages.map((passage, i) => ({
+            ...passage, score: memoryStore.cosine(queryVector, vectors[i])
+        }));
+
+        const kept = scored.filter(p => p.score >= minScore);
+        if (!kept.length) return [];
+        kept.sort((a, b) => b.score - a.score);
+        const best = kept[0].score;
+        return kept
+            .filter(p => p.score >= best - margin)
+            .slice(0, 3)
+            .map(({ embedText, ...passage }) => passage);
+    }
+};
+
+module.exports = { open, append, list, messages, exists, remove, clear, titleFrom,
+    searchMessages, answerSource, DEFAULT_PATH };

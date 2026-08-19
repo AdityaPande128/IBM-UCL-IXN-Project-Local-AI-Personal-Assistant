@@ -51,18 +51,18 @@ function isIncognito() {
     return incognito;
 }
 
-async function add(text, { source = 'user' } = {}) {
+async function add(text, { source = 'user', origin = null } = {}) {
     if (incognito) throw new Error('incognito: nothing is being recorded');
     const vector = await embedOne(String(text));
     const fact = memoryStore.remember({
-        text, vector, embeddingModel: EMBED_MODEL, source
+        text, vector, embeddingModel: EMBED_MODEL, source, origin
     });
     activityBus.publish('memory', 'remembered', { id: fact.id, source });
     return fact;
 }
 
 // Inference never writes: it offers. The card is the write barrier (§3.1).
-function offer(text, why) {
+function offer(text, why, origin = null) {
     if (incognito) return null;
     const words = String(text || '').trim();
     if (!words) return null;
@@ -76,7 +76,7 @@ function offer(text, why) {
         text: words,
         why: why || 'this came up and looks like it will matter again'
     }, async () => {
-        const fact = await add(words, { source: 'inferred' });
+        const fact = await add(words, { source: 'inferred', origin });
         return { status: 'success', response: `Remembered: ${fact.text}` };
     });
 }
@@ -95,7 +95,7 @@ Respond with ONLY a JSON object:
 
 Zero facts is the usual answer: {"facts":[]}`;
 
-async function inferFrom(exchange) {
+async function inferFrom(exchange, origin = null) {
     if (!INFER || incognito) return [];
     const text = String(exchange || '').trim();
     if (text.length < 12) return [];
@@ -117,7 +117,7 @@ async function inferFrom(exchange) {
         .map(fact => String(fact || '').trim())
         .filter(fact => fact.length >= 8 && fact.length <= 200)
         .slice(0, MAX_OFFERS_PER_PASS)
-        .map(fact => offer(fact, 'mentioned in conversation'))
+        .map(fact => offer(fact, 'mentioned in conversation', origin))
         .filter(Boolean);
 }
 

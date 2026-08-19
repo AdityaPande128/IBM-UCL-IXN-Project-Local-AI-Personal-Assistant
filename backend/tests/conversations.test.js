@@ -96,3 +96,29 @@ test('incognito records nothing, and blank or malformed messages never land', ()
         store.cleanup();
     }
 });
+
+test('recall pages an old chat back in, and skips the question just asked', () => {
+    const store = scratchStore();
+    try {
+        const first = {};
+        conversationStore.append(first, 'user', 'plan the trip to Lisbon in October');
+        conversationStore.append(first, 'assistant',
+            'Lisbon in October: flights from Gatwick are cheapest midweek.');
+        const second = {};
+        const asked = 'what did we say about the Lisbon trip?';
+        conversationStore.append(second, 'user', asked);
+
+        const rows = conversationStore.searchMessages(asked);
+        assert.ok(rows.length >= 1, 'the old chat is found');
+        assert.ok(rows.every(row => row.text !== asked),
+            'the question just recorded is not a memory');
+        assert.ok(rows.some(row => /Gatwick/.test(row.text)));
+
+        assert.ok(conversationStore.answerSource.matches(asked),
+            'asking to recall claims the source');
+        assert.ok(!conversationStore.answerSource.matches('how much RAM does this machine have'),
+            'an ordinary question never pages old chats in');
+    } finally {
+        store.cleanup();
+    }
+});

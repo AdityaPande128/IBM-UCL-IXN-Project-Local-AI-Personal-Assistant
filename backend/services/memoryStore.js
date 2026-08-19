@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS facts (
     pinned INTEGER NOT NULL DEFAULT 0,
     superseded_by TEXT,
     source TEXT NOT NULL DEFAULT 'user',
+    origin TEXT,
     created_at INTEGER NOT NULL,
     last_recalled_at INTEGER
 );
@@ -55,6 +56,9 @@ function open(target = DEFAULT_PATH) {
     // removed fact is not recoverable by reading the file.
     db.exec('PRAGMA secure_delete = ON');
     db.exec(SCHEMA);
+    // Stores created before facts carried their birthplace.
+    const columns = db.prepare('PRAGMA table_info(facts)').all().map(c => c.name);
+    if (!columns.includes('origin')) db.exec('ALTER TABLE facts ADD COLUMN origin TEXT');
     return db;
 }
 
@@ -85,15 +89,16 @@ function inflate(row) {
     return { ...row, pinned: Boolean(row.pinned), embedding: undefined };
 }
 
-function remember({ text, vector = null, embeddingModel = null, source = 'user' }) {
+function remember({ text, vector = null, embeddingModel = null, source = 'user', origin = null }) {
     ensure();
     const words = String(text || '').trim();
     if (!words) throw new Error('a memory needs words');
 
     const id = crypto.randomUUID();
-    db.prepare(`INSERT INTO facts (id, text, embedding, embedding_model, source, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)`)
-        .run(id, words, pack(vector), embeddingModel, source, Date.now());
+    db.prepare(`INSERT INTO facts (id, text, embedding, embedding_model, source, origin, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`)
+        .run(id, words, pack(vector), embeddingModel, source,
+            origin === null || origin === undefined ? null : String(origin), Date.now());
     return get(id);
 }
 
@@ -182,6 +187,15 @@ function hardDelete(ids) {
     return removed;
 }
 
+// A chat's inferred facts die with the chat. What the user typed into the
+// Remember box has no origin and is untouched.
+function deleteByOrigin(origin) {
+    ensure();
+    if (origin === null || origin === undefined || origin === '') return 0;
+    return db.prepare('DELETE FROM facts WHERE origin = ?')
+        .run(String(origin)).changes;
+}
+
 // The reviewable hit list behind "forget everything about X": plain substring
 // over every tier including what was superseded — a wipe must find it all.
 function wipeCandidates(term) {
@@ -242,6 +256,6 @@ function stats() {
 
 module.exports = {
     open, close, remember, get, list, search, supersede, setPinned,
-    hardDelete, wipeCandidates, wipeAll, nightly, restore, stats,
+    hardDelete, deleteByOrigin, wipeCandidates, wipeAll, nightly, restore, stats,
     cosine, DEFAULT_PATH, FACT_ARCHIVE_DAYS
 };

@@ -209,3 +209,22 @@ test('model inference is parsed, bounded, and lands as cards', async (t) => {
         scope.cleanup();
     }
 });
+
+test('facts born in a chat die with it; what the user typed stays', () => {
+    const store = scratch();
+    try {
+        const inferred = memoryStore.remember({
+            text: 'the user is planning a trip to Lisbon',
+            source: 'inferred', origin: 7
+        });
+        const typed = memoryStore.remember({ text: 'the user is called Adi' });
+
+        assert.strictEqual(memoryStore.deleteByOrigin(7), 1);
+        assert.strictEqual(memoryStore.get(inferred.id), null);
+        assert.ok(memoryStore.get(typed.id), 'a typed fact has no origin and survives');
+        assert.strictEqual(memoryStore.deleteByOrigin(null), 0,
+            'no origin never deletes anything');
+    } finally {
+        store.cleanup();
+    }
+});

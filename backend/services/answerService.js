@@ -151,6 +151,7 @@ function corpusSource(name, { label, minScore = CORPUS_MIN_SCORE, margin = CORPU
 registerSource(corpusSource('documents', { label: 'document' }));
 registerSource(corpusSource('mail', { label: 'email' }));
 registerSource(require('./memoryService').answerSource);
+registerSource(require('./conversationStore').answerSource);
 
 const MAX_ONDEMAND_FILES = 3;
 const MAX_ONDEMAND_BYTES = 512 * 1024;
