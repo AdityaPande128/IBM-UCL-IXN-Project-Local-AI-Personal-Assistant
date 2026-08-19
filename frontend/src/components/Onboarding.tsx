@@ -212,7 +212,12 @@ export function Onboarding({
 
   // A daemon restart mid-flow lands back here with the profile already
   // written and a queue on disk: resume at the download page, not page one.
-  const resumed = Boolean(profile.name) && (data.downloads.queue.length > 0);
+  // Decided once, at mount: the models step applies the profile and
+  // restarts the daemon mid-wizard, and a fresh run must not start reading
+  // as a resume when its own half-written profile comes back over the wire.
+  const [resumed] = useState(
+    () => Boolean(profile.name) && data.downloads.queue.length > 0
+  );
   const [step, setStep] = useState<Step>(resumed ? "download" : "theme");
 
   // A resume carries the profile's recorded choices, not the defaults the

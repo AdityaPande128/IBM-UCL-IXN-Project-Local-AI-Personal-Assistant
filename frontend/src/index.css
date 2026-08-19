@@ -2130,6 +2130,7 @@ body {
 .sidebar-chat {
   position: relative;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   border-radius: 9px;
 }
@@ -2206,15 +2207,18 @@ body {
   stroke-linecap: round;
 }
 
+/* Armed delete takes its own line under the title: a confirmation must
+   never cover the words that say what it would delete. */
 .sidebar-chat-confirm {
-  position: absolute;
-  right: 6px;
-  display: inline-flex;
-  gap: 4px;
+  flex-basis: 100%;
+  display: flex;
+  gap: 6px;
+  padding: 0 8px 8px;
 }
 
 .sidebar-chat-confirm-yes,
 .sidebar-chat-confirm-no {
+  flex: 1;
   border: none;
   border-radius: 6px;
   font-size: 11px;
@@ -2586,6 +2590,14 @@ body {
 :focus-visible {
   outline: 2px solid var(--blue);
   outline-offset: 2px;
+}
+
+/* Editable fields carry their own focus treatment — styled borders and the
+   caret; the keyboard ring is for controls that would otherwise show nothing. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
 }
 
 ::-webkit-scrollbar {

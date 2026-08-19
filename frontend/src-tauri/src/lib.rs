@@ -247,12 +247,17 @@ fn supervise(
                 pids.lock().unwrap().insert(spec.name.clone(), child.id());
                 let launched = Instant::now();
 
-                for _ in 0..50 {
+                // However long the boot takes, the banner follows the
+                // truth: poll until the port opens or the child dies.
+                loop {
                     if port_open(spec.port) {
                         emit_status(&app, &spec.name, "running", restarts);
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(200));
+                    if let Ok(Some(_)) = child.try_wait() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(500));
                 }
 
                 let _ = child.wait();

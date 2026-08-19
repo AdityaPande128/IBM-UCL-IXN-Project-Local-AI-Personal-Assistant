@@ -65,6 +65,17 @@ function callOpenClawAgent(userMessage, signal) {
     });
 }
 
+// A follow-up only means something next to what it follows: the recent
+// exchange rides along so "check the official website" knows which site.
+function inConversation(text, history) {
+    if (!Array.isArray(history) || history.length === 0) return text;
+    const exchange = history
+        .map(m => `${m.role === 'user' ? 'user' : 'assistant'}: ${m.text}`)
+        .join('\n');
+    return `Recent exchange:\n${exchange}\n\nThe user now says: ${text}\n`
+        + 'Read the new message in the light of the exchange it continues.';
+}
+
 // A reply that only disclaims reach into the live web is not an answer;
 // the planner's browse lane has that reach, so the ask goes there instead.
 const DISCLAIMS_THE_WEB =
@@ -290,7 +301,8 @@ async function executeIntent(intentText, options = {}) {
         return { ...delegated, decision: { action: 'openclaw' }, durationMs: Date.now() - startedAt };
     }
 
-    const decision = await router.route(intentText);
+    const asked = inConversation(intentText, options.history);
+    const decision = await router.route(asked);
     const routeTraceId = routerTraces.record(intentText, decision);
     activityBus.publish('router', 'decision', {
         action: decision.action, skill: decision.target_skill || null,
@@ -317,15 +329,20 @@ async function executeIntent(intentText, options = {}) {
                 status: 'needs_clarification',
                 response: decision.is_successful
                     ? 'I\'m not confident I understood that. Could you rephrase it?'
-                    : 'I couldn\'t process that request. Check that the inference server is running.',
+                    : decision.intent_type === 'timeout'
+                        ? 'The model answered too slowly just now — the machine may be '
+                            + 'busy. Give it a moment and ask again.'
+                        : 'I couldn\'t reach the local models. If they are still '
+                            + 'starting, the light in the corner turns green when '
+                            + 'they are ready.',
                 action: 'clarify'
             };
             break;
 
         case router.ACTIONS.ANSWER: {
-            const answered = await answerService.answer(intentText);
+            const answered = await answerService.answer(asked);
             if (answered.is_successful && DISCLAIMS_THE_WEB.test(answered.text || '')) {
-                outcome = await composeThenGenerate(intentText, options);
+                outcome = await composeThenGenerate(asked, options);
                 break;
             }
             outcome = {
@@ -362,11 +379,11 @@ async function executeIntent(intentText, options = {}) {
                 };
                 break;
             }
-            outcome = await composeThenGenerate(intentText, options);
+            outcome = await composeThenGenerate(asked, options);
             break;
 
         case router.ACTIONS.EXECUTE:
-            outcome = await executeSkill(decision, intentText, options);
+            outcome = await executeSkill(decision, asked, options);
             break;
 
         default:

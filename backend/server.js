@@ -300,10 +300,15 @@ wss.on('connection', (ws) => {
                 // The executor follows the profile's mode at the moment the
                 // intent arrives, so switching modes never needs a restart.
                 const mode = profile.current().mode;
+                const history = ws.conversationId
+                    ? conversationStore.messages(ws.conversationId).slice(-6)
+                        .filter(m => m.role === 'user' || m.role === 'assistant')
+                        .map(m => ({ role: m.role, text: String(m.text || '').slice(0, 240) }))
+                    : [];
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
                         openclawBridge.executeIntent(parsed.text, {
-                            interactive: true, signal,
+                            interactive: true, signal, history,
                             ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
                         })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));

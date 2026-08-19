@@ -219,7 +219,10 @@ test('an ANSWERED verdict is stripped and the prose is the answer', async (t) =>
     assert.strictEqual(result.text, 'It is at 3pm on Thursday.');
 });
 
-test('a model that ignores the verdict protocol still answers as before', async (t) => {
+test('a grounded reply that never declares ANSWERED is a refusal, not an answer', async (t) => {
+    // The verdict line is the commitment. Forgiving its absence once let a
+    // stray JSON action-blob through as an "answer" — fluent prose without
+    // the declaration is not an answer either.
     withModel(t, 'It is at 3pm on Thursday.');
 
     const result = await answerService.answer('when is my dentist appointment', {
@@ -227,8 +230,8 @@ test('a model that ignores the verdict protocol still answers as before', async 
             cite: 'email: "Reminder" from dentist', source: 'mail' }]
     });
 
-    assert.strictEqual(result.refused, false);
-    assert.strictEqual(result.text, 'It is at 3pm on Thursday.');
+    assert.strictEqual(result.refused, true);
+    assert.match(result.text, /nothing I found actually answers/);
 });
 
 test('a bare string is material too — a path grounds a where-answer', async (t) => {

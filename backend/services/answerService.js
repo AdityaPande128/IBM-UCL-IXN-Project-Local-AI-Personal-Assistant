@@ -401,6 +401,9 @@ async function answer(query, options = {}) {
 
         const opening = parseVerdict(first);
         if (grounded && opening.verdict === 'not_stated') return finish(refusal(used), true);
+        // The verdict line is the commitment: a grounded reply that never
+        // declares ANSWERED has not answered, however fluent the prose.
+        if (grounded && opening.verdict === null) return finish(refusal(used), true);
         let text = opening.prose;
 
         const { describesIntent } = require('./webAgent');

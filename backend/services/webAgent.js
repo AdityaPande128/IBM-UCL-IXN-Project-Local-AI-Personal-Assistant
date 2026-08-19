@@ -2987,8 +2987,28 @@ async function browse(goal, options = {}) {
         if (status === 'exhausted') {
             failure = failure || `stopped after ${budget} actions without reaching the goal`;
 
+            // A lost read-only run may be standing on its answer: before
+            // declaring defeat, try to conclude from the page in view. The
+            // answer layer refuses what the page does not state, so this
+            // cannot invent a result.
+            if (!mandate.size && observation) {
+                const inView = perception.passages(observation);
+                const concluded = inView.length
+                    ? await require('./answerService')
+                        .answer(goal, { passages: inView })
+                        .catch(() => null)
+                    : null;
+                if (concluded && concluded.is_successful && !concluded.refused) {
+                    status = 'success';
+                    answer = concluded.text;
+                    failure = null;
+                    actions.push({ action: 'done',
+                        reason: 'answered from the page in view', answer });
+                }
+            }
+
             const soughtFor = intent.query || subject(goal)[0] || null;
-            if (!mandate.size && searched && soughtFor) {
+            if (status === 'exhausted' && !mandate.size && searched && soughtFor) {
                 const missing = absent(observation, subject(goal));
                 if (missing.length) {
                     status = 'success';
