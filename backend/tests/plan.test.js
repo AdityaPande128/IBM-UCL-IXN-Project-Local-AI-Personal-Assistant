@@ -1128,3 +1128,32 @@ test('ATTACK: a grant redeems only the ask that was approved', async () => {
 
     cleanup(dir);
 });
+
+test('a guessed path on a named site does not survive validation', () => {
+    const guessed = planner.validatePlan({
+        goal: 'read the rate',
+        steps: [{ id: 's1', capability: 'web.read',
+            inputs: { url: 'https://example.co.uk/publications/rates' }, reason: 'read the rate page' }],
+        missing: []
+    }, { question: 'find the current rate on example.co.uk' });
+    assert.strictEqual(guessed.valid, false);
+    assert.match(guessed.errors.join(' '), /guessed address/);
+
+    const front = planner.validatePlan({
+        goal: 'read the front page',
+        steps: [{ id: 's1', capability: 'web.read',
+            inputs: { url: 'https://example.co.uk/' }, reason: 'read the front page' }],
+        missing: []
+    }, { question: 'find the current rate on example.co.uk' });
+    assert.strictEqual(front.valid, true,
+        `front page must pass: ${front.errors.join('; ')}`);
+
+    const given = planner.validatePlan({
+        goal: 'read the given page',
+        steps: [{ id: 's1', capability: 'web.read',
+            inputs: { url: 'https://example.co.uk/docs/api' }, reason: 'read the page the user gave' }],
+        missing: []
+    }, { question: 'read https://example.co.uk/docs/api for me' });
+    assert.strictEqual(given.valid, true,
+        `a given path must pass: ${given.errors.join('; ')}`);
+});

@@ -404,6 +404,26 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
             }
         }
 
+        // A path on a site the request only named is a guess: the model
+        // cannot know an unseen site's structure, and reading an invented
+        // address answers from imagination. Hosts may be guessed — that is
+        // how a named institution becomes its site — paths may not.
+        if (capability.id === 'web.read') {
+            const value = String(inputs.url || '');
+            if (!REFERENCE.test(value)) {
+                let aimed = null;
+                try { aimed = new URL(value); } catch { }
+                if (aimed && aimed.pathname && aimed.pathname !== '/'
+                    && !question.toLowerCase().includes(aimed.pathname.toLowerCase())) {
+                    errors.push(
+                        `${where}: "${aimed.pathname}" is a guessed address — the request `
+                        + 'named the site, not that page. Read the front page '
+                        + `("${aimed.origin}") if that is where the answer lives, or `
+                        + 'web.browse to find it on the site.');
+                }
+            }
+        }
+
         for (const [name, io] of Object.entries(capability.inputs)) {
             const value = inputs[name];
             if (typeof value !== 'string' || !String(io.type).includes('path')) continue;
