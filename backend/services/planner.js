@@ -1,5 +1,6 @@
 const configReader = require('../utils/configReader');
 const llmClient = require('./llmClient');
+const activityBus = require('./activityBus');
 const capabilityGraph = require('./capabilityGraph');
 const skillRetriever = require('./skillRetriever');
 const mailProvider = require('./mailProvider');
@@ -591,6 +592,7 @@ async function plan(request, options = {}) {
     const startedAt = Date.now();
     const graph = options.graph || capabilityGraph;
 
+    activityBus.publish('planner', 'planning', {});
     const { capabilities, retrieved } = await selectCapabilities(request, options);
     const conversation = [
         { role: 'system', content: buildPlanPrompt(capabilities, mailUrlFor(request), calendarUrlFor(request)) },

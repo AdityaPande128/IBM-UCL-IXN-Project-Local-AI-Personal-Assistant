@@ -229,10 +229,17 @@ async function say(chatId, text) {
     await call('sendMessage', { chat_id: chatId, text: String(text).slice(0, MAX_TEXT) });
 }
 
+let pendingApproval = null; // { id, until } — the question still on the table
+
+const SAYS_YES = /^\s*(yes|yeah|yep|sure|ok(ay)?|go ahead|do it|please do|build it)\b/i;
+const SAYS_NO = /^\s*(no|nope|don't|do not|stop|leave it|cancel|skip)\b/i;
+
 async function offerApproval(chatId, proposal) {
     await call('sendMessage', {
         chat_id: chatId,
-        text: `${proposal.summary || proposal.request || proposal.kind || 'An action'} — approve?`,
+        text: proposal.kind === 'build_skill'
+            ? `I don't have a skill for that — want me to build one? It takes a minute or two. Reply yes or no, or use the buttons.`
+            : `${proposal.summary || proposal.request || proposal.kind || 'An action'} — approve? Reply yes or no, or use the buttons.`,
         reply_markup: {
             inline_keyboard: [[
                 { text: 'Approve', callback_data: `apr:yes:${proposal.id}` },
@@ -290,6 +297,29 @@ async function handleMessage(message) {
     }
     if (!text) return;
 
+    if (pendingApproval && Date.now() < pendingApproval.until
+            && typeof deps.answer === 'function') {
+        const yes = SAYS_YES.test(text);
+        const no = SAYS_NO.test(text);
+        if (yes || no) {
+            const { id } = pendingApproval;
+            pendingApproval = null;
+            if (yes && !no) {
+                await say(chatId, 'Building the skill now — this takes a minute or two.');
+            }
+            const outcome = await deps.answer(id, yes && !no ? 'yes' : 'no')
+                .catch(err => ({ response: `That failed: ${err.message}` }));
+            const reply = outcome.response
+                || (yes && !no ? 'Approved and done.' : 'Okay, leaving it.');
+            await say(chatId, reply);
+            if (spokenBack && typeof deps.speak === 'function') {
+                await deps.speak(chatId, reply, call).catch(() => null);
+            }
+            return;
+        }
+        // Anything else is a new request; the buttons still answer the old one.
+    }
+
     if (typeof deps.execute !== 'function') {
         await say(chatId, 'The assistant is not taking requests right now.');
         return;
@@ -301,6 +331,7 @@ async function handleMessage(message) {
 
     if (result && result.status === 'needs_approval' && result.proposal) {
         await offerApproval(chatId, result.proposal);
+        pendingApproval = { id: result.proposal.id, until: Date.now() + 5 * 60000 };
         return;
     }
 
@@ -320,6 +351,7 @@ async function handleCallback(callback) {
     if (!match || typeof deps.answer !== 'function') return;
 
     const [, decision, id] = match;
+    if (pendingApproval && pendingApproval.id === id) pendingApproval = null;
     const outcome = await deps.answer(id, decision).catch(err => ({
         response: `That failed: ${err.message}`
     }));

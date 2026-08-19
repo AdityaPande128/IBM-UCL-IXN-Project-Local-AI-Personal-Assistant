@@ -2810,3 +2810,101 @@ select:focus-visible {
 .sidebar-resizer:hover {
   background: linear-gradient(to right, transparent, rgba(var(--accent-tint), 0.35), transparent);
 }
+
+/* ── Wake control ──────────────────────────────────────────────────────── */
+
+.wake-control {
+  position: relative;
+}
+
+.wake-toggle--heard {
+  color: var(--on-accent);
+  background: var(--teal);
+  border-color: transparent;
+}
+
+.wake-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  min-width: 240px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.wake-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.wake-menu-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-dim, rgba(160, 168, 180, 0.9));
+}
+
+/* ── Thinking indicator ────────────────────────────────────────────────── */
+
+.chat-bubble--thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--teal);
+  animation: thinking-bounce 1.2s ease-in-out infinite;
+}
+
+.thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes thinking-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.thinking-line {
+  font-size: 13px;
+  opacity: 0.85;
+}
+
+/* ── System theme swatch ───────────────────────────────────────────────── */
+
+.ob-theme-swatch--system {
+  background: linear-gradient(110deg, #0a0c11 50%, #ffffff 50%);
+  border: 1px solid rgba(128, 136, 150, 0.35);
+}
+
+.ob-voice-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.settings-field--sub {
+  margin-top: 8px;
+}
+
+.ob-theme-card--system {
+  background: linear-gradient(110deg, #0a0c11 50%, #f3f4f7 50%);
+  color: #8a93a5;
+}

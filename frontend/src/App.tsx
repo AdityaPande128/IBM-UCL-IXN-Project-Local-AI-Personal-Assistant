@@ -36,6 +36,25 @@ const VIEW_TITLES: Record<Exclude<View, "chat">, string> = {
 };
 
 const SIDEBAR_KEY = "jarvis-sidebar";
+const WAKE_KEY = "jarvis-wake";
+
+// Visibility of system status: while Jarvis works, the chat says which part
+// of the machinery is turning, in words, from the live activity feed.
+function describeActivity(latest?: { source: string; event: string; at: number }): string {
+  if (!latest || Date.now() - latest.at > 120000) return "Thinking…";
+  switch (`${latest.source}/${latest.event}`) {
+    case "router/decision": return "Choosing how to handle it…";
+    case "planner/planning": return "Working out a plan…";
+    case "plan/step": return "Working through the plan…";
+    case "generator/attempt": return "Writing a new skill…";
+    case "generator/verifying": return "Testing the new skill in a sandbox…";
+    case "generator/tests_failed": return "A test failed — rewriting and retrying…";
+    case "generator/installed": return "Skill installed — running it…";
+    case "skill/running": return "Running the skill…";
+    case "bridge/proposal": return "Waiting for your go-ahead…";
+    default: return "Thinking…";
+  }
+}
 
 const SUGGESTIONS = [
   "Check my inbox for unread emails",
@@ -77,6 +96,7 @@ function App() {
     wipeAllMemory,
     setIncognito,
     wakeMode,
+    wakeHeardAt,
     setWakeMode,
     sendBinary,
     sendIntent,
@@ -116,6 +136,11 @@ function App() {
   const [showActivity, setShowActivity] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [wakeWanted, setWakeWanted] = useState(
+    localStorage.getItem(WAKE_KEY) === "on"
+  );
+  const [wakeMenuOpen, setWakeMenuOpen] = useState(false);
+  const [wakeFlash, setWakeFlash] = useState(false);
   const [toasts, setToasts] = useState<{ id: number; text: string }[]>([]);
   const [wizardActive, setWizardActive] = useState(false);
   const [splashLate, setSplashLate] = useState(false);
@@ -147,6 +172,36 @@ function App() {
   useEffect(() => {
     invoke("set_wake_indicator", { listening: listening && wakeMode }).catch(() => {});
   }, [listening, wakeMode]);
+
+  // The recorded wish arms the ears whenever the pieces are ready; turning
+  // it off closes the microphone at once. Failure to open the mic clears
+  // the wish rather than pretending.
+  useEffect(() => {
+    if (!wakeWanted) {
+      stopListening();
+      setWakeMode(false);
+      return;
+    }
+    if (!connected || !voiceReady || !voiceEnabled || listening) return;
+    startListening().then((ok) => {
+      if (ok) setWakeMode(true);
+      else {
+        setWakeWanted(false);
+        localStorage.setItem(WAKE_KEY, "off");
+        pushToast("The microphone could not be opened — allow it in "
+          + "System Settings → Privacy & Security → Microphone.");
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wakeWanted, connected, voiceReady, voiceEnabled]);
+
+  // A summons lights the pill for a moment, so being heard is visible.
+  useEffect(() => {
+    if (!wakeHeardAt) return;
+    setWakeFlash(true);
+    const timer = setTimeout(() => setWakeFlash(false), 2500);
+    return () => clearTimeout(timer);
+  }, [wakeHeardAt]);
 
   useEffect(() => {
     localStorage.setItem(SIDEBAR_KEY, sidebarOpen ? "open" : "closed");
@@ -187,6 +242,7 @@ function App() {
       } else if (e.key === "Escape" && !settingsOpen) {
         setShowActivity(false);
         setShowDownloads(false);
+        setWakeMenuOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -233,21 +289,6 @@ function App() {
     }
   };
 
-  // The mic opens and the daemon arms together; either failing leaves both off.
-  const toggleWake = async () => {
-    if (listening) {
-      stopListening();
-      setWakeMode(false);
-      return;
-    }
-    if (!voiceReady && profile) {
-      voiceNotReady();
-      return;
-    }
-    if (await startListening()) {
-      setWakeMode(true);
-    }
-  };
 
   if (onboarding === null) {
     return (
@@ -343,19 +384,39 @@ function App() {
           </div>
           <div className="app-status">
             {voiceEnabled && (
-              <button
-                className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""}`}
-                onClick={toggleWake}
-                aria-pressed={listening && wakeMode}
-                aria-label={listening && wakeMode
-                  ? "Stop listening for Hey Jarvis"
-                  : "Start listening for Hey Jarvis"}
-                title={listening
-                  ? "Listening for “Hey Jarvis” — click to close the microphone"
-                  : "Start listening for “Hey Jarvis” (nothing is recorded until you do)"}
-              >
-                {listening && wakeMode ? "● Listening" : "Hey Jarvis"}
-              </button>
+              <div className="wake-control">
+                <button
+                  className={`activity-toggle ${listening && wakeMode ? "wake-toggle--live" : ""} ${wakeFlash ? "wake-toggle--heard" : ""}`}
+                  onClick={() => setWakeMenuOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={wakeMenuOpen}
+                  title="“Hey Jarvis” settings"
+                >
+                  {wakeFlash ? "● Heard you" : listening && wakeMode ? "● Listening" : "Hey Jarvis · off"}
+                </button>
+                {wakeMenuOpen && (
+                  <div className="wake-menu" role="menu">
+                    <label className="wake-menu-row">
+                      <input
+                        type="checkbox"
+                        checked={wakeWanted}
+                        onChange={(e) => {
+                          const on = e.target.checked;
+                          setWakeWanted(on);
+                          localStorage.setItem(WAKE_KEY, on ? "on" : "off");
+                          if (on && !voiceReady && profile) voiceNotReady();
+                        }}
+                      />
+                      <span>Listen for “Hey Jarvis”</span>
+                    </label>
+                    <div className="wake-menu-hint">
+                      {wakeWanted
+                        ? "The mic stays open on this Mac only; the pill lights up when it hears you."
+                        : "Nothing is recorded until this is on."}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
             {downloadsPending(downloads) && (
               <button
@@ -417,6 +478,8 @@ function App() {
                   suggestions={SUGGESTIONS}
                   onSuggest={connected ? sendIntent : undefined}
                   voiceEnabled={voiceEnabled}
+                  busy={busy}
+                  busyLine={busy ? describeActivity(activities[activities.length - 1]) : null}
                 />
                 {proposal && <ApprovalCard proposal={proposal} onDecision={sendDecision} />}
               </>

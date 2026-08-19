@@ -7,6 +7,7 @@ import type {
   OnboardingData,
 } from "../hooks/useWebSocket";
 import { applyTheme, storedTheme, type Theme } from "../theme";
+import { VOICE_CHOICES } from "../voices";
 import { BotSteps } from "./BotSteps";
 
 type Step =
@@ -228,6 +229,7 @@ export function Onboarding({
   const [agreed, setAgreed] = useState(false);
   const [voiceOn, setVoiceOn] = useState(resumed ? profile.voice.enabled : true);
   const [tts, setTts] = useState(resumed ? profile.voice.tts : true);
+  const [voiceName, setVoiceName] = useState(resumed ? (profile.voice.voice ?? "af_heart") : "af_heart");
   const [improvement, setImprovement] = useState(resumed ? profile.improvement : true);
 
   useEffect(() => {
@@ -357,7 +359,7 @@ export function Onboarding({
       improvement,
       engine,
       smith: improvement ? smith : null,
-      voice: { enabled: voiceOn, tts: voiceOn && tts },
+      voice: { enabled: voiceOn, tts: voiceOn && tts, voice: voiceName },
     });
   };
 
@@ -412,6 +414,14 @@ export function Onboarding({
             >
               <span className="ob-theme-swatch ob-theme-swatch--light" />
               Light
+            </button>
+            <button
+              className={`ob-theme-card ob-theme-card--system ${theme === "system" ? "ob-choice--picked" : ""}`}
+              aria-pressed={theme === "system"}
+              onClick={() => pickTheme("system")}
+            >
+              <span className="ob-theme-swatch ob-theme-swatch--system" />
+              Match my Mac
             </button>
           </div>
           <p className="ob-hint">You can change this any time in settings.</p>
@@ -628,6 +638,20 @@ export function Onboarding({
                   off and Jarvis answers in text only.
                 </span>
               </span>
+            </label>
+          )}
+          {voiceOn && tts && (
+            <label className="ob-check ob-check--sub ob-voice-pick">
+              <span className="ob-feature-title">Which voice?</span>
+              <select
+                className="settings-select"
+                value={voiceName}
+                onChange={(e) => setVoiceName(e.target.value)}
+              >
+                {VOICE_CHOICES.map((v) => (
+                  <option key={v.id} value={v.id}>{v.label}</option>
+                ))}
+              </select>
             </label>
           )}
           <div className="ob-nav">

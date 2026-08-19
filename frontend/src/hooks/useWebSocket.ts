@@ -198,9 +198,9 @@ export interface PermissionsData {
 export interface ProfileData {
   name: string;
   mode: "jarvis" | "openclaw";
-  theme: "dark" | "light";
+  theme: "dark" | "light" | "system";
   improvement: boolean;
-  voice: { enabled: boolean; tts: boolean };
+  voice: { enabled: boolean; tts: boolean; voice?: string };
   avatar: string;
   onboarded: boolean;
 }
@@ -254,12 +254,12 @@ export interface OnboardingData {
 
 export interface OnboardingApplyPayload {
   name: string;
-  theme: "dark" | "light";
+  theme: "dark" | "light" | "system";
   mode: "jarvis" | "openclaw";
   improvement: boolean;
   engine: string;
   smith?: string | null;
-  voice: { enabled: boolean; tts: boolean };
+  voice: { enabled: boolean; tts: boolean; voice?: string };
 }
 
 export interface OnboardingApplyResult {
@@ -271,9 +271,9 @@ export interface OnboardingApplyResult {
 export interface ProfileUpdate {
   name?: string;
   mode?: "jarvis" | "openclaw";
-  theme?: "dark" | "light";
+  theme?: "dark" | "light" | "system";
   improvement?: boolean;
-  voice?: { enabled?: boolean; tts?: boolean };
+  voice?: { enabled?: boolean; tts?: boolean; voice?: string };
   avatar?: string;
 }
 
@@ -350,6 +350,7 @@ interface UseWebSocketReturn {
   wipeAllMemory: () => void;
   setIncognito: (on: boolean) => void;
   wakeMode: boolean;
+  wakeHeardAt: number | null;
   setWakeMode: (on: boolean) => void;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
@@ -456,6 +457,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [onboardingApply, setOnboardingApply] = useState<OnboardingApplyResult | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
+  const [wakeHeardAt, setWakeHeardAt] = useState<number | null>(null);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const memoryStatusRef = useRef<string | undefined>(undefined);
@@ -725,6 +727,7 @@ export function useWebSocket(): UseWebSocketReturn {
           return;
         }
         if (msg.type === "wake") {
+          setWakeHeardAt(Date.now());
           addMessage("user", msg.command ? `“Hey Jarvis, ${msg.command}”` : "“Hey Jarvis”");
           return;
         }
@@ -1081,6 +1084,7 @@ export function useWebSocket(): UseWebSocketReturn {
     wipeAllMemory,
     setIncognito,
     wakeMode,
+    wakeHeardAt,
     setWakeMode,
     sendBinary,
     sendIntent,

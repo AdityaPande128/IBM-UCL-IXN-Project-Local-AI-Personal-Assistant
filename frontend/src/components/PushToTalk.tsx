@@ -5,6 +5,8 @@ interface PushToTalkProps {
   onStop: () => void;
 }
 
+// One click opens the microphone, the next sends what was said. The square
+// stop glyph and the pulsing ring say which half of that you are in.
 export function PushToTalk({
   recording,
   disabled,
@@ -14,26 +16,15 @@ export function PushToTalk({
   return (
     <div className="ptt-container">
       <button
-      aria-label={recording ? "Release to send" : "Hold to talk"}
-      aria-pressed={recording}
-      onKeyDown={(e) => {
-        if ((e.key === " " || e.key === "Enter") && !e.repeat && !recording && !disabled) {
-          e.preventDefault();
-          onStart();
-        }
-      }}
-      onKeyUp={(e) => {
-        if ((e.key === " " || e.key === "Enter") && recording) {
-          e.preventDefault();
-          onStop();
-        }
-      }}
+        aria-label={recording ? "Stop and send" : "Talk to Jarvis"}
+        aria-pressed={recording}
+        title={recording ? "Click to stop and send" : "Click, speak, click again to send"}
         className={`ptt-button ${recording ? "ptt-button--active" : ""} ${disabled ? "ptt-button--disabled" : ""}`}
-        onMouseDown={!disabled ? onStart : undefined}
-        onMouseUp={!disabled ? onStop : undefined}
-        onMouseLeave={recording ? onStop : undefined}
-        onTouchStart={!disabled ? onStart : undefined}
-        onTouchEnd={!disabled ? onStop : undefined}
+        onClick={() => {
+          if (disabled) return;
+          if (recording) onStop();
+          else onStart();
+        }}
         disabled={disabled}
       >
         <div className="ptt-icon">

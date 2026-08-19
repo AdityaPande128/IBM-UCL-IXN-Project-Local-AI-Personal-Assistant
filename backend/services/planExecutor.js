@@ -1,3 +1,4 @@
+const activityBus = require('./activityBus');
 const capabilityGraph = require('./capabilityGraph');
 const traceStore = require('./traceStore');
 const labels = require('../security/labels');
@@ -161,6 +162,8 @@ async function run(plan, options = {}) {
     let failure = null;
 
     for (const [ordinal, step] of plan.steps.entries()) {
+        activityBus.publish('plan', 'step', {
+            capability: step.capability, ordinal, of: plan.steps.length });
         if (options.signal && options.signal.aborted) {
             failure = { step: step.id, error: 'stopped before this step', aborted: true };
             record.push({ ...step, status: 'skipped', error: failure.error, durationMs: 0 });

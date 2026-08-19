@@ -46,11 +46,15 @@ function initialsOf(name: string) {
 
 const WIDTH_KEY = "jarvis-sidebar-width";
 const MIN_WIDTH = 208;
-const MAX_WIDTH = 340;
+
+// The sidebar may take up to 85% of the window; the ceiling moves with it.
+function maxWidth() {
+  return Math.max(MIN_WIDTH, Math.round(window.innerWidth * 0.85));
+}
 
 function storedWidth() {
   const value = Number(localStorage.getItem(WIDTH_KEY));
-  return Number.isFinite(value) && value >= MIN_WIDTH && value <= MAX_WIDTH ? value : 248;
+  return Number.isFinite(value) && value >= MIN_WIDTH ? Math.min(value, maxWidth()) : 248;
 }
 
 export function Sidebar({
@@ -72,7 +76,7 @@ export function Sidebar({
     document.body.style.cursor = "col-resize";
     const onMove = (move: MouseEvent) => {
       if (!dragging.current) return;
-      setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, move.clientX)));
+      setWidth(Math.min(maxWidth(), Math.max(MIN_WIDTH, move.clientX)));
     };
     const onUp = () => {
       dragging.current = false;
@@ -162,6 +166,17 @@ export function Sidebar({
             )}
           </button>
         ))}
+        <button
+          className="sidebar-nav-item"
+          onClick={onOpenSettings}
+          title="Settings (⌘,)"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z" />
+            <path d="M16.2 12.4a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5v.2a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H2a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3h.1a1.6 1.6 0 0 0 1-1.5V2a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.5 1h.2a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z" />
+          </svg>
+          Settings
+        </button>
       </nav>
 
       <button className="sidebar-profile" onClick={onOpenSettings} title="Open settings">
@@ -182,14 +197,14 @@ export function Sidebar({
         aria-orientation="vertical"
         aria-label="Resize the sidebar"
         aria-valuemin={MIN_WIDTH}
-        aria-valuemax={MAX_WIDTH}
+        aria-valuemax={maxWidth()}
         aria-valuenow={width}
         tabIndex={0}
         onKeyDown={(e) => {
           if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
           e.preventDefault();
           setWidth((current) => {
-            const next = Math.min(MAX_WIDTH,
+            const next = Math.min(maxWidth(),
               Math.max(MIN_WIDTH, current + (e.key === "ArrowRight" ? 16 : -16)));
             localStorage.setItem(WIDTH_KEY, String(next));
             return next;

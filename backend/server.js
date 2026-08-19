@@ -118,7 +118,9 @@ function applyOnboarding(parsed) {
         theme: parsed.theme,
         mode: parsed.mode,
         improvement,
-        voice: { enabled: selection.voice, tts: selection.tts }
+        voice: { enabled: selection.voice, tts: selection.tts,
+            ...(parsed.voice && parsed.voice.voice
+                ? { voice: String(parsed.voice.voice) } : {}) }
     });
     if (applied.status !== 'applied') return applied;
 
@@ -211,11 +213,30 @@ wss.on('connection', (ws) => {
 
         if (isBinary) {
             if (ws.wakeMode) {
+                // A spoken approval question holds a short window in which
+                // the next utterance is the answer, not a summons.
+                const pending = ws.pendingVoiceApproval;
+                if (pending && Date.now() < pending.until) {
+                    const heard = String(await aiPipeline.transcribeAudio(message)
+                        .catch(() => '') || '').toLowerCase();
+                    const yes = /\b(yes|yeah|yep|sure|go ahead|do it|please do|build it)\b/.test(heard);
+                    const no = /\b(no|nope|don't|do not|stop|leave it|cancel|skip)\b/.test(heard);
+                    if (yes || no) {
+                        ws.pendingVoiceApproval = null;
+                        await withActivity(ws, () =>
+                            aiPipeline.answerAloud(pending.id, yes && !no, ws));
+                        return;
+                    }
+                    // Anything else falls through to the wake probe below;
+                    // the window stays open until it expires.
+                }
                 // Idle speech dies here: no reply, no record, no transcript.
                 const probed = await wakeWord.probe(message);
                 if (!probed.wake) return;
                 ws.send(JSON.stringify({ type: 'wake', command: probed.command }));
                 if (probed.command) {
+                    // A summons starts its own chat, like walking up fresh.
+                    ws.conversationId = null;
                     await withActivity(ws, () => aiPipeline.respondTo(probed.command, ws));
                 }
                 return;
@@ -365,8 +386,17 @@ wss.on('connection', (ws) => {
                     withActivity(ws, () =>
                         openclawBridge.answerProposal(parsed.id,
                             parsed.decision === 'yes' ? 'yes' : 'no', { signal })));
+                // The accepted id is what turns the thinking indicator on
+                // while the skill builds.
+                ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id,
+                    position: job.position }));
                 const result = await job.result;
                 ws.send(JSON.stringify({ type: 'intent_result', id: job.id, ...result }));
+                if (result && result.response) {
+                    conversationStore.append(ws,
+                        result.status === 'error' ? 'error' : 'assistant',
+                        result.response, result.artifacts);
+                }
                 return;
             }
 

@@ -4,6 +4,7 @@ const intentQueue = require('./intentQueue');
 const activityBus = require('./activityBus');
 const conversationStore = require('./conversationStore');
 const configReader = require('../utils/configReader');
+const profile = require('./profile');
 
 const config = configReader.readConfig();
 const INFERENCE_URL = process.env.INFERENCE_URL || `http://127.0.0.1:${config.ports.inference}`;
@@ -125,7 +126,8 @@ async function transcribeAudio(audioBuffer) {
 async function synthesizeChunk(textChunk, chunkIndex) {
     console.log(`[TTS: Kokoro-82M] synthesizing chunk ${chunkIndex} (${textChunk.length} chars)`);
 
-    const formBody = `text=${encodeURIComponent(textChunk)}&voice=af_heart`;
+    const chosen = profile.current().voice.voice || 'af_heart';
+    const formBody = `text=${encodeURIComponent(textChunk)}&voice=${encodeURIComponent(chosen)}`;
 
     try {
         const result = await httpPost('/tts', formBody, 'application/x-www-form-urlencoded');
@@ -159,6 +161,47 @@ function record(ws, role, text, artifacts) {
     if (role === 'error' && !ws.conversationId) return;
     const created = conversationStore.append(ws, role, text, artifacts);
     if (created) send(ws, { type: 'conversation_started', ...created });
+}
+
+async function speakText(text, ws) {
+    const spokenText = speakableSummary(String(text || ''));
+    const textChunks = chunkTextDynamically(spokenText);
+    let spoken = 0;
+    for (let i = 0; i < textChunks.length; i++) {
+        if (!isOpen(ws)) {
+            console.log('[Pipeline] Client disconnected; abandoning synthesis.');
+            return spoken;
+        }
+        const audioChunk = await synthesizeChunk(textChunks[i], i);
+        if (audioChunk) { ws.send(audioChunk); spoken++; }
+    }
+    if (spoken === 0 && textChunks.length > 0) {
+        send(ws, { type: 'speech_unavailable',
+                   message: 'The reply could not be spoken; text only.' });
+    }
+    console.log(`[Pipeline] Spoke ${spoken}/${textChunks.length} chunk(s).`);
+    return spoken;
+}
+
+// The spoken half of the approval card: acknowledge at once, run the
+// decision, then speak the outcome like any other reply.
+async function answerAloud(proposalId, approved, ws) {
+    record(ws, 'user', approved ? '“Yes.”' : '“No.”');
+    if (approved) {
+        await speakText('Building the skill now — this takes a minute or two.', ws);
+    }
+    const job = intentQueue.submit(({ signal }) =>
+        openclawBridge.answerProposal(proposalId, approved ? 'yes' : 'no', { signal }));
+    send(ws, { type: 'intent_accepted', id: job.id, position: job.position });
+    let result = await job.result;
+    const responseText = result.response || result.error
+        || (approved ? 'Done.' : 'Okay, leaving it.');
+    result = { ...result, response: responseText };
+    send(ws, { type: 'intent_result', id: job.id, ...result });
+    record(ws, result.status === 'error' ? 'error' : 'assistant',
+        responseText, result.artifacts);
+    await speakText(responseText, ws);
+    send(ws, { type: 'pipeline_complete' });
 }
 
 async function handleIncomingAudio(audioBuffer, ws) {
@@ -209,32 +252,16 @@ async function respondTo(transcribedText, ws) {
         } finally {
             unsubscribe();
         }
-        const responseText = llmResult.response;
-
-        const spokenText = speakableSummary(responseText);
-        if (spokenText !== responseText) {
-            console.log(`[Pipeline] Reply condensed for speech: ${responseText.length} -> ${spokenText.length} chars.`);
+        // A question that needs a yes opens a spoken window for the answer;
+        // the daemon treats the next utterance as the decision, not a summons.
+        if (llmResult.status === 'needs_approval' && llmResult.proposal) {
+            ws.pendingVoiceApproval = {
+                id: llmResult.proposal.id,
+                until: Date.now() + 45000
+            };
         }
 
-        const textChunks = chunkTextDynamically(spokenText);
-        console.log(`[Pipeline] Response chunked into ${textChunks.length} clauses for TTS.`);
-
-        let spoken = 0;
-        for (let i = 0; i < textChunks.length; i++) {
-            if (!isOpen(ws)) {
-                console.log('[Pipeline] Client disconnected; abandoning synthesis.');
-                return;
-            }
-            const audioChunk = await synthesizeChunk(textChunks[i], i);
-            if (audioChunk) { ws.send(audioChunk); spoken++; }
-        }
-
-        if (spoken === 0 && textChunks.length > 0) {
-            send(ws, { type: 'speech_unavailable',
-                       message: 'The reply could not be spoken; text only.' });
-        }
-
-        console.log(`[Pipeline] Complete: ${spoken}/${textChunks.length} chunk(s) spoken.`);
+        await speakText(llmResult.response, ws);
         send(ws, { type: 'pipeline_complete' });
 
     } catch (err) {
@@ -247,6 +274,8 @@ async function respondTo(transcribedText, ws) {
 module.exports = {
     handleIncomingAudio,
     respondTo,
+    speakText,
+    answerAloud,
     chunkTextDynamically,
     speakableSummary,
     transcribeAudio,

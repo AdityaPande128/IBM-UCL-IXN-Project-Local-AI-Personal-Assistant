@@ -7,7 +7,10 @@ const fs = require('fs');
 const configReader = require('../utils/configReader');
 
 const MODES = ['jarvis', 'openclaw'];
-const THEMES = ['dark', 'light'];
+const THEMES = ['dark', 'light', 'system'];
+// The Kokoro voices offered by name; every one ships inside the TTS model.
+const VOICES = ['af_heart', 'af_bella', 'af_nicole', 'af_sky',
+    'am_adam', 'am_michael', 'bf_emma', 'bf_isabella', 'bm_george', 'bm_daniel'];
 const MAX_NAME = 80;
 // A small square photo as a data URI; anything bigger belongs on disk, not
 // in config.
@@ -21,7 +24,8 @@ function read(config) {
         mode: MODES.includes(stored.mode) ? stored.mode : 'jarvis',
         theme: THEMES.includes(stored.theme) ? stored.theme : 'dark',
         improvement: stored.improvement === true,
-        voice: { enabled: voice.enabled === true, tts: voice.tts === true },
+        voice: { enabled: voice.enabled === true, tts: voice.tts === true,
+            voice: VOICES.includes(voice.voice) ? voice.voice : 'af_heart' },
         avatar: typeof stored.avatar === 'string' ? stored.avatar : '',
         onboarded: stored.onboarded === true
     };
@@ -77,6 +81,9 @@ function validate(update) {
                 return `voice.${key} must be true or false.`;
             }
         }
+        if (update.voice.voice !== undefined && !VOICES.includes(update.voice.voice)) {
+            return `"${update.voice.voice}" is not one of the installed voices.`;
+        }
     }
     return null;
 }
@@ -104,4 +111,4 @@ function apply(update) {
     return { status: 'applied', profile: read(config) };
 }
 
-module.exports = { read, current, improvementEnabled, validate, apply, MODES, THEMES };
+module.exports = { read, current, improvementEnabled, validate, apply, MODES, THEMES, VOICES };

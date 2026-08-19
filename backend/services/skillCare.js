@@ -1,5 +1,6 @@
 const path = require('path');
 
+const activityBus = require('./activityBus');
 const skillExecutor = require('./skillExecutor');
 const proposals = require('./proposals');
 const profile = require('./profile');
@@ -24,6 +25,7 @@ function blockedPath(stderr, parameters) {
 }
 
 async function run(skill, parameters, options = {}) {
+    activityBus.publish('skill', 'running', { skill: skill.name });
     const first = await skillExecutor.execute(skill, parameters);
     if (first.status !== 'error') return first;
 

@@ -16,6 +16,8 @@ interface ChatLogProps {
   suggestions?: string[];
   onSuggest?: (text: string) => void;
   voiceEnabled?: boolean;
+  busy?: boolean;
+  busyLine?: string | null;
 }
 
 function formatTime(date: Date) {
@@ -84,7 +86,7 @@ function greeting(name?: string) {
   return name ? `${part}, ${name}.` : `${part}.`;
 }
 
-export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceEnabled }: ChatLogProps) {
+export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceEnabled, busy, busyLine }: ChatLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -95,7 +97,7 @@ export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceE
   const followRef = useRef(true);
   useEffect(() => {
     if (followRef.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, busy, busyLine]);
 
   return (
     <div
@@ -113,7 +115,7 @@ export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceE
             <div className="chat-empty-orb" />
             <div className="chat-empty-title">{greeting(greetingName)}</div>
             <div className="chat-empty-hint">
-              {voiceEnabled ? "Type below, or hold the mic to talk." : "Type below to get started."}
+              {voiceEnabled ? "Type below, or tap the mic to talk." : "Type below to get started."}
             </div>
             {onSuggest && (suggestions?.length ?? 0) > 0 && (
               <div className="chat-suggestions">
@@ -153,6 +155,19 @@ export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceE
               </div>
             </div>
           )
+        )}
+        {busy && (
+          <div className="chat-row chat-row--assistant" aria-live="polite">
+            <div className="chat-meta">
+              <span>Jarvis</span>
+            </div>
+            <div className="chat-bubble chat-bubble--thinking">
+              <span className="thinking-dots" aria-hidden="true">
+                <span /><span /><span />
+              </span>
+              <span className="thinking-line">{busyLine ?? "Thinking…"}</span>
+            </div>
+          </div>
         )}
         <div ref={bottomRef} />
       </div>

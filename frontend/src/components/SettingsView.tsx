@@ -11,7 +11,8 @@ import type {
   SettingsResult,
   SettingsUpdate,
 } from "../hooks/useWebSocket";
-import { applyTheme } from "../theme";
+import { applyTheme, type Theme } from "../theme";
+import { VOICE_CHOICES } from "../voices";
 import { ArmButton } from "./Confirm";
 import { BotSteps } from "./BotSteps";
 import { Pending } from "./Pending";
@@ -360,13 +361,14 @@ export function SettingsView({
                       className="settings-select"
                       value={profile.theme}
                       onChange={(e) => {
-                        const theme = e.target.value as "dark" | "light";
+                        const theme = e.target.value as Theme;
                         applyTheme(theme);
                         onUpdateProfile({ theme });
                       }}
                     >
                       <option value="dark">Dark</option>
                       <option value="light">Light</option>
+                      <option value="system">Match my Mac</option>
                     </select>
                   </div>
                 </>
@@ -486,6 +488,20 @@ export function SettingsView({
                         onChange={(e) => onUpdateProfile({ voice: { tts: e.target.checked } })}
                       />
                       Jarvis speaks back
+                    </label>
+                  )}
+                  {profile.voice.enabled && profile.voice.tts && (
+                    <label className="settings-field settings-field--sub">
+                      <span className="settings-label">Voice</span>
+                      <select
+                        className="settings-select"
+                        value={profile.voice.voice ?? "af_heart"}
+                        onChange={(e) => onUpdateProfile({ voice: { voice: e.target.value } })}
+                      >
+                        {VOICE_CHOICES.map((v) => (
+                          <option key={v.id} value={v.id}>{v.label}</option>
+                        ))}
+                      </select>
                     </label>
                   )}
                 </div>
