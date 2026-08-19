@@ -5,6 +5,8 @@
 # daemon restart); the tailnet path needs `tailscale serve` instead.
 TOKEN=$(cat "$HOME/.jarvis/socket-token" 2>/dev/null)
 [ -z "$TOKEN" ] && { echo "No socket token yet; start the daemon once first."; exit 1; }
+SECRET=$(cat "$HOME/.jarvis/pairing-secret" 2>/dev/null)
+[ -z "$SECRET" ] && { echo "No pairing secret yet; start the daemon once first."; exit 1; }
 HOST=${1:-}
 if [ -z "$HOST" ] && command -v tailscale >/dev/null 2>&1; then
     HOST=$(tailscale ip -4 2>/dev/null | head -1)
@@ -16,5 +18,5 @@ if [ -z "$HOST" ]; then
 fi
 [ -z "$HOST" ] && { echo "No address found; pass one: pair-phone.sh <host>"; exit 1; }
 echo "Pairing target: $HOST:8080"
-qrencode -t ansiutf8 "{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\"}"
+qrencode -t ansiutf8 "{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\",\"secret\":\"$SECRET\"}"
 echo "Scan from the app's pairing screen. Treat this code like a password."

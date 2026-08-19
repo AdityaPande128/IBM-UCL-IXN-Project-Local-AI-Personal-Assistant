@@ -7,6 +7,7 @@ const test = require('node:test');
 const assert = require('node:assert');
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-sync-'));
+process.env.JARVIS_DIRECT = 'off';
 process.env.PORT = '18097';
 process.env.JARVIS_SOCKET_TOKEN_PATH = path.join(scratch, 'socket-token');
 process.env.JARVIS_CONVERSATIONS_DB = path.join(scratch, 'conversations.db');

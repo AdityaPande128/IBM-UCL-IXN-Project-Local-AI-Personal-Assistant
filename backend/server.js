@@ -1032,6 +1032,23 @@ async function boot() {
         console.warn(`[Files] inbox unavailable: ${err.message}`);
     }
 
+    // Jarvis Direct: the phone reaches this Mac from anywhere by punching
+    // through both NATs; the rendezvous relay sees only ciphertext. Opt-out
+    // via env; a missing native module degrades to LAN-and-Telegram only.
+    if (process.env.JARVIS_DIRECT !== 'off') {
+        try {
+            const pairingSecret = require('./services/pairingSecret');
+            const directTransport = require('./services/directTransport');
+            directTransport.start({
+                secret: pairingSecret.issue(process.env.JARVIS_PAIRING_SECRET_PATH),
+                port: PORT,
+                token: SOCKET_TOKEN
+            });
+        } catch (err) {
+            console.warn(`[Direct] disabled: ${err.message}`);
+        }
+    }
+
     // Loopback unless the config opts into the LAN; the tailnet path never
     // needs more than loopback, and the token gates either way.
     const bindHost = (config.remote && config.remote.lan_bind === true)
