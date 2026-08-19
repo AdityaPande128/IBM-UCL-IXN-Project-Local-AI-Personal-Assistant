@@ -434,7 +434,7 @@ test('indexed chunks carry a label, so retrieval still knows they are personal',
 });
 
 
-test('the socket token is issued fresh, written 0600, and verified strictly', () => {
+test('the socket token is issued once, written 0600, and verified strictly', () => {
     const socketAuth = require('../services/socketAuth');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-tok-'));
     const tokenPath = path.join(dir, 'socket-token');
@@ -444,7 +444,13 @@ test('the socket token is issued fresh, written 0600, and verified strictly', ()
     assert.strictEqual(fs.readFileSync(tokenPath, 'utf8'), token);
     assert.strictEqual(fs.statSync(tokenPath).mode & 0o777, 0o600);
 
-    assert.notStrictEqual(socketAuth.issue(tokenPath), token, 'a boot must not reuse tokens');
+    // Two daemons can race for the port at boot; the loser re-running
+    // issue() must not disinherit the winner's clients.
+    assert.strictEqual(socketAuth.issue(tokenPath), token,
+        'an existing token is reused, not rotated');
+    fs.writeFileSync(tokenPath, 'not a token');
+    assert.notStrictEqual(socketAuth.issue(tokenPath), token,
+        'a malformed token file is replaced with a fresh one');
 
     assert.strictEqual(socketAuth.verify(token, token), true);
     assert.strictEqual(socketAuth.verify(token, 'f'.repeat(64)), false);

@@ -14,6 +14,14 @@ function resolvePath(configured) {
 
 function issue(configuredPath) {
     const tokenPath = resolvePath(configuredPath);
+    // A token that exists is reused, not rotated. Two daemons can race for
+    // the port at startup; if the loser rotated the file on its way down,
+    // every client would present the dead daemon's token to the living one
+    // and be refused until someone restarted the world.
+    try {
+        const existing = fs.readFileSync(tokenPath, 'utf8').trim();
+        if (/^[0-9a-f]{64}$/.test(existing)) return existing;
+    } catch { /* no token yet — mint one */ }
     const token = crypto.randomBytes(32).toString('hex');
     fs.mkdirSync(path.dirname(tokenPath), { recursive: true, mode: 0o700 });
     fs.writeFileSync(tokenPath, token, { mode: 0o600 });
