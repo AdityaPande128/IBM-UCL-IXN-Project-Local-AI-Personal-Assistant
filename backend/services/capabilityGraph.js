@@ -395,8 +395,11 @@ function builtins() {
             tier: TIER.PERCEPTION,
             description:
                 'Open one web page and read it, returning its text as passages. Use this ' +
-                'when the user gives a URL or asks what a specific page says. It reads only ' +
-                'the page given; it does not follow links or search.',
+                'only when the named page IS where the answer lives — a URL the user gave, ' +
+                'or a page needing no finding. Naming a site is not naming the page: a ' +
+                'price, a rate, an opening time or any fact that lives somewhere ON a site ' +
+                'has to be found first, and finding is web.browse. It reads only the page ' +
+                'given; it does not follow links or search.',
             inputs: {
                 url: { type: 'url', required: true, description: 'full https:// address' }
             },
