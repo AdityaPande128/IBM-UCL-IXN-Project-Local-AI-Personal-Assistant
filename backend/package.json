@@ -13,6 +13,7 @@
     "bench:devset": "node tools/router-devset.js",
     "bench:plans": "node tools/plan-devset.js",
     "bench:web": "node tools/web-devset.js",
+    "bench:unseen": "node tools/unseen-devset.js",
     "bench:mail": "node tools/mail-devset.js",
     "bench:distil": "node tools/distil-devset.js",
     "distil": "node tools/distil.js"

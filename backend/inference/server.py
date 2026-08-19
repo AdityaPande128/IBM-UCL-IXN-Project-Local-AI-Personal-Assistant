@@ -14,6 +14,11 @@ from fastapi.responses import Response, StreamingResponse
 # log keeps sizes, not contents, unless debugging explicitly asks.
 LOG_CONTENT = os.environ.get("JARVIS_LOG_PROMPTS") == "1"
 
+# Model-seconds for the evaluation protocol: cumulative wall time spent
+# inside generate(), by model, since boot. The harness differences two
+# /stats snapshots to cost a task; both systems share this server.
+GENERATION_STATS = {"requests": 0, "seconds": 0.0, "by_model": {}}
+
 app = FastAPI(title="Jarvis Inference Server")
 
 import json
@@ -436,12 +441,23 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
             prompt_arg = prompt
             prompt_tokens = None
 
+    generation_started = time.perf_counter()
     try:
         response = generate(target_model, target_tokenizer, prompt=prompt_arg,
                             **generate_kwargs)
     finally:
         if PREFIX_CACHE is not None and prompt_tokens is not None:
             PREFIX_CACHE.end(cache_key, prompt_tokens)
+        generation_seconds = time.perf_counter() - generation_started
+        ledger_key = str(model_id or "unknown")
+        GENERATION_STATS["requests"] += 1
+        GENERATION_STATS["seconds"] += generation_seconds
+        per_model = GENERATION_STATS["by_model"].setdefault(
+            ledger_key, {"requests": 0, "seconds": 0.0})
+        per_model["requests"] += 1
+        per_model["seconds"] += generation_seconds
+        print(f"[Inference] {ledger_key} generated in {generation_seconds:.2f}s",
+              flush=True)
 
     response = _strip_thinking(response)
 
@@ -962,6 +978,12 @@ async def embed(req: dict):
     except Exception as e:
         print(f"[Embed] Error: {e}", flush=True)
         return {"error": str(e)}
+
+
+@app.get("/stats")
+async def stats():
+    """Cumulative time inside generate(), by model, since boot."""
+    return {"generation": GENERATION_STATS}
 
 
 @app.get("/health")
