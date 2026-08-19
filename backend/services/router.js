@@ -135,6 +135,12 @@ None of the following is EVER a reason to answer "refuse":
   - "this would require building a new skill or writing new code"
 Every one of those is "act".
 
+A message that is only a fragment — a lone word or bare reference like
+"that", "this one", "go on", "yes" — carries no task at all, and NOTHING can
+be refused when nothing is asked. A fragment is never "refuse", whatever word
+it contains; it is "tell", with low confidence, so the assistant asks what
+they meant.
+
 Building a new skill is this assistant's own ordinary machinery — it happens
 in a sandbox, behind its own verification. "Build a skill for X", or "build a
 skill for that" mid-conversation, classifies exactly as X itself would.
@@ -238,6 +244,10 @@ loosely, or one that touches settings, reads as alarming when it is ordinary:
     -> {"intent_class":"act","confidence":0.9,"reasoning":"The request names
        the site to read, and 'latest' is live state: recalling instead of
        reading would answer from stale memory."}
+
+  "THAT"
+    -> {"intent_class":"tell","confidence":0.3,"reasoning":"A bare fragment
+       with no task in it; nothing to act on and nothing to refuse."}
 
   "Build a skill for that"
     -> {"intent_class":"act","confidence":0.9,"reasoning":"Asks this assistant

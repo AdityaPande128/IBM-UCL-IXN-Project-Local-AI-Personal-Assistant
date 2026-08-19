@@ -20,13 +20,25 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
     try {
       chunksRef.current = [];
 
+      // Raw capture: macOS voice processing (echo cancellation, auto gain)
+      // ducks and clips dictated speech, which whisper then never sees.
+      // Nothing plays back during push-to-talk, so there is no echo to cancel.
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true },
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
       });
 
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       const source = audioCtx.createMediaStreamSource(stream);
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      // Half-second buffers: fewer main-thread callbacks, fewer dropped
+      // frames while React is busy. Latency does not matter here — the
+      // audio only leaves when the user clicks stop.
+      const processor = audioCtx.createScriptProcessor(8192, 1, 1);
 
       processor.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
