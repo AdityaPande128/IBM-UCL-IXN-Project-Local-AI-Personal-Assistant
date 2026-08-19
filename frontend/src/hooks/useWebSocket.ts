@@ -459,6 +459,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [profileError, setProfileError] = useState<string | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const [wakeHeardAt, setWakeHeardAt] = useState<number | null>(null);
+  const [remoteBusy, setRemoteBusy] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
   const memoryStatusRef = useRef<string | undefined>(undefined);
@@ -605,8 +606,48 @@ export function useWebSocket(): UseWebSocketReturn {
           ]);
           return;
         }
+        if (msg.type === "conversation_event") {
+          // Another surface is talking; this window keeps up without ever
+          // hearing its own words back (the daemon excludes the origin).
+          if (msg.kind === "started") {
+            setConversations((prev) => [
+              {
+                id: msg.conversation.id,
+                title: msg.conversation.title ?? "New chat",
+                updated_at: new Date().toISOString(),
+                messages: 1,
+              },
+              ...prev.filter((c) => c.id !== msg.conversation.id),
+            ]);
+          }
+          if (msg.kind === "message") {
+            setConversations((prev) => {
+              const hit = prev.find((c) => c.id === msg.conversation.id);
+              if (!hit) return prev;
+              return [
+                { ...hit, updated_at: new Date().toISOString() },
+                ...prev.filter((c) => c.id !== msg.conversation.id),
+              ];
+            });
+          }
+          if (
+            (msg.kind === "started" || msg.kind === "message") &&
+            msg.message &&
+            activeConversationRef.current === msg.conversation.id
+          ) {
+            addMessage(msg.message.role, msg.message.text, msg.message.artifacts);
+          }
+          if (msg.kind === "proposal" && msg.proposal) {
+            setProposal(msg.proposal);
+          }
+          if (msg.kind === "busy" && activeConversationRef.current === msg.conversation.id) {
+            setRemoteBusy(!!msg.busy);
+          }
+          return;
+        }
         if (msg.type === "conversation_messages") {
           setActiveConversation(msg.id ?? null);
+          setRemoteBusy(false);
           setMessages(
             (msg.messages ?? []).map(
               (row: { ts: string; role: string; text: string; artifacts?: MessageArtifacts }, i: number) => ({
@@ -1077,7 +1118,7 @@ export function useWebSocket(): UseWebSocketReturn {
     selectConversation,
     deleteConversation,
     openclawConnected,
-    busy: activeIntents.length > 0,
+    busy: activeIntents.length > 0 || remoteBusy,
     messages,
     activities,
     proposal,
