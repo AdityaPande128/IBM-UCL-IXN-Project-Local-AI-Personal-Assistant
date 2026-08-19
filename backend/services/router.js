@@ -315,7 +315,7 @@ Critical Rules:
 2a. When you set "target_skill", the keys of "parameters" MUST be the parameter names shown in that skill's [brackets] below, verbatim including underscores. Do not rename, prefix, or invent keys.
 2b. "generate_new_skill" and a non-null "target_skill" contradict each other. If you have named a skill, "intent_type" is "execute_existing". If you mean to write a new skill, "target_skill" MUST be null.
 2c. Paths: copy an explicit path from the request character for character. When the user names a folder without a path — "my Downloads", "the Desktop", "my Documents" — write it as a home-relative path such as "~/Downloads", "~/Desktop", "~/Documents". Never emit a bare folder name on its own.
-3. If uncertain, reflect that uncertainty in the confidence score. The system degrades a low-confidence answer to a clarifying question on its own.
+3. Confidence scores YOUR DECISION, not skill coverage. A sure "generate_new_skill" — you understood the request and checked that nothing installed covers it — is HIGH confidence, 0.8 or above; that no skill matches is the finding, not a doubt. Low confidence means only that you cannot tell what the user wants. The system degrades a low-confidence answer to a clarifying question on its own.
 
 === INSTALLED SKILLS (${skills.length}) ===
 Check every one of these against the request before choosing "generate_new_skill".

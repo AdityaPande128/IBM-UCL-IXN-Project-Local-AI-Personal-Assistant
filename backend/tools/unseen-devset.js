@@ -166,7 +166,7 @@ async function runJarvis(task, opts) {
 
         const steps = (result.plan && result.plan.steps) || [];
         const webSteps = steps.filter(s =>
-            /^(web\.browse|procedure\.)/.test(String(s.capability || '')));
+            /^(web\.(browse|read)|procedure\.)/.test(String(s.capability || '')));
         return {
             status: timedOut ? 'timeout' : result.status,
             answer: result.response ?? null,
