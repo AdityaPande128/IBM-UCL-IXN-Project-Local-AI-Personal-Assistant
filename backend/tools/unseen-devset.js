@@ -119,14 +119,28 @@ function connect(port) {
             check();
         });
 
+        // A dropped wire must fail the waiting run loudly; with nothing
+        // referenced, node would otherwise drain and exit 0 mid-task.
+        ws.on('close', () => {
+            for (const waiter of waiters.splice(0)) {
+                waiter.reject(new Error('the wire closed under the run'));
+            }
+        });
+
         const api = {
             ws,
             send: obj => ws.send(JSON.stringify(obj)),
             next(match, timeoutMs) {
                 return new Promise((resolveNext, rejectNext) => {
-                    waiters.push({ match, resolve: resolveNext });
+                    const timer = setTimeout(() => {
+                        rejectNext(new Error('timed out'));
+                    }, timeoutMs);
+                    waiters.push({
+                        match,
+                        resolve: found => { clearTimeout(timer); resolveNext(found); },
+                        reject: err => { clearTimeout(timer); rejectNext(err); }
+                    });
                     check();
-                    setTimeout(() => rejectNext(new Error('timed out')), timeoutMs).unref();
                 });
             }
         };
