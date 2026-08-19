@@ -1157,3 +1157,30 @@ test('a guessed path on a named site does not survive validation', () => {
     assert.strictEqual(given.valid, true,
         `a given path must pass: ${given.errors.join('; ')}`);
 });
+
+test('a what-does-it-say question cannot end at filenames', () => {
+    const starved = planner.validatePlan({
+        goal: 'Report what the blood test says',
+        steps: [
+            { id: 's1', capability: 'files.search', inputs: { text: 'hemoglobin report' } },
+            { id: 's2', capability: 'answer',
+              inputs: { question: 'what does my latest hemoglobin report say', passages: '$s1.paths' } }
+        ],
+        missing: []
+    }, { question: 'find my latest hemoglobin report and tell me what it says' });
+
+    assert.strictEqual(starved.valid, false);
+    assert.match(starved.errors.join(' '), /files\.read/,
+        'the error must teach that the file has to be opened');
+
+    const located = planner.validatePlan({
+        goal: 'Say where the report is',
+        steps: [
+            { id: 's1', capability: 'files.search', inputs: { text: 'hemoglobin report' } },
+            { id: 's2', capability: 'answer',
+              inputs: { question: 'where is my hemoglobin report', passages: '$s1.paths' } }
+        ],
+        missing: []
+    }, { question: 'where is my hemoglobin report' });
+    assert.ok(located.valid, located.errors.join('; '));
+});

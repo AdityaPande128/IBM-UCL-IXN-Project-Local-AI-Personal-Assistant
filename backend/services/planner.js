@@ -150,7 +150,10 @@ RULES
    HOW BIG it is or WHETHER it exists need only files.search. Use files.read
    only when the answer depends on what is written INSIDE the file. Opening the
    user's documents to answer something their names already answer is an
-   intrusion, not thoroughness.
+   intrusion, not thoroughness. The reverse also holds: "find my latest blood
+   report and tell me what it says" asks what is WRITTEN INSIDE, so the plan
+   is files.search -> files.read -> answer — ending at the search hands the
+   answer step filenames it cannot read.
 7b. The web is for things that are ON the web. Use web.read when the user gives
    a URL or names a specific page. Use web.browse when reaching the answer needs
    searching a site, following links or filling in a form. Do NOT use either for
@@ -413,6 +416,21 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
         // cannot know an unseen site's structure, and reading an invented
         // address answers from imagination. Hosts may be guessed — that is
         // how a named institution becomes its site — paths may not.
+        if (capability.id === 'answer') {
+            const fed = String(inputs.passages || '').match(REFERENCE);
+            const source = fed && parsed.steps.find(other => other.id === fed[1]);
+            const sourceCap = source && graph.get(graph.resolveId(source.capability));
+            const gives = (sourceCap && sourceCap.outputs) || {};
+            if (sourceCap && 'paths' in gives && !('passages' in gives)
+                && !LOCATING.test(String(question))) {
+                errors.push(
+                    `${where}: the answer step is fed file PATHS, but the question `
+                    + 'asks what the files SAY. Add files.read after the search and '
+                    + 'pass its passages to answer — a filename cannot answer for '
+                    + "a file's contents.");
+            }
+        }
+
         if (capability.id === 'web.read') {
             const value = String(inputs.url || '');
             if (!REFERENCE.test(value)) {
