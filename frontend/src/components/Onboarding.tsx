@@ -352,6 +352,15 @@ export function Onboarding({
     applyTheme(chosen);
   };
 
+  // Permissions up front: the macOS microphone prompt belongs here, right
+  // after the step that explains why — not sprung on the first mic tap
+  // days later. macOS remembers the answer machine-wide.
+  const probeMicrophone = () => {
+    navigator.mediaDevices?.getUserMedia({ audio: true })
+      .then((stream) => stream.getTracks().forEach((track) => track.stop()))
+      .catch(() => { /* the toggles report any denial when they are used */ });
+  };
+
   const submit = () => {
     onApply({
       name: name.trim(),
@@ -676,9 +685,23 @@ export function Onboarding({
               </select>
             </label>
           )}
+          {voiceOn && (
+            <p className="ob-hint">
+              macOS will ask for microphone access when you continue — that
+              one answer covers the mic button and “Hey Jarvis” alike.
+            </p>
+          )}
           <div className="ob-nav">
             <button className="ob-back" onClick={() => setStep("permissions")}>Back</button>
-            <button className="ob-next" onClick={() => setStep("phone")}>Continue</button>
+            <button
+              className="ob-next"
+              onClick={() => {
+                if (voiceOn) probeMicrophone();
+                setStep("phone");
+              }}
+            >
+              Continue
+            </button>
           </div>
         </div>
       )}
