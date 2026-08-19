@@ -65,15 +65,38 @@ function callOpenClawAgent(userMessage, signal) {
     });
 }
 
-// A follow-up only means something next to what it follows: the recent
-// exchange rides along so "check the official website" knows which site.
-function inConversation(text, history) {
+// A follow-up is resolved into the standalone request it means — "check the
+// official website" becomes a sentence naming the site — before anything
+// routes on it. The raw exchange travels no further than this call: fed
+// onward whole, it turned greetings into web plans and put assistant prose
+// into browse goals.
+async function resolveFollowUp(text, history) {
     if (!Array.isArray(history) || history.length === 0) return text;
     const exchange = history
         .map(m => `${m.role === 'user' ? 'user' : 'assistant'}: ${m.text}`)
         .join('\n');
-    return `Recent exchange:\n${exchange}\n\nThe user now says: ${text}\n`
-        + 'Read the new message in the light of the exchange it continues.';
+    try {
+        const raw = await llmClient.complete([
+            { role: 'system', content:
+                'A user is mid-conversation with their assistant. Rewrite their '
+                + 'newest message as ONE standalone request meaning the same '
+                + 'thing, resolved against the exchange: fill in what "it", '
+                + '"that" or "the website" refer to. If the newest message '
+                + 'already stands alone, or is not a request at all — a '
+                + 'greeting, thanks, chit-chat — return it EXACTLY as written. '
+                + 'Reply with that one line only: no quotes, no commentary.' },
+            { role: 'user', content: `${exchange}\n\nNewest message: ${text}` }
+        ], { tier: 'guard', temperature: 0, max_tokens: 120, timeout_ms: 20000 });
+        const resolved = String(raw || '').trim()
+            .replace(/^["']|["']$/g, '').trim();
+        if (!resolved || resolved.length > 300) return text;
+        if (resolved !== text) {
+            console.log(`[Bridge] Follow-up resolved (${text.length} -> ${resolved.length} chars)`);
+        }
+        return resolved;
+    } catch {
+        return text;
+    }
 }
 
 // A reply that only disclaims reach into the live web is not an answer;
@@ -305,7 +328,7 @@ async function executeIntent(intentText, options = {}) {
         return { ...delegated, decision: { action: 'openclaw' }, durationMs: Date.now() - startedAt };
     }
 
-    const asked = inConversation(intentText, options.history);
+    const asked = await resolveFollowUp(intentText, options.history);
     const decision = await router.route(asked);
     const routeTraceId = routerTraces.record(intentText, decision);
     activityBus.publish('router', 'decision', {

@@ -45,8 +45,15 @@ async function open(options = {}) {
     if (page && !page.isClosed() && mode !== wanted) await close();
 
     if (page && !page.isClosed()) {
-        touch();
-        return page;
+        // isClosed() answers for the handle, not the browser behind it: a
+        // dead process leaves a live-looking page. One cheap ping settles
+        // it, and a dead browser relaunches instead of erroring the run.
+        const alive = await page.evaluate('1').then(() => true).catch(() => false);
+        if (alive) {
+            touch();
+            return page;
+        }
+        await close();
     }
     if (launching) return launching;
 

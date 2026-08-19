@@ -316,6 +316,14 @@ function describeDisclosure(verdict) {
 }
 
 
+// Guard reasons carry label annotations like "(personal (user+web))" for
+// the audit trail; the user hears the sentence without the notation.
+function plainWords(reason) {
+    return String(reason || '')
+        .replace(/\s*\((?:public|personal|secret|unknown)[^()]*(?:\([^()]*\))?[^()]*\)/gi, '')
+        .replace(/\s{2,}/g, ' ');
+}
+
 function clause(step) {
     const reason = (step && step.reason ? step.reason : '').trim().replace(/[.;,]+$/, '');
     if (!reason) return null;
@@ -362,8 +370,8 @@ function render(plan, record, failure) {
                 succeeded.length
                     ? `I got ${succeeded.length} of ${plan.steps.length} steps done. Step ${where} ` +
                       `(${plan.steps[where - 1]?.capability}) ` +
-                      `${failure.blocked ? 'is blocked' : 'failed'}: ${failure.error}`
-                    : `I couldn't do that. ${failure.error}`
+                      `${failure.blocked ? 'is blocked' : 'failed'}: ${plainWords(failure.error)}`
+                    : `I couldn't do that. ${plainWords(failure.error)}`
             );
         }
     }
