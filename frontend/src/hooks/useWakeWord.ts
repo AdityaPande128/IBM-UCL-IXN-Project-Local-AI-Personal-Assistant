@@ -17,7 +17,7 @@ const MAX_UTTERANCE_MS = 8000;
 
 interface UseWakeWordReturn {
   listening: boolean;
-  startListening: () => Promise<boolean>;
+  startListening: () => Promise<true | string>;
   stopListening: () => void;
 }
 
@@ -37,8 +37,11 @@ export function useWakeWord(sendBinary: (data: ArrayBuffer) => void): UseWakeWor
     setListening(false);
   }, []);
 
-  const startListening = useCallback(async (): Promise<boolean> => {
+  const startListening = useCallback(async (): Promise<true | string> => {
     if (streamRef.current) return true;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return "this window exposes no microphone API";
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true },
@@ -103,9 +106,9 @@ export function useWakeWord(sendBinary: (data: ArrayBuffer) => void): UseWakeWor
       processorRef.current = processor;
       setListening(true);
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error("Wake listening failed:", err);
-      return false;
+      return `${err?.name ?? "error"}: ${err?.message ?? String(err)}`;
     }
   }, [sendBinary]);
 

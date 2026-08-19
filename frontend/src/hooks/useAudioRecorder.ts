@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 
 interface UseAudioRecorderReturn {
   recording: boolean;
-  startRecording: () => Promise<boolean>;
+  startRecording: () => Promise<true | string>;
   stopRecording: () => ArrayBuffer | null;
 }
 
@@ -13,7 +13,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const chunksRef = useRef<Float32Array[]>([]);
 
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (): Promise<true | string> => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      return "this window exposes no microphone API";
+    }
     try {
       chunksRef.current = [];
 
@@ -40,7 +43,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
       return true;
     } catch (err: any) {
       console.error("Microphone access error:", err);
-      return false;
+      return `${err?.name ?? "error"}: ${err?.message ?? String(err)}`;
     }
   }, []);
 

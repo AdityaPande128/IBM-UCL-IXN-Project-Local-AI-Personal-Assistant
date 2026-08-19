@@ -183,13 +183,13 @@ function App() {
       return;
     }
     if (!connected || !voiceReady || !voiceEnabled || listening) return;
-    startListening().then((ok) => {
-      if (ok) setWakeMode(true);
+    startListening().then((opened) => {
+      if (opened === true) setWakeMode(true);
       else {
         setWakeWanted(false);
         localStorage.setItem(WAKE_KEY, "off");
-        pushToast("The microphone could not be opened — allow it in "
-          + "System Settings → Privacy & Security → Microphone.");
+        pushToast(`The microphone could not be opened (${opened}). If it was `
+          + "never asked for, check System Settings → Privacy & Security → Microphone.");
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -276,9 +276,10 @@ function App() {
       voiceNotReady();
       return;
     }
-    if (!(await startRecording())) {
-      pushToast("The microphone could not be opened — allow it in "
-        + "System Settings → Privacy & Security → Microphone.");
+    const opened = await startRecording();
+    if (opened !== true) {
+      pushToast(`The microphone could not be opened (${opened}). If it was `
+        + "never asked for, check System Settings → Privacy & Security → Microphone.");
     }
   };
 
@@ -320,7 +321,10 @@ function App() {
           onApply={applyOnboarding}
           onComplete={completeOnboarding}
           onDownloadAction={downloadAction}
-          onFinished={() => setWizardActive(false)}
+          onFinished={() => {
+            setWizardActive(false);
+            setWakeWanted(localStorage.getItem(WAKE_KEY) === "on");
+          }}
         />
       </div>
     );
@@ -411,8 +415,8 @@ function App() {
                     </label>
                     <div className="wake-menu-hint">
                       {wakeWanted
-                        ? "The mic stays open on this Mac only; the pill lights up when it hears you."
-                        : "Nothing is recorded until this is on."}
+                        ? "Listening happens on this Mac only: each snippet of speech is checked for “Hey Jarvis” and discarded the instant it isn't — nothing is stored, nothing leaves the machine."
+                        : "The microphone stays closed until this is on. Once on, speech is checked locally for “Hey Jarvis” and dropped the instant it isn't — never stored, never sent anywhere."}
                     </div>
                   </div>
                 )}

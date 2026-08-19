@@ -230,6 +230,7 @@ export function Onboarding({
   const [voiceOn, setVoiceOn] = useState(resumed ? profile.voice.enabled : true);
   const [tts, setTts] = useState(resumed ? profile.voice.tts : true);
   const [voiceName, setVoiceName] = useState(resumed ? (profile.voice.voice ?? "af_heart") : "af_heart");
+  const [wake, setWake] = useState(localStorage.getItem("jarvis-wake") === "on");
   const [improvement, setImprovement] = useState(resumed ? profile.improvement : true);
 
   useEffect(() => {
@@ -636,6 +637,27 @@ export function Onboarding({
                   {catalog.voice.tts?.label ?? "The voice model"} ·{" "}
                   {catalog.voice.tts?.disk_gb.toFixed(1) ?? "?"} GB on disk. Leave this
                   off and Jarvis answers in text only.
+                </span>
+              </span>
+            </label>
+          )}
+          {voiceOn && (
+            <label className="ob-check ob-check--head ob-check--sub">
+              <input
+                type="checkbox"
+                checked={wake}
+                onChange={(e) => {
+                  setWake(e.target.checked);
+                  localStorage.setItem("jarvis-wake", e.target.checked ? "on" : "off");
+                }}
+              />
+              <span>
+                <span className="ob-feature-title">Answer to “Hey Jarvis”</span>
+                <span className="ob-feature-what">
+                  Hands-free summons. Speech is checked on this Mac only and
+                  dropped the instant it doesn't start with “Hey Jarvis” —
+                  never stored, never sent anywhere. No voice training needed:
+                  it recognises the phrase, not a particular voice.
                 </span>
               </span>
             </label>
