@@ -235,8 +235,13 @@ wss.on('connection', (ws) => {
                 if (!probed.wake) return;
                 ws.send(JSON.stringify({ type: 'wake', command: probed.command }));
                 if (probed.command) {
-                    // A summons starts its own chat, like walking up fresh.
+                    // A summons starts its own chat, titled by its own words.
                     ws.conversationId = null;
+                    const started = conversationStore.append(ws, 'user',
+                        `“Hey Jarvis, ${probed.command}”`);
+                    if (started) {
+                        ws.send(JSON.stringify({ type: 'conversation_started', ...started }));
+                    }
                     await withActivity(ws, () => aiPipeline.respondTo(probed.command, ws));
                 }
                 return;

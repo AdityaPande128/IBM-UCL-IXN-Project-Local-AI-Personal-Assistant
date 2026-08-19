@@ -727,6 +727,10 @@ export function useWebSocket(): UseWebSocketReturn {
           setWakeModeState(Boolean(msg.on));
           return;
         }
+        if (msg.type === "proposal_taken") {
+          setProposal((prev) => (prev && prev.id === msg.id ? null : prev));
+          return;
+        }
         if (msg.type === "system_note") {
           addMessage("system", String(msg.text ?? ""));
           return;

@@ -187,6 +187,10 @@ async function speakText(text, ws) {
 // decision, then speak the outcome like any other reply.
 async function answerAloud(proposalId, approved, ws) {
     record(ws, 'user', approved ? '“Yes.”' : '“No.”');
+    // The card asked; the voice answered. It leaves the screen now, not
+    // after the minutes the build takes.
+    send(ws, { type: 'proposal_taken', id: proposalId,
+        decision: approved ? 'yes' : 'no' });
     if (approved) {
         await speakText('Building the skill now — this takes a minute or two.', ws);
     }
