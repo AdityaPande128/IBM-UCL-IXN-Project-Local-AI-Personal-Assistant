@@ -83,6 +83,14 @@ function abort(id) {
     return { id: job.id, state: 'aborted' };
 }
 
+// The stop signal of whichever queue job the caller is running inside, so
+// long waits deep in a job (a model call, mostly) can end the moment the
+// user stops it instead of at the next checkpoint.
+function currentSignal() {
+    const job = inside.getStore();
+    return job ? job.controller.signal : null;
+}
+
 function size() {
     return queued.length + (running ? 1 : 0);
 }
@@ -96,4 +104,4 @@ function reset() {
     running = null;
 }
 
-module.exports = { submit, abort, size, reset };
+module.exports = { submit, abort, size, reset, currentSignal };

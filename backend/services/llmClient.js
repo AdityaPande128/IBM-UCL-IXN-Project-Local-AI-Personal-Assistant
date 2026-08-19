@@ -1,5 +1,6 @@
 const http = require('http');
 const configReader = require('../utils/configReader');
+const intentQueue = require('./intentQueue');
 const modelTiers = require('./modelTiers');
 
 const config = configReader.readConfig();
@@ -29,7 +30,26 @@ function complete(messages, opts = {}) {
     const startedAt = Date.now();
     const shape = opts.response_format ? 'json' : 'plain';
 
+    // A Stop should not wait out an in-flight generation: drop the request
+    // the moment the surrounding job's signal fires.
+    const signal = opts.signal || intentQueue.currentSignal();
+    const stopped = () => {
+        const err = new Error('aborted');
+        err.aborted = true;
+        return err;
+    };
+    if (signal && signal.aborted) return Promise.reject(stopped());
+
     return new Promise((resolve, reject) => {
+        let onAbort = null;
+        const settle = (fn) => (value) => {
+            if (onAbort) signal.removeEventListener('abort', onAbort);
+            fn(value);
+        };
+        if (signal) {
+            resolve = settle(resolve);
+            reject = settle(reject);
+        }
         const payload = JSON.stringify({
             model, messages, temperature, max_tokens,
             ...(opts.response_format ? { response_format: opts.response_format } : {})
@@ -63,6 +83,14 @@ function complete(messages, opts = {}) {
                 }
             });
         });
+
+        if (signal) {
+            onAbort = () => {
+                reject(stopped());
+                req.destroy();
+            };
+            signal.addEventListener('abort', onAbort, { once: true });
+        }
 
         req.on('error', err => reject(new Error(`transport_error: ${err.message}`)));
         req.on('timeout', () => {
