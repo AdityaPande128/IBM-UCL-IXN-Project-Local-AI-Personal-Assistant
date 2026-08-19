@@ -230,7 +230,7 @@ export function Onboarding({
   const [voiceOn, setVoiceOn] = useState(resumed ? profile.voice.enabled : true);
   const [tts, setTts] = useState(resumed ? profile.voice.tts : true);
   const [voiceName, setVoiceName] = useState(resumed ? (profile.voice.voice ?? "af_heart") : "af_heart");
-  const [wake, setWake] = useState(localStorage.getItem("jarvis-wake") === "on");
+  const [wake, setWake] = useState(localStorage.getItem("jarvis-wake") !== "off");
   const [improvement, setImprovement] = useState(resumed ? profile.improvement : true);
 
   useEffect(() => {

@@ -138,7 +138,7 @@ function App() {
   const [showDownloads, setShowDownloads] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wakeWanted, setWakeWanted] = useState(
-    localStorage.getItem(WAKE_KEY) === "on"
+    localStorage.getItem(WAKE_KEY) !== "off"
   );
   const [wakeMenuOpen, setWakeMenuOpen] = useState(false);
   const [wakeFlash, setWakeFlash] = useState(false);
@@ -341,7 +341,7 @@ function App() {
           onDownloadAction={downloadAction}
           onFinished={() => {
             setWizardActive(false);
-            setWakeWanted(localStorage.getItem(WAKE_KEY) === "on");
+            setWakeWanted(localStorage.getItem(WAKE_KEY) !== "off");
           }}
         />
       </div>
@@ -414,7 +414,7 @@ function App() {
                   aria-expanded={wakeMenuOpen}
                   title="“Hey Jarvis” settings"
                 >
-                  {wakeFlash ? "● Heard you" : listening && wakeMode ? "● Listening" : "Hey Jarvis · off"}
+                  {wakeFlash ? "● Heard you" : listening && wakeMode ? "“Hey Jarvis” active" : "Hey Jarvis · off"}
                 </button>
                 {wakeMenuOpen && (
                   <div className="wake-menu" role="menu">
