@@ -29,7 +29,9 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
           channelCount: 1,
           echoCancellation: false,
           noiseSuppression: false,
-          autoGainControl: false,
+          // Auto gain stays: without it the raw signal sits ~30x below the
+          // daemon's silence gate. It levels; it does not chop.
+          autoGainControl: true,
         },
       });
 

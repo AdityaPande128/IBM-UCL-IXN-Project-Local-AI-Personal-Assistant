@@ -351,7 +351,7 @@ interface UseWebSocketReturn {
   setIncognito: (on: boolean) => void;
   wakeMode: boolean;
   wakeHeardAt: number | null;
-  reportClientError: (text: string) => void;
+  reportClientError: (text: string, quiet?: boolean) => void;
   setWakeMode: (on: boolean) => void;
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
@@ -889,9 +889,9 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
-  const reportClientError = useCallback((text: string) => {
+  const reportClientError = useCallback((text: string, quiet = false) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "client_log", text }));
+      wsRef.current.send(JSON.stringify({ type: "client_log", text, quiet }));
     }
   }, []);
 

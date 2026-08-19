@@ -415,7 +415,9 @@ wss.on('connection', (ws) => {
             if (parsed.type === 'client_log') {
                 const note = String(parsed.text || '').slice(0, 500);
                 console.log(`[Client] ${note}`);
-                ws.send(JSON.stringify({ type: 'system_note', text: note }));
+                if (!parsed.quiet) {
+                    ws.send(JSON.stringify({ type: 'system_note', text: note }));
+                }
                 return;
             }
 

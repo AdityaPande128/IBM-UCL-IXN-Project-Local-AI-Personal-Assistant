@@ -183,10 +183,17 @@ function App() {
       setWakeMode(false);
       return;
     }
-    if (!connected || !voiceReady || !voiceEnabled || listening) return;
+    if (!connected || !voiceReady || !voiceEnabled || listening) {
+      reportClientError(`wake: waiting (connected=${connected} voiceReady=${voiceReady} `
+        + `voiceEnabled=${voiceEnabled} listening=${listening})`, true);
+      return;
+    }
+    reportClientError("wake: opening the microphone…", true);
     startListening().then((opened) => {
-      if (opened === true) setWakeMode(true);
-      else {
+      if (opened === true) {
+        reportClientError("wake: microphone open, listening armed", true);
+        setWakeMode(true);
+      } else {
         setWakeWanted(false);
         localStorage.setItem(WAKE_KEY, "off");
         reportClientError(`Wake listening could not open the microphone: ${opened}`);
@@ -406,9 +413,11 @@ function App() {
                     <label className="wake-menu-row">
                       <input
                         type="checkbox"
+                        className="switch"
                         checked={wakeWanted}
                         onChange={(e) => {
                           const on = e.target.checked;
+                          reportClientError(`wake toggle clicked -> ${on ? "on" : "off"}`, true);
                           setWakeWanted(on);
                           localStorage.setItem(WAKE_KEY, on ? "on" : "off");
                           if (on && !voiceReady && profile) voiceNotReady();
