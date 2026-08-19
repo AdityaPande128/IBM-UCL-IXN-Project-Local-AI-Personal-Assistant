@@ -109,7 +109,12 @@ function answerOffer(signal) {
     pc.onLocalCandidate((candidate, mid) => publish({ kind: 'candidate', candidate, mid }));
     pc.onDataChannel(dc => bridge(dc));
     pc.onStateChange(pcState => {
-        if (pcState === 'failed' || pcState === 'closed') teardown(`peer ${pcState}`);
+        // A replaced connection announces its own death after the next one
+        // is already alive; only the current session may tear itself down.
+        if ((pcState === 'failed' || pcState === 'closed')
+            && state && state.pc === pc) {
+            teardown(`peer ${pcState}`);
+        }
     });
     try {
         pc.setRemoteDescription(signal.sdp, 'offer');
