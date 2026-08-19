@@ -71,6 +71,15 @@ function callOpenClawAgent(userMessage, signal) {
 // routes on it. The raw exchange travels no further than this call: fed
 // onward whole, it turned greetings into web plans and put assistant prose
 // into browse goals.
+// The rubric tag and its monologue belong in the trace; the user gets one
+// plain sentence about the request itself.
+function plainRefusal(reasoning) {
+    const text = String(reasoning || '').replace(/^\s*R\d+\s*[:.—-]?\s*/, '').trim();
+    const sentence = (text.match(/^.{10,240}?\./s) || [text.slice(0, 240)])[0].trim();
+    if (!sentence) return 'I can\'t help with that request.';
+    return `I won't do that: ${sentence.replace(/\.?$/, '.')}`;
+}
+
 async function resolveFollowUp(text, history) {
     if (!Array.isArray(history) || history.length === 0) return text;
     // Asking the same thing again is a retry, not a follow-up: it already
@@ -87,7 +96,10 @@ async function resolveFollowUp(text, history) {
                 'A user is mid-conversation with their assistant. Rewrite their '
                 + 'newest message as ONE standalone request meaning the same '
                 + 'thing, resolved against the exchange: fill in what "it", '
-                + '"that" or "the website" refer to. If the newest message '
+                + '"that" or "the website" refer to — "build a skill for '
+                + 'that" after asking about memory usage becomes "build a '
+                + 'skill to check how much memory my computer is using". '
+                + 'If the newest message '
                 + 'already stands alone, or is not a request at all — a '
                 + 'greeting, thanks, chit-chat — return it EXACTLY as written. '
                 + 'You speak AS the user, in their words: never describe them '
@@ -356,7 +368,7 @@ async function executeIntent(intentText, options = {}) {
         case router.ACTIONS.REFUSE:
             outcome = {
                 status: 'refused',
-                response: decision.reasoning || 'I can\'t help with that request.',
+                response: plainRefusal(decision.reasoning),
                 action: 'refused'
             };
             break;

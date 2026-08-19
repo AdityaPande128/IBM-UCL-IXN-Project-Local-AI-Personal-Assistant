@@ -122,7 +122,11 @@ RULES
 1. Use only the capability ids listed above, copied exactly. Do not invent one,
    do not guess at one that "should" exist, and do not abbreviate.
 2. If part of the request cannot be done with the list above, do NOT approximate
-   it with something else. Leave it out of "steps" and describe it in "missing".
+   it with something else. A capability that measures a different quantity of
+   the same subject is an approximation, not a match: one that reports how much
+   RAM is installed does not answer how much is in use right now, and one that
+   reports a disk's total size does not answer what is filling it. Leave it out
+   of "steps" and describe it in "missing".
    Saying you cannot do something is a correct answer; pretending is not.
 3. Use the fewest steps that do the job, and no more. At most ${MAX_STEPS}. If a
    single operation does the whole thing, the plan is that one step. Never add a

@@ -97,8 +97,8 @@ test('decideAction: invalid schema never produces an action', () => {
     assert.equal(router.decideAction({ ...base, schema_valid: false }), router.ACTIONS.CLARIFY);
 });
 
-test('decideAction: execute_existing without a skill degrades to clarify', () => {
-    assert.equal(router.decideAction({ ...base, target_skill: null }), router.ACTIONS.CLARIFY);
+test('decideAction: execute_existing without a skill is the generate condition', () => {
+    assert.equal(router.decideAction({ ...base, target_skill: null }), router.ACTIONS.GENERATE);
 });
 
 test('decideAction: confident generate_new_skill generates', () => {

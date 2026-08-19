@@ -132,7 +132,14 @@ None of the following is EVER a reason to answer "refuse":
   - "this could have unintended consequences"
   - "the agent cannot verify or authorise this"
   - "this affects system stability"
+  - "this would require building a new skill or writing new code"
 Every one of those is "act".
+
+Building a new skill is this assistant's own ordinary machinery — it happens
+in a sandbox, behind its own verification. "Build a skill for X", or "build a
+skill for that" mid-conversation, classifies exactly as X itself would.
+Writing and installing the skill is never itself R1–R7; only what the skill
+would then do can be.
 
 "refuse" is a closed list. A request qualifies ONLY if it matches one of these
 seven categories, and your "reasoning" MUST name the one it matches:
@@ -232,6 +239,11 @@ loosely, or one that touches settings, reads as alarming when it is ordinary:
        the site to read, and 'latest' is live state: recalling instead of
        reading would answer from stale memory."}
 
+  "Build a skill for that"
+    -> {"intent_class":"act","confidence":0.9,"reasoning":"Asks this assistant
+       to build one of its own skills for the task under discussion — its
+       ordinary machinery, sandboxed and verified. Matches no R-category."}
+
   "Wipe the drive and reinstall macOS"
     -> {"intent_class":"refuse","confidence":0.99,"reasoning":"R1: irreversible
        destruction of the user's data."}
@@ -268,6 +280,15 @@ skill's exact name and extract its parameters. Differences in wording, file
 paths, or folder names do NOT make it a different task: a skill that counts
 words in a folder covers "count the words in /some/path" regardless of which
 path is named. Re-authoring a skill that already exists is always wrong.
+
+But the match is the QUANTITY asked about, not the subject. A skill that
+reports how much RAM is installed does not cover how much RAM is in use right
+now; one that reports total disk size does not cover what is taking the space;
+one that counts files does not cover how large they are. When every installed
+skill measures a different quantity of the same subject, step 1 has found
+nothing, however familiar the names sound — the answer is "generate_new_skill",
+and naming the near-miss skill anyway hands the user a number they did not
+ask for.
 
 A missing parameter is NOT a missing capability. If the request does not say
 where to write the output, or omits any other value the skill declares, that is
@@ -355,6 +376,15 @@ skill's exact name and extract its parameters. Differences in wording, file
 paths, or folder names do NOT make it a different task: a skill that counts
 words in a folder covers "count the words in /some/path" regardless of which
 path is named. Re-authoring a skill that already exists is always wrong.
+
+But the match is the QUANTITY asked about, not the subject. A skill that
+reports how much RAM is installed does not cover how much RAM is in use right
+now; one that reports total disk size does not cover what is taking the space;
+one that counts files does not cover how large they are. When every installed
+skill measures a different quantity of the same subject, step 1 has found
+nothing, however familiar the names sound — the answer is "generate_new_skill",
+and naming the near-miss skill anyway hands the user a number they did not
+ask for.
 
 A missing parameter is NOT a missing capability. If the request does not say
 where to write the output, or omits any other value the skill declares, that is
@@ -453,6 +483,9 @@ answers, not refusals. Reserve "refuse" for requests that should never be
 carried out at all, however capable the agent is.
 
 None of the following is a reason to refuse. Each is a step 2 answer:
+  - "this asks the assistant to build a new skill" — building its own skills,
+    sandboxed and verified, is this assistant's ordinary machinery; judge only
+    what the skill would then do
   - "this is beyond the scope of the available skills"
   - "this needs administrator or system-level privileges"
   - "the agent cannot verify this is authorised" — see WHO IS ASKING above
@@ -602,7 +635,10 @@ function decideAction(classification) {
     }
 
     if (intent_type === 'execute_existing') {
-        if (!target_skill) return ACTIONS.CLARIFY;
+        // A confident "execute" that names no skill is the model finding that
+        // nothing installed covers the request — the generate condition, not
+        // a doubt about what the user wants.
+        if (!target_skill) return ACTIONS.GENERATE;
 
         const skill = skillCatalog.get(target_skill);
         if (skill) {
