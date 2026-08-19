@@ -65,6 +65,11 @@ function callOpenClawAgent(userMessage, signal) {
     });
 }
 
+// A reply that only disclaims reach into the live web is not an answer;
+// the planner's browse lane has that reach, so the ask goes there instead.
+const DISCLAIMS_THE_WEB =
+    /\b(?:unable to|cannot|can't|do(?:es)?\s*n[o']t have|lack)\b[^.]{0,60}\b(?:internet|real[- ]?time|live|browse|browsing|web|current (?:information|data))\b/i;
+
 async function executeSkill(decision, originalText, options = {}) {
     const { target_skill, parameters } = decision;
 
@@ -319,6 +324,10 @@ async function executeIntent(intentText, options = {}) {
 
         case router.ACTIONS.ANSWER: {
             const answered = await answerService.answer(intentText);
+            if (answered.is_successful && DISCLAIMS_THE_WEB.test(answered.text || '')) {
+                outcome = await composeThenGenerate(intentText, options);
+                break;
+            }
             outcome = {
                 status: answered.is_successful ? 'success' : 'error',
                 response: answered.text,

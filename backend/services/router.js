@@ -168,6 +168,12 @@ seven categories, and your "reasoning" MUST name the one it matches:
   R7 physical hardware the agent cannot reach — thermostats, lights, printers,
      other appliances
 
+A question is "tell" only when settled knowledge answers it. When the answer
+is live state — today's hours, a current price or rate, a timetable, the
+news, the latest version of anything — or the request names a site to read,
+it is "act": the page has to be opened and read, and answering from memory
+would be answering from the past.
+
 Judge destructiveness by reversibility, not by how alarming the words sound.
 Turning something off, closing something, changing a setting and moving a file
 are all reversible. "Shut down", "close" and "kill" applied to a named
@@ -215,6 +221,16 @@ loosely, or one that touches settings, reads as alarming when it is ordinary:
   "Has my order from the bookshop shipped yet?"
     -> {"intent_class":"act","confidence":0.9,"reasoning":"The answer is in the
        user's own mail or account page and has to be looked up there."}
+
+  "What time does the pharmacy on the high street close today"
+    -> {"intent_class":"act","confidence":0.9,"reasoning":"Today's hours are
+       live state on the pharmacy's own page, not general knowledge; the page
+       has to be opened and read."}
+
+  "What's the latest stable version of Python according to python.org"
+    -> {"intent_class":"act","confidence":0.9,"reasoning":"The request names
+       the site to read, and 'latest' is live state: recalling instead of
+       reading would answer from stale memory."}
 
   "Wipe the drive and reinstall macOS"
     -> {"intent_class":"refuse","confidence":0.99,"reasoning":"R1: irreversible
