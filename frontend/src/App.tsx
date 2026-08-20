@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { ChatLog } from "./components/ChatLog";
 import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
@@ -103,6 +104,8 @@ function App() {
     sendBinary,
     sendIntent,
     sendDecision,
+    saveFile,
+    savedFile,
     sendAbort,
     requestAbilities,
     removeSkill,
@@ -150,6 +153,10 @@ function App() {
     const timer = setTimeout(() => setSplashLate(true), 10000);
     return () => clearTimeout(timer);
   }, []);
+  // A finished save shows itself: the copy is revealed where it landed.
+  useEffect(() => {
+    if (savedFile) revealItemInDir(savedFile.path).catch(() => {});
+  }, [savedFile]);
   const [view, setView] = useState<View>("chat");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -509,6 +516,7 @@ function App() {
                   greetingName={profile?.name}
                   suggestions={SUGGESTIONS}
                   onSuggest={connected ? sendIntent : undefined}
+                  onFileSave={connected ? saveFile : undefined}
                   voiceEnabled={voiceEnabled}
                   busy={busy}
                   busyLine={busy ? describeActivity(activities[activities.length - 1]) : null}

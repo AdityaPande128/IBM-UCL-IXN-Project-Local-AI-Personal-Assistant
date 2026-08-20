@@ -269,4 +269,5 @@ const answerSource = {
 };
 
 module.exports = { open, append, list, messages, exists, remove, clear, titleFrom,
-    searchMessages, answerSource, notifyAppend, artifactPath, DEFAULT_PATH };
+    searchMessages, answerSource, notifyAppend, artifactPath, stampArtifacts,
+    DEFAULT_PATH };

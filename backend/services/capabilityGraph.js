@@ -396,6 +396,50 @@ function builtins() {
         }),
 
         define({
+            id: 'files.deliver',
+            tier: TIER.PROGRAMMATIC,
+            description:
+                'Hand specific files to the user as downloadable attachments on whatever ' +
+                'surface they are speaking from — the phone app, the chat, anywhere. This ' +
+                'IS how a file gets sent, shared or given to the user: pair it with ' +
+                'files.search when they say "send me", "share" or "give me" a file.',
+            inputs: {
+                paths: { type: 'path[]', required: true, description: 'full paths of the files to hand over' }
+            },
+            outputs: {
+                delivered: { type: 'file[]', description: 'the files now attached to the reply' },
+                message: { type: 'string', description: 'a line naming what went across' }
+            },
+            consent: 'documents',
+            produces: labels.label(ORIGIN.FILE, SENSITIVITY.PERSONAL),
+            run(bound) {
+                const fs = require('fs');
+                const requested = (Array.isArray(bound.paths) ? bound.paths : [bound.paths])
+                    .map(p => String(p || '')).filter(Boolean).slice(0, 5);
+                const delivered = [];
+                const skipped = [];
+                for (const target of requested) {
+                    const full = corpusIndexer.expandHome(target);
+                    if (!securityStore.isWithinGrantedRoot(full, 'documents')) {
+                        skipped.push(`${path.basename(full)} (not inside a granted folder)`);
+                        continue;
+                    }
+                    let stat;
+                    try { stat = fs.statSync(full); } catch { stat = null; }
+                    if (!stat || !stat.isFile()) {
+                        skipped.push(`${path.basename(full)} (no such file)`);
+                        continue;
+                    }
+                    delivered.push({ name: path.basename(full), path: full });
+                }
+                const message = delivered.length
+                    ? `Attached ${delivered.map(f => f.name).join(', ')}.`
+                    : `Nothing could be attached${skipped.length ? `: ${skipped.join('; ')}` : '.'}`;
+                return { delivered, message };
+            }
+        }),
+
+        define({
             id: 'web.read',
             tier: TIER.PERCEPTION,
             description:

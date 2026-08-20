@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 type MessageType = "user" | "assistant" | "system" | "error";
 
 export interface MessageArtifacts {
-  files?: { path: string; name: string; bytes: number }[];
+  files?: { path: string; name: string; bytes: number; id?: string }[];
   table?: { columns: string[]; rows: string[][]; total: number };
 }
 
@@ -356,6 +356,8 @@ interface UseWebSocketReturn {
   sendBinary: (data: ArrayBuffer) => void;
   sendIntent: (text: string) => void;
   sendDecision: (id: string, decision: "yes" | "no") => void;
+  saveFile: (id: string, name: string, to: "downloads" | "ask") => void;
+  savedFile: { path: string; at: number } | null;
   sendAbort: () => void;
   requestAbilities: () => void;
   removeSkill: (name: string) => void;
@@ -457,6 +459,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [voiceReady, setVoiceReady] = useState(false);
   const [onboardingApply, setOnboardingApply] = useState<OnboardingApplyResult | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [savedFile, setSavedFile] = useState<{ path: string; at: number } | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const [wakeHeardAt, setWakeHeardAt] = useState<number | null>(null);
   const [remoteBusy, setRemoteBusy] = useState(false);
@@ -548,6 +551,22 @@ export function useWebSocket(): UseWebSocketReturn {
           } else if (msg.status === "invalid") {
             setProfileError(msg.error ?? "That change was not accepted.");
           }
+          return;
+        }
+        if (msg.type === "file_save_result") {
+          if (msg.status === "saved" && msg.path) {
+            setSavedFile({ path: msg.path as string, at: Date.now() });
+          }
+          return;
+        }
+        if (msg.type === "profile_changed" && msg.profile) {
+          // Another surface (the phone) changed the shared profile; the
+          // settings radios here must follow, not sit on the stale choice.
+          setOnboarding((prev) =>
+            prev
+              ? { ...prev, profile: { ...prev.profile, ...msg.profile } }
+              : prev
+          );
           return;
         }
         if (msg.type === "download_status") {
@@ -880,6 +899,15 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
+  const saveFile = useCallback(
+    (id: string, name: string, to: "downloads" | "ask") => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "file_save", id, name, to }));
+      }
+    },
+    []
+  );
+
   const requestChannel = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "channel_status" }));
@@ -1146,6 +1174,8 @@ export function useWebSocket(): UseWebSocketReturn {
     sendBinary,
     sendIntent,
     sendDecision,
+    saveFile,
+    savedFile,
     sendAbort,
     requestAbilities,
     removeSkill,

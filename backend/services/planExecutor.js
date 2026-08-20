@@ -281,6 +281,11 @@ async function run(plan, options = {}) {
 
     const runMs = Date.now() - startedAt;
     const last = [...environment.values()].pop() || null;
+    // Files a step handed over become artifacts on the reply — the chip the
+    // user taps to download, on whichever surface they asked from.
+    const deliveredFiles = record.flatMap(s =>
+        s.status === 'success' && s.values && Array.isArray(s.values.delivered)
+            ? s.values.delivered : []);
 
     const status = failure
         ? (failure.proposal ? 'needs_approval'
@@ -300,6 +305,7 @@ async function run(plan, options = {}) {
         status,
         planId,
         goal: plan.goal || null,
+        ...(deliveredFiles.length ? { artifacts: { files: deliveredFiles } } : {}),
         text: failure && failure.proposal ? failure.error : render(plan, record, failure),
         ...(failure && failure.proposal ? { proposal: failure.proposal } : {}),
         steps: record,

@@ -124,6 +124,24 @@ async function resolveFollowUp(text, history) {
     }
 }
 
+// An attached file's indexed chunks, pinned as answer context so the reply
+// grounds on what the user just handed over, not on retrieval's best guess.
+function attachmentPassages(attached) {
+    const corpusIndexer = require('./corpusIndexer');
+    const passages = [];
+    for (const file of attached.slice(0, 3)) {
+        try {
+            for (const record of corpusIndexer.recordsForFile(file.path)) {
+                passages.push({
+                    text: record.meta.text,
+                    cite: `file: ${path.basename(file.path)}`
+                });
+            }
+        } catch { /* an unindexed attachment answers like any other ask */ }
+    }
+    return passages;
+}
+
 // A reply that only disclaims reach into the live web is not an answer;
 // the planner's browse lane has that reach, so the ask goes there instead.
 const DISCLAIMS_THE_WEB =
@@ -258,6 +276,7 @@ async function composeThenGenerate(intentText, options = {}) {
             status: execution.status === 'success' ? 'success' : execution.status,
             response: execution.text,
             action: 'composed',
+            ...(execution.artifacts ? { artifacts: execution.artifacts } : {}),
             ...(execution.proposal ? { proposal: execution.proposal } : {}),
             plan: {
                 goal: execution.goal,
@@ -286,6 +305,26 @@ async function composeThenGenerate(intentText, options = {}) {
         );
     } catch (err) {
         console.warn(`[Bridge] Could not record the gap: ${err.message}`);
+    }
+
+    // A plan that reduces to "just answer" with nothing missing is the
+    // planner agreeing this was conversation all along. If the answer layer
+    // already replied, that reply wins; if the router skipped it, answer now.
+    // The skill factory is for capability gaps, not small talk.
+    if (plan.status === 'planned' && !gaps.length) {
+        if (options.fallbackAnswer) {
+            console.log('[Bridge] The planner calls it an answer; keeping the one we had.');
+            return options.fallbackAnswer;
+        }
+        console.log('[Bridge] The planner calls it an answer; answering instead.');
+        const answered = await answerService.answer(intentText);
+        return {
+            status: answered.is_successful ? 'success' : 'error',
+            response: answered.text,
+            action: 'answered',
+            grounded: answered.grounded,
+            sources: answered.sources
+        };
     }
 
     console.log(
@@ -393,7 +432,13 @@ async function executeIntent(intentText, options = {}) {
         return { ...delegated, decision: { action: 'openclaw' }, durationMs: Date.now() - startedAt };
     }
 
-    const asked = await resolveFollowUp(intentText, options.history);
+    let asked = await resolveFollowUp(intentText, options.history);
+    // Attachments ride options, not the text, so the follow-up resolver can
+    // never strip them; they rejoin the request here, after resolution.
+    const attached = Array.isArray(options.attachments) ? options.attachments : [];
+    if (attached.length) {
+        asked += `\n\n(The user attached: ${attached.map(a => a.path).join(', ')})`;
+    }
     const decision = await router.route(asked);
     const routeTraceId = routerTraces.record(intentText, decision);
     activityBus.publish('router', 'decision', {
@@ -432,9 +477,27 @@ async function executeIntent(intentText, options = {}) {
             break;
 
         case router.ACTIONS.ANSWER: {
-            const answered = await answerService.answer(asked);
-            if (answered.is_successful && DISCLAIMS_THE_WEB.test(answered.text || '')) {
-                outcome = await composeThenGenerate(asked, options);
+            // An attached file IS the context: its indexed text is pinned
+            // straight into the answer, no retrieval lottery in between.
+            const pinned = attachmentPassages(attached);
+            const answered = await answerService.answer(asked,
+                pinned.length ? { passages: pinned } : {});
+            if (answered.is_successful
+                && (answered.refused || DISCLAIMS_THE_WEB.test(answered.text || ''))) {
+                // The disclaimer may be the whole point ("what's the weather")
+                // or an aside in a perfectly good reply ("who are you"). Carry
+                // the reply along: if the planner finds no capability gap
+                // either, this answer stands instead of a skill build.
+                outcome = await composeThenGenerate(asked, {
+                    ...options,
+                    fallbackAnswer: {
+                        status: 'success',
+                        response: answered.text,
+                        action: 'answered',
+                        grounded: answered.grounded,
+                        sources: answered.sources
+                    }
+                });
                 break;
             }
             outcome = {

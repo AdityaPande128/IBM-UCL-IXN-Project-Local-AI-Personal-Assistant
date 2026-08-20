@@ -15,6 +15,7 @@ interface ChatLogProps {
   greetingName?: string;
   suggestions?: string[];
   onSuggest?: (text: string) => void;
+  onFileSave?: (id: string, name: string, to: "downloads" | "ask") => void;
   voiceEnabled?: boolean;
   busy?: boolean;
   busyLine?: string | null;
@@ -34,19 +35,47 @@ function revealFile(path: string) {
   revealItemInDir(path).catch(() => {});
 }
 
-function Artifacts({ artifacts }: { artifacts: MessageArtifacts }) {
+function Artifacts({
+  artifacts,
+  onFileSave,
+}: {
+  artifacts: MessageArtifacts;
+  onFileSave?: (id: string, name: string, to: "downloads" | "ask") => void;
+}) {
   return (
     <div className="artifacts">
       {artifacts.files?.map((file) => (
-        <button
-          key={file.path}
-          className="artifact-file"
-          title={file.path}
-          onClick={() => revealFile(file.path)}
-        >
-          <span className="artifact-file-name">{file.name}</span>
-          <span className="artifact-file-meta">{formatBytes(file.bytes)}</span>
-        </button>
+        <div key={file.path} className="artifact-file-row"
+          style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <button
+            className="artifact-file"
+            title={file.path}
+            onClick={() => revealFile(file.path)}
+          >
+            <span className="artifact-file-name">{file.name}</span>
+            <span className="artifact-file-meta">{formatBytes(file.bytes)}</span>
+          </button>
+          {onFileSave && file.id && (
+            <>
+              <button
+                className="artifact-file-meta"
+                title="Save a copy to Downloads"
+                style={{ background: "none", border: "none", cursor: "pointer" }}
+                onClick={() => onFileSave(file.id!, file.name, "downloads")}
+              >
+                ↓ Downloads
+              </button>
+              <button
+                className="artifact-file-meta"
+                title="Save as…"
+                style={{ background: "none", border: "none", cursor: "pointer" }}
+                onClick={() => onFileSave(file.id!, file.name, "ask")}
+              >
+                Save as…
+              </button>
+            </>
+          )}
+        </div>
       ))}
       {artifacts.table && (
         <div className="artifact-table-wrap">
@@ -86,7 +115,7 @@ function greeting(name?: string) {
   return name ? `${part}, ${name}.` : `${part}.`;
 }
 
-export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceEnabled, busy, busyLine }: ChatLogProps) {
+export function ChatLog({ messages, greetingName, suggestions, onSuggest, onFileSave, voiceEnabled, busy, busyLine }: ChatLogProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
 
@@ -151,7 +180,7 @@ export function ChatLog({ messages, greetingName, suggestions, onSuggest, voiceE
               </div>
               <div className="chat-bubble">
                 {msg.text}
-                {msg.artifacts && <Artifacts artifacts={msg.artifacts} />}
+                {msg.artifacts && <Artifacts artifacts={msg.artifacts} onFileSave={onFileSave} />}
               </div>
             </div>
           )

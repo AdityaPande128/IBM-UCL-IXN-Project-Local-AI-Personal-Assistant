@@ -91,6 +91,21 @@ function syncOpenClawConfig() {
     }
 }
 
+// The native save panel, borrowed through osascript: returns the chosen
+// POSIX path, or null when the user cancels.
+function askSavePanel(name) {
+    const { execFile } = require('child_process');
+    return new Promise(resolve => {
+        execFile('osascript', ['-e',
+            `POSIX path of (choose file name with prompt "Save as" default name ${JSON.stringify(name)})`],
+        { timeout: 120000 }, (err, stdout) => {
+            if (err) return resolve(null);
+            const chosen = String(stdout || '').trim();
+            resolve(chosen || null);
+        });
+    });
+}
+
 function voiceReady() {
     const chosen = profile.current();
     if (!chosen.voice.enabled) return false;
@@ -381,10 +396,11 @@ wss.on('connection', (ws) => {
                 // An attached upload becomes a real path the planner can
                 // read; the chat keeps the user's words and shows the file
                 // as an artifact chip on every surface.
+                // The bridge appends the attachment note itself, after
+                // follow-up resolution — baked into the text here, the
+                // resolver's rewrite used to strip it.
                 const attached = filePlane.resolveAttachments(parsed.attachments);
-                const intentText = attached.length
-                    ? `${parsed.text}\n\n(The user attached: ${attached.map(a => a.path).join(', ')})`
-                    : parsed.text;
+                const intentText = parsed.text;
                 const history = ws.conversationId
                     ? conversationStore.messages(ws.conversationId).slice(-6)
                         .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -394,6 +410,7 @@ wss.on('connection', (ws) => {
                     withActivity(ws, () =>
                         openclawBridge.executeIntent(intentText, {
                             interactive: true, signal, history,
+                            attachments: attached,
                             ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
                         })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));
@@ -408,6 +425,13 @@ wss.on('connection', (ws) => {
                     conversation: { id: convoId }, busy: true }, ws);
 
                 const result = await job.result;
+                // Stamp before sending: the live message must carry the same
+                // download ids the stored copy will, or the chip that arrives
+                // now has nothing to fetch. Stamping preserves existing ids,
+                // so the append below reuses these rather than minting twice.
+                if (result && result.artifacts) {
+                    result.artifacts = conversationStore.stampArtifacts(result.artifacts);
+                }
                 ws.send(JSON.stringify({ type: 'intent_result', id: job.id,
                     conversation: convoId, ...result }));
                 conversationStore.append(ws, result.status === 'error' ? 'error' : 'assistant',
@@ -483,6 +507,9 @@ wss.on('connection', (ws) => {
                 if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
                     conversation: { id: convoId }, busy: true }, ws);
                 const result = await job.result;
+                if (result && result.artifacts) {
+                    result.artifacts = conversationStore.stampArtifacts(result.artifacts);
+                }
                 ws.send(JSON.stringify({ type: 'intent_result', id: job.id,
                     conversation: convoId, ...result }));
                 if (result && result.response) {
@@ -888,6 +915,44 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'file_save' && parsed.id) {
+                // Saving is the daemon's job: the artifact id resolves to the
+                // real path, the copy lands under the name the chat showed —
+                // never the inbox's hash — and "ask" raises the native panel.
+                const source = conversationStore.artifactPath(String(parsed.id));
+                if (!source || !fs.existsSync(source)) {
+                    ws.send(JSON.stringify({ type: 'file_save_result', id: parsed.id,
+                        status: 'error', error: 'That file is no longer here.' }));
+                    return;
+                }
+                const name = path.basename(String(parsed.name || '') || path.basename(source));
+                let dest;
+                if (parsed.to === 'ask') {
+                    dest = await askSavePanel(name);
+                    if (!dest) {
+                        ws.send(JSON.stringify({ type: 'file_save_result', id: parsed.id,
+                            status: 'cancelled' }));
+                        return;
+                    }
+                } else {
+                    const downloads = path.join(os.homedir(), 'Downloads');
+                    const { name: stem, ext } = path.parse(name);
+                    dest = path.join(downloads, name);
+                    for (let n = 2; fs.existsSync(dest); n++) {
+                        dest = path.join(downloads, `${stem} (${n})${ext}`);
+                    }
+                }
+                try {
+                    await fs.promises.copyFile(source, dest);
+                    ws.send(JSON.stringify({ type: 'file_save_result', id: parsed.id,
+                        status: 'saved', path: dest }));
+                } catch (err) {
+                    ws.send(JSON.stringify({ type: 'file_save_result', id: parsed.id,
+                        status: 'error', error: err.message }));
+                }
+                return;
+            }
+
             if (parsed.type === 'profile_update') {
                 const applied = profile.apply({
                     name: parsed.name,
@@ -898,6 +963,10 @@ wss.on('connection', (ws) => {
                 });
                 if (applied.status === 'applied') {
                     activityBus.publish('daemon', 'profile_updated', {});
+                    // A change made on one surface must show on every other:
+                    // the phone picking a voice moves the Mac's radio too.
+                    broadcast({ type: 'profile_changed',
+                        profile: applied.profile || profile.current() }, ws);
                 }
                 ws.send(JSON.stringify({ type: 'profile_update_result', ...applied }));
                 return;
