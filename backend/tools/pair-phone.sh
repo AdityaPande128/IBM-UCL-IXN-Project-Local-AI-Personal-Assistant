@@ -30,3 +30,4 @@ PAYLOAD="{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\",\"secret\":\"$SE
 [ -n "$TURN" ] && PAYLOAD="{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\",\"secret\":\"$SECRET\",\"turn\":\"$TURN\"}"
 qrencode -t ansiutf8 "$PAYLOAD"
 echo "Scan from the app's pairing screen. Treat this code like a password."
+echo "Please make sure both devices are on the same network."
