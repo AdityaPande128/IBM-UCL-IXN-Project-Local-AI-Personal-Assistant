@@ -18,5 +18,15 @@ if [ -z "$HOST" ]; then
 fi
 [ -z "$HOST" ] && { echo "No address found; pass one: pair-phone.sh <host>"; exit 1; }
 echo "Pairing target: $HOST:8080"
-qrencode -t ansiutf8 "{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\",\"secret\":\"$SECRET\"}"
+# The QR carries the TURN relay list too, so the phone learns the relay the
+# moment it pairs — no app rebuild when the relay changes.
+CONFIG="${0:A:h}/../../config.json"
+TURN=$(node -e "
+try {
+  const t = (require('$CONFIG').remote || {}).turn;
+  if (Array.isArray(t) && t.length) process.stdout.write(t.join(','));
+} catch {}" 2>/dev/null)
+PAYLOAD="{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\",\"secret\":\"$SECRET\"}"
+[ -n "$TURN" ] && PAYLOAD="{\"host\":\"$HOST\",\"port\":8080,\"token\":\"$TOKEN\",\"secret\":\"$SECRET\",\"turn\":\"$TURN\"}"
+qrencode -t ansiutf8 "$PAYLOAD"
 echo "Scan from the app's pairing screen. Treat this code like a password."

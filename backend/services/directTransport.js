@@ -31,7 +31,22 @@ function publish(payload) {
 }
 
 // A long-lived JSON stream of everything published to the topic; ntfy sends
-// keepalives, we send reconnects. Quiet resilience over cleverness.
+// keepalives, we send reconnects. The watchdog exists because a NAT can
+// kill an idle stream without either end hearing a close — the socket
+// looks established while nothing will ever arrive again. Keepalives come
+// every ~45s, so 100s of silence means the stream is dead, not quiet.
+const SILENCE_MS = 100 * 1000;
+
+function watchdog() {
+    if (!state) return;
+    if (Date.now() - state.lastHeard > SILENCE_MS) {
+        if (state.stream) try { state.stream.destroy(); } catch { /* dead */ }
+        return retrySubscribe('keepalives stopped');
+    }
+    state.watch = setTimeout(watchdog, 30 * 1000);
+    state.watch.unref();
+}
+
 function subscribe() {
     if (!state) return;
     const req = https.get(`${NTFY}/${state.topic}/json`, res => {
@@ -40,8 +55,12 @@ function subscribe() {
             return retrySubscribe(`stream refused (${res.statusCode})`);
         }
         log('signaling armed');
+        state.lastHeard = Date.now();
+        clearTimeout(state.watch);
+        watchdog();
         let carry = '';
         res.on('data', piece => {
+            state.lastHeard = Date.now();
             carry += piece.toString('utf8');
             const lines = carry.split('\n');
             carry = lines.pop();
@@ -63,8 +82,14 @@ function retrySubscribe(reason) {
     if (!state) return;
     log(`signaling dropped (${reason}); back in 5s`);
     clearTimeout(state.retry);
+    clearTimeout(state.watch);
     state.retry = setTimeout(subscribe, 5000);
     state.retry.unref();
+}
+
+function candidateType(candidate) {
+    const match = / typ (\w+)/.exec(candidate);
+    return match ? match[1] : 'unknown';
 }
 
 function handleSignal(raw) {
@@ -78,6 +103,7 @@ function handleSignal(raw) {
         // once it is promoted, later candidates go to the live one.
         const target = state.pending || state.pc;
         if (!target) return;
+        log(`phone candidate in (${candidateType(signal.candidate)})`);
         try { target.addRemoteCandidate(signal.candidate, signal.mid || '0'); }
         catch (err) { log(`candidate refused: ${err.message}`); }
     }
@@ -109,10 +135,16 @@ function answerOffer(signal) {
     // grave: a garbage or dead-on-arrival offer — which any secret-holder
     // can publish — must not drop a phone that is still connected. Only when
     // the new channel actually opens does the old session retire.
-    const pc = new nodeDataChannel.PeerConnection('jarvis-mac', { iceServers: STUN });
+    if (state.pending) { try { state.pending.close(); } catch { /* stale */ } }
+    const pc = new nodeDataChannel.PeerConnection('jarvis-mac',
+        { iceServers: [...STUN, ...state.turn] });
     state.pending = pc;
-    pc.onLocalDescription((sdp, type) => publish({ kind: type, sdp }));
-    pc.onLocalCandidate((candidate, mid) => publish({ kind: 'candidate', candidate, mid }));
+    pc.onLocalDescription((sdp, type) => { log(`${type} published`); publish({ kind: type, sdp }); });
+    pc.onLocalCandidate((candidate, mid) => {
+        log(`our candidate out (${candidateType(candidate)})`);
+        publish({ kind: 'candidate', candidate, mid });
+    });
+    pc.onIceStateChange(ice => log(`ice: ${ice}`));
     pc.onDataChannel(dc => {
         // The new peer is really here now: retire whatever was live, then
         // promote this one and bridge it.
@@ -125,6 +157,7 @@ function answerOffer(signal) {
         bridge(dc);
     });
     pc.onStateChange(pcState => {
+        log(`pc: ${pcState}`);
         if (pcState !== 'failed' && pcState !== 'closed') return;
         if (state && state.pending === pc) {
             // A negotiation that never arrived: drop it, keep the live one.
@@ -255,14 +288,18 @@ function fileRequest(session, whole) {
     respond(400, { json: JSON.stringify({ error: 'unknown file op' }) });
 }
 
-function start({ secret, port, token }) {
+// TURN entries arrive as libdatachannel URIs — turn:user:pass@host:port,
+// optionally ?transport=tcp. A relay is the honest rung under a symmetric
+// NAT: the punch cannot land, and the relay carries only DTLS ciphertext.
+function start({ secret, port, token, turn = [] }) {
     if (state) return;
     state = {
         key: directCrypto.keyFor(secret),
         topic: directCrypto.topicFor(secret),
-        port, token,
+        port, token, turn,
         seen: new Map(),
-        pc: null, session: null, pending: null, stream: null, retry: null
+        pc: null, session: null, pending: null, stream: null, retry: null,
+        watch: null, lastHeard: Date.now()
     };
     subscribe();
 }
@@ -272,6 +309,7 @@ function stop() {
     if (state.pending) { try { state.pending.close(); } catch { /* closing */ } }
     teardown('transport stopped');
     clearTimeout(state.retry);
+    clearTimeout(state.watch);
     if (state.stream) try { state.stream.destroy(); } catch { /* closing */ }
     state = null;
 }

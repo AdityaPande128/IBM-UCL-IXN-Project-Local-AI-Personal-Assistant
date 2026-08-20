@@ -1047,7 +1047,9 @@ async function boot() {
             directTransport.start({
                 secret: pairingSecret.issue(process.env.JARVIS_PAIRING_SECRET_PATH),
                 port: PORT,
-                token: SOCKET_TOKEN
+                token: SOCKET_TOKEN,
+                turn: (config.remote && Array.isArray(config.remote.turn))
+                    ? config.remote.turn.filter(u => typeof u === 'string') : []
             });
         } catch (err) {
             console.warn(`[Direct] disabled: ${err.message}`);
