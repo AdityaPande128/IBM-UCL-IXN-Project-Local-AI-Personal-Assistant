@@ -89,7 +89,10 @@ function retrySubscribe(reason) {
 
 function candidateType(candidate) {
     const match = / typ (\w+)/.exec(candidate);
-    return match ? match[1] : 'unknown';
+    const type = match ? match[1] : 'unknown';
+    // candidate:<foundation> <component> <proto> <priority> <address> <port> typ …
+    const address = String(candidate).split(' ')[4] || '';
+    return `${type}/${address.includes(':') ? 'v6' : 'v4'}`;
 }
 
 function handleSignal(raw) {
@@ -167,6 +170,10 @@ function answerOffer(signal) {
             teardown(`peer ${pcState}`);
         }
     });
+    // Alongside the answer, tell the phone where the router's mapped port
+    // is (when NAT-PMP won one): a direct TCP door with no relay behind it.
+    const spot = typeof state.endpoint === 'function' ? state.endpoint() : null;
+    if (spot) publish({ kind: 'endpoint', host: spot.ip, port: spot.port });
     try {
         pc.setRemoteDescription(signal.sdp, 'offer');
     } catch (err) {
@@ -291,12 +298,12 @@ function fileRequest(session, whole) {
 // TURN entries arrive as libdatachannel URIs — turn:user:pass@host:port,
 // optionally ?transport=tcp. A relay is the honest rung under a symmetric
 // NAT: the punch cannot land, and the relay carries only DTLS ciphertext.
-function start({ secret, port, token, turn = [] }) {
+function start({ secret, port, token, turn = [], endpoint = null }) {
     if (state) return;
     state = {
         key: directCrypto.keyFor(secret),
         topic: directCrypto.topicFor(secret),
-        port, token, turn,
+        port, token, turn, endpoint,
         seen: new Map(),
         pc: null, session: null, pending: null, stream: null, retry: null,
         watch: null, lastHeard: Date.now()

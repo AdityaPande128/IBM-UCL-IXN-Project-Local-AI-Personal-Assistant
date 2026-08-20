@@ -1113,12 +1113,21 @@ async function boot() {
         try {
             const pairingSecret = require('./services/pairingSecret');
             const directTransport = require('./services/directTransport');
+            // Where the home router cooperates, the Mac is its own server:
+            // NAT-PMP maps a public port straight here, and the phone learns
+            // it through the sealed signaling — no third party in the path.
+            let natPmp = null;
+            if (config.remote && config.remote.lan_bind === true) {
+                natPmp = require('./services/natPmp');
+                natPmp.start({ port: PORT });
+            }
             directTransport.start({
                 secret: pairingSecret.issue(process.env.JARVIS_PAIRING_SECRET_PATH),
                 port: PORT,
                 token: SOCKET_TOKEN,
                 turn: (config.remote && Array.isArray(config.remote.turn))
-                    ? config.remote.turn.filter(u => typeof u === 'string') : []
+                    ? config.remote.turn.filter(u => typeof u === 'string') : [],
+                endpoint: natPmp ? natPmp.current : null
             });
         } catch (err) {
             console.warn(`[Direct] disabled: ${err.message}`);
