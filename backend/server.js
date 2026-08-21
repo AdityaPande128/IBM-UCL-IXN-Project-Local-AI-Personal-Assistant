@@ -1039,6 +1039,19 @@ function channelDeps() {
     };
 }
 
+// Warm and stay warm: the engine answers in half a second resident and in
+// a minute cold, and every cold first question reads as "Jarvis is broken."
+// A one-token heartbeat keeps the weights loaded for the daemon's lifetime.
+function keepEngineWarm() {
+    const llmClient = require('./services/llmClient');
+    const warm = () => llmClient.complete(
+        [{ role: 'user', content: 'ok' }],
+        { tier: 'guard', max_tokens: 1, timeout_ms: 120000 }
+    ).catch(() => { /* warming is best-effort */ });
+    warm();
+    setInterval(warm, 8 * 60 * 1000).unref();
+}
+
 async function boot() {
     syncOpenClawConfig();
 
@@ -1133,6 +1146,8 @@ async function boot() {
             console.warn(`[Direct] disabled: ${err.message}`);
         }
     }
+
+    keepEngineWarm();
 
     // Loopback unless the config opts into the LAN; the tailnet path never
     // needs more than loopback, and the token gates either way.
