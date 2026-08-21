@@ -281,9 +281,14 @@ wss.on('connection', (ws) => {
 
     ws.on('message', async (message, isBinary) => {
         if (ws.sealed) {
+          try {
             if (isBinary) {
                 const clear = remoteSeal.openBinary('phone', message, ws.sealSeenBin);
                 if (!clear) return;
+                // The tag is the first byte: refuse a file op from a peer
+                // that has the secret but not yet the token BEFORE reassembly,
+                // so it can never park tens of megabytes of buffer pre-auth.
+                if (clear[0] === channelFrames.TAG.FILE_REQ && !authenticated) return;
                 const whole = ws.sealAssemble(clear);
                 if (!whole) return;
                 if (whole.tag === channelFrames.TAG.FILE_REQ) {
@@ -305,6 +310,12 @@ wss.on('connection', (ws) => {
                 message = Buffer.from(JSON.stringify(opened.payload));
                 isBinary = false;
             }
+          } catch (err) {
+            // A malformed sealed frame is the network's problem, never a
+            // reason to reject this socket's whole message loop.
+            console.warn(`[Seal] frame dropped: ${err.message}`);
+            return;
+          }
         }
         if (!authenticated) {
             let hello = null;

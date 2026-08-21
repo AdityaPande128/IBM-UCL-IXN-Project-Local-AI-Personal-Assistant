@@ -234,7 +234,10 @@ async function answerAloud(proposalId, approved, ws, kind = null) {
     const responseText = result.response || result.error
         || (approved ? 'Done.' : 'Okay, leaving it.');
     result = { ...result, response: responseText };
-    send(ws, { type: 'intent_result', id: job.id, ...result });
+    // Stamp the chat this reply belongs to, so a surface that has since
+    // wandered to another conversation shows it in the right one — the same
+    // contract the typed-intent path already keeps.
+    send(ws, { type: 'intent_result', id: job.id, conversation: ws.conversationId, ...result });
     record(ws, result.status === 'error' ? 'error' : 'assistant',
         responseText, result.artifacts);
     await speakText(responseText, ws);
@@ -283,7 +286,8 @@ async function respondTo(transcribedText, ws) {
             llmResult = { ...llmResult, response: responseText };
 
             console.log(`[Pipeline] Response (${llmResult.status}): ${responseText.length} chars`);
-            send(ws, { type: 'intent_result', id: job.id, ...llmResult });
+            send(ws, { type: 'intent_result', id: job.id,
+                conversation: ws.conversationId, ...llmResult });
             record(ws, llmResult.status === 'error' ? 'error' : 'assistant',
                 llmResult.response, llmResult.artifacts);
         } finally {
