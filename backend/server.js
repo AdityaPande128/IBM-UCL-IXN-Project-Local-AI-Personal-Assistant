@@ -406,11 +406,21 @@ wss.on('connection', (ws) => {
                         .filter(m => m.role === 'user' || m.role === 'assistant')
                         .map(m => ({ role: m.role, text: String(m.text || '').slice(0, 240) }))
                     : [];
+                // Files that crossed this conversation recently, so "that
+                // PDF" still means something three messages later.
+                const recentFiles = ws.conversationId
+                    ? conversationStore.messages(ws.conversationId).slice(-12)
+                        .flatMap(m => (m.artifacts && Array.isArray(m.artifacts.files))
+                            ? m.artifacts.files : [])
+                        .filter(f => f && f.path)
+                        .slice(-5)
+                    : [];
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
                         openclawBridge.executeIntent(intentText, {
                             interactive: true, signal, history,
                             attachments: attached,
+                            recentFiles,
                             ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
                         })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));

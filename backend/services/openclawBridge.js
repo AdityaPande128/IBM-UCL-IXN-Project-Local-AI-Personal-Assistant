@@ -124,6 +124,21 @@ async function resolveFollowUp(text, history) {
     }
 }
 
+// The asks that sound like they mean a file this chat has already seen.
+const REFERENCES_FILES =
+    /\b(pdf|file|document|docx?|report|attachment|image|photo|picture|schedule|spreadsheet|that one|it back)\b/i;
+
+// Verbs that make a short utterance a job rather than conversation.
+const SMALL_ACTION =
+    /^(send|open|find|build|make|check|read|write|search|email|mail|book|play|show|list|run|create|delete|remove|convert|download|upload|save|schedule|set|turn|call|text|browse|visit|go|fetch|get|give|share|attach|summari[sz]e|translate|extract|count|rename|move|copy|stop|pause|resume)\b/i;
+
+function isSmallTalk(text) {
+    const plain = String(text || '').trim();
+    return plain.split(/\s+/).length <= 4
+        && !/\d/.test(plain)
+        && !SMALL_ACTION.test(plain);
+}
+
 // An attached file's indexed chunks, pinned as answer context so the reply
 // grounds on what the user just handed over, not on retrieval's best guess.
 function attachmentPassages(attached) {
@@ -439,6 +454,30 @@ async function executeIntent(intentText, options = {}) {
     if (attached.length) {
         asked += `\n\n(The user attached: ${attached.map(a => a.path).join(', ')})`;
     }
+    // "That PDF" from three messages ago is still in the room: files that
+    // crossed this conversation earlier come back into view whenever the
+    // ask sounds like it means one of them.
+    const recent = Array.isArray(options.recentFiles) ? options.recentFiles : [];
+    const wantsFiles = !attached.length && recent.length > 0
+        && REFERENCES_FILES.test(asked);
+    if (wantsFiles) {
+        asked += `\n\n(Files earlier in this chat: ${recent.map(f => f.path).join(', ')})`;
+    }
+    // A tiny conversational ask never deserves the skill factory: no digits,
+    // no action verb, no file in hand — it goes straight to the answer path
+    // before triage can dream bigger.
+    if (!attached.length && isSmallTalk(asked)) {
+        console.log('[Bridge] Small ask; answering directly.');
+        const answered = await answerService.answer(asked);
+        return {
+            status: answered.is_successful ? 'success' : 'error',
+            response: answered.text,
+            action: 'answered',
+            grounded: answered.grounded,
+            sources: answered.sources,
+            durationMs: Date.now() - startedAt
+        };
+    }
     const decision = await router.route(asked);
     const routeTraceId = routerTraces.record(intentText, decision);
     activityBus.publish('router', 'decision', {
@@ -479,7 +518,10 @@ async function executeIntent(intentText, options = {}) {
         case router.ACTIONS.ANSWER: {
             // An attached file IS the context: its indexed text is pinned
             // straight into the answer, no retrieval lottery in between.
-            const pinned = attachmentPassages(attached);
+            // A question that sounds like it means an earlier file pins
+            // those the same way.
+            const pinned = attachmentPassages(attached.length ? attached
+                : (wantsFiles ? recent : []));
             const answered = await answerService.answer(asked,
                 pinned.length ? { passages: pinned } : {});
             if (answered.is_successful

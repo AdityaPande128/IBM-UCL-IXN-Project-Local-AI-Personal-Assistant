@@ -163,7 +163,7 @@ test('the rendered catalogue names inputs and outputs', () => {
     const rendered = capabilityGraph.describe([capabilityGraph.get('files.search')]);
     assert.match(rendered, /files\.search\(/);
     assert.match(rendered, /text:string/);
-    assert.match(rendered, /-> \{files, paths\}/);
+    assert.match(rendered, /-> \{files, paths, best\}/);
 });
 
 

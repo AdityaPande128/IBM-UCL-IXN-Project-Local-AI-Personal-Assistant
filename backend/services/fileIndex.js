@@ -266,7 +266,21 @@ function search(query = {}) {
     `;
     params.push(limit);
 
-    return database.prepare(sql).all(...params).map(row => ({
+    const rows = database.prepare(sql).all(...params);
+    // A name that carries the query's words beats a body that merely
+    // mentions them: "Iron Profile.pdf" must outrank a long report whose
+    // text happens to say "report" a hundred times. Stable sort keeps the
+    // bm25 order inside each name-hit band.
+    if (match) {
+        const terms = String(text).toLowerCase()
+            .split(/[^\p{L}\p{N}]+/u).filter(t => t.length >= 2);
+        const nameHits = row => {
+            const name = String(row.name || '').toLowerCase();
+            return terms.filter(t => name.includes(t)).length;
+        };
+        rows.sort((a, b) => nameHits(b) - nameHits(a));
+    }
+    return rows.map(row => ({
         ...row,
         content_indexed: Boolean(row.content_indexed),
         modified: new Date(row.mtime).toISOString()

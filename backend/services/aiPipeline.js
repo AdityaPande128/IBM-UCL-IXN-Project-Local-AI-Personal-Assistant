@@ -172,6 +172,10 @@ function record(ws, role, text, artifacts) {
 }
 
 async function speakText(text, ws) {
+    // Which mouth is talking matters when a reply lands on the wrong one:
+    // wakeMode marks the Mac's own surface, everything else is a client.
+    console.log(`[TTS] speaking ${String(text || '').length} chars on `
+        + `${ws && ws.wakeMode ? 'the Mac (wake surface)' : 'a connected surface'}`);
     const spokenText = speakableSummary(String(text || ''));
     const textChunks = chunkTextDynamically(spokenText);
     let spoken = 0;

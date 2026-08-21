@@ -334,7 +334,12 @@ function builtins() {
             },
             outputs: {
                 files: { type: 'file[]', description: 'matching files, best first' },
-                paths: { type: 'string[]', description: 'just their paths' }
+                paths: { type: 'string[]', description: 'just their paths' },
+                best: {
+                    type: 'path',
+                    description: 'the single strongest match — wire THIS into a later step '
+                        + 'when the user means one particular file ("the PDF", "my report")'
+                }
             },
             produces: labels.label(ORIGIN.FILE, SENSITIVITY.PERSONAL),
             run(bound) {
@@ -344,7 +349,11 @@ function builtins() {
                     dir: bound.dir ? corpusIndexer.expandHome(bound.dir) : undefined,
                     limit: Math.min(Number(bound.limit) || 20, 50)
                 });
-                return { files, paths: files.map(f => f.path) };
+                return {
+                    files,
+                    paths: files.map(f => f.path),
+                    best: files.length ? files[0].path : null
+                };
             }
         }),
 
@@ -404,7 +413,11 @@ function builtins() {
                 'IS how a file gets sent, shared or given to the user: pair it with ' +
                 'files.search when they say "send me", "share" or "give me" a file.',
             inputs: {
-                paths: { type: 'path[]', required: true, description: 'full paths of the files to hand over' }
+                paths: {
+                    type: 'path[]', required: true,
+                    description: 'full paths to hand over — for "send me the X" wire '
+                        + 'files.search\'s "best" here, not every match it found'
+                }
             },
             outputs: {
                 delivered: { type: 'file[]', description: 'the files now attached to the reply' },
@@ -415,7 +428,7 @@ function builtins() {
             run(bound) {
                 const fs = require('fs');
                 const requested = (Array.isArray(bound.paths) ? bound.paths : [bound.paths])
-                    .map(p => String(p || '')).filter(Boolean).slice(0, 5);
+                    .map(p => String(p || '')).filter(Boolean).slice(0, 3);
                 const delivered = [];
                 const skipped = [];
                 for (const target of requested) {

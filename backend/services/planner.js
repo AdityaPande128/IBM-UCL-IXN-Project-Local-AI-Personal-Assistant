@@ -463,6 +463,17 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
             }
         }
 
+        // "Send me the PDF" means one PDF: a delivery wired to every search
+        // hit narrows to the strongest match unless the ask was plural.
+        if (capability.id === 'files.deliver'
+            && typeof inputs.paths === 'string'
+            && /\.paths$/.test(inputs.paths)
+            && !/\b(all|every|each|both|files|pdfs|documents|reports|photos|images)\b/i
+                .test(String(question))) {
+            inputs.paths = inputs.paths.replace(/\.paths$/, '.best');
+            repairs.push('narrowed_delivery');
+        }
+
         seen.set(step.id, capability);
     });
 
@@ -472,10 +483,13 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
         if (!capability) return;
 
         const isLast = index === parsed.steps.length - 1;
+        // A final step that hands the user text OR files has finished the
+        // job — delivery is an ending, not a loose wire.
         const useful = capabilityGraph.effectsFor(capability, step.inputs)
             .some(e => capabilityGraph.ACCOMPLISHING.has(e))
             || consumed.has(step.id)
-            || (isLast && 'text' in capability.outputs);
+            || (isLast && ('text' in capability.outputs
+                || 'delivered' in capability.outputs));
 
         if (!useful) unused.push({ index, step, capability, isLast });
     });
