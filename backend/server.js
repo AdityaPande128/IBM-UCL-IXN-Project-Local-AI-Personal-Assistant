@@ -230,10 +230,15 @@ aiPipeline.setBroadcast(broadcast);
 // dialect: every later frame in both directions is ciphertext under the
 // pairing secret. The phone uses it on the remembered home door, where the
 // bytes cross the open internet; the token still authenticates inside.
+// The replay maps are daemon-global, not per-connection: a captured sealed
+// auth replayed on a fresh socket must find its nonce already burned.
+const sealSeenText = new Map();
+const sealSeenBin = new Map();
+
 function sealConnection(ws) {
     ws.sealed = true;
-    ws.sealSeen = new Map();
-    ws.sealSeenBin = new Map();
+    ws.sealSeen = sealSeenText;
+    ws.sealSeenBin = sealSeenBin;
     ws.sealAssemble = channelFrames.assembler();
     ws.sealSid = 0;
     const raw = ws.send.bind(ws);
@@ -362,11 +367,17 @@ wss.on('connection', (ws) => {
             }
             // Push-to-talk keeps the same courtesy the wake path extends: a
             // clear spoken yes or no inside a proposal's window answers the
-            // card; anything else is an ordinary request.
+            // card; anything else is an ordinary request. The owner check
+            // stops another surface consenting — but a reconnected phone is
+            // a new socket, so a dead owner passes the window to whoever
+            // still holds the card on screen.
+            const ownerOk = pendingSpokenProposal
+                && (pendingSpokenProposal.owner === ws
+                    || pendingSpokenProposal.owner.readyState !== WebSocket.OPEN);
             const pending = (ws.pendingVoiceApproval
                     && Date.now() < ws.pendingVoiceApproval.until)
                 ? ws.pendingVoiceApproval
-                : (pendingSpokenProposal && pendingSpokenProposal.owner === ws
+                : (pendingSpokenProposal && ownerOk
                     && Date.now() < pendingSpokenProposal.until
                     ? pendingSpokenProposal : null);
             if (pending) {

@@ -668,6 +668,13 @@ export function useWebSocket(): UseWebSocketReturn {
           if (msg.kind === "proposal" && msg.proposal) {
             setProposal(msg.proposal);
           }
+          if (msg.kind === "deleted") {
+            setConversations((prev) => prev.filter((c) => c.id !== msg.conversation.id));
+            if (activeConversationRef.current === msg.conversation.id) {
+              setActiveConversation(null);
+              setMessages([]);
+            }
+          }
           if (msg.kind === "busy" && activeConversationRef.current === msg.conversation.id) {
             setRemoteBusy(!!msg.busy);
           }

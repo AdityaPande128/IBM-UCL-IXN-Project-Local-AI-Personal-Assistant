@@ -178,7 +178,8 @@ function connectSealed() {
 
         ws.on('open', () => {
             ws.send(JSON.stringify({ type: 'seal', v: 1 }));
-            api.send({ type: 'auth', token: token() });
+            api.authEnvelope = directCrypto.seal(key, 'phone', { type: 'auth', token: token() });
+            ws.send(api.authEnvelope);
             resolve(api);
         });
         ws.on('error', reject);
@@ -264,6 +265,22 @@ test('a decision mid-sentence silences the rest of the reply', async () => {
     assert.equal(spoken, 1);
     assert.ok(sent.includes('speak_start'));
     assert.equal(sent.filter(k => k === 'audio').length, 1);
+});
+
+test('a captured sealed auth opens nothing on a second connection', async () => {
+    const phone = await connectSealed();
+    await phone.next(m => m.type === 'connected');
+    // The nonce burned on the first socket: replaying the very same sealed
+    // auth on a fresh one must leave it unauthenticated until the grace
+    // timer shows it the door.
+    const thief = new WebSocket('ws://127.0.0.1:18093');
+    clients.push(thief);
+    const closed = new Promise(resolve => thief.once('close', code => resolve(code)));
+    thief.on('open', () => {
+        thief.send(JSON.stringify({ type: 'seal', v: 1 }));
+        thief.send(phone.authEnvelope);
+    });
+    assert.equal(await closed, 4401);
 });
 
 test('garbage on a sealed socket is dropped, never fatal', async () => {
