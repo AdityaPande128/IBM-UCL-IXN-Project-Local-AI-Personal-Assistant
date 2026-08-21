@@ -126,11 +126,11 @@ async function resolveFollowUp(text, history) {
 
 // The asks that sound like they mean a file this chat has already seen.
 const REFERENCES_FILES =
-    /\b(pdf|file|document|docx?|report|attachment|image|photo|picture|schedule|spreadsheet|that one|it back)\b/i;
+    /\b(pdf|file|document|docx?|report|attachment|image|photo|picture|spreadsheet|that one|it back)\b/i;
 
 // Verbs that make a short utterance a job rather than conversation.
 const SMALL_ACTION =
-    /^(send|open|find|build|make|check|read|write|search|email|mail|book|play|show|list|run|create|delete|remove|convert|download|upload|save|schedule|set|turn|call|text|browse|visit|go|fetch|get|give|share|attach|summari[sz]e|translate|extract|count|rename|move|copy|stop|pause|resume)\b/i;
+    /^(send|open|find|build|make|check|read|write|search|email|mail|book|play|show|list|run|create|delete|remove|convert|download|upload|save|schedule|set|turn|call|text|browse|visit|go|fetch|get|give|share|attach|summari[sz]e|translate|extract|count|rename|move|copy|stop|pause|resume|remind|wipe|cancel|clear|forget|start|launch|close|quit|update|enable|disable|add)\b/i;
 
 function isSmallTalk(text) {
     const plain = String(text || '').trim();

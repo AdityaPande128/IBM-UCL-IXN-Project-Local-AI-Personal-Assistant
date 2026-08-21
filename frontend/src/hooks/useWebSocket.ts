@@ -358,6 +358,7 @@ interface UseWebSocketReturn {
   sendDecision: (id: string, decision: "yes" | "no") => void;
   saveFile: (id: string, name: string, to: "downloads" | "ask") => void;
   savedFile: { path: string; at: number } | null;
+  saveError: { text: string; at: number } | null;
   sendAbort: () => void;
   requestAbilities: () => void;
   removeSkill: (name: string) => void;
@@ -460,6 +461,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [onboardingApply, setOnboardingApply] = useState<OnboardingApplyResult | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [savedFile, setSavedFile] = useState<{ path: string; at: number } | null>(null);
+  const [saveError, setSaveError] = useState<{ text: string; at: number } | null>(null);
   const [wakeMode, setWakeModeState] = useState(false);
   const [wakeHeardAt, setWakeHeardAt] = useState<number | null>(null);
   const [remoteBusy, setRemoteBusy] = useState(false);
@@ -556,6 +558,13 @@ export function useWebSocket(): UseWebSocketReturn {
         if (msg.type === "file_save_result") {
           if (msg.status === "saved" && msg.path) {
             setSavedFile({ path: msg.path as string, at: Date.now() });
+          } else if (msg.status === "error") {
+            // A failed save must say so; a button that does nothing reads
+            // as a dead button.
+            setSaveError({
+              text: msg.error ?? "The file could not be saved.",
+              at: Date.now(),
+            });
           }
           return;
         }
@@ -1176,6 +1185,7 @@ export function useWebSocket(): UseWebSocketReturn {
     sendDecision,
     saveFile,
     savedFile,
+    saveError,
     sendAbort,
     requestAbilities,
     removeSkill,

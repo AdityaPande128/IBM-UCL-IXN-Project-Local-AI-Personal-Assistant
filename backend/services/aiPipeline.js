@@ -22,6 +22,15 @@ function setBroadcast(fn) {
 
 const MAX_SPOKEN_CHARS = 350;
 
+// One user, one voice: any decision — an approval, an abort — silences
+// every reply still being spoken, wherever it was streaming. Utterances
+// capture the epoch when they start and stop the moment it moves on.
+let speechEpoch = 0;
+
+function silence() {
+    speechEpoch += 1;
+}
+
 function speakableSummary(text) {
     const full = String(text || '').trim();
     if (full.length <= MAX_SPOKEN_CHARS) return full;
@@ -176,18 +185,26 @@ async function speakText(text, ws) {
     // wakeMode marks the Mac's own surface, everything else is a client.
     console.log(`[TTS] speaking ${String(text || '').length} chars on `
         + `${ws && ws.wakeMode ? 'the Mac (wake surface)' : 'a connected surface'}`);
+    const epoch = speechEpoch;
     const spokenText = speakableSummary(String(text || ''));
     const textChunks = chunkTextDynamically(spokenText);
     let spoken = 0;
+    if (textChunks.length) send(ws, { type: 'speak_start' });
     for (let i = 0; i < textChunks.length; i++) {
         if (!isOpen(ws)) {
             console.log('[Pipeline] Client disconnected; abandoning synthesis.');
             return spoken;
         }
+        if (epoch !== speechEpoch) {
+            console.log('[Pipeline] Silenced; abandoning synthesis.');
+            return spoken;
+        }
         const audioChunk = await synthesizeChunk(textChunks[i], i);
+        // A decision may have landed while this chunk was rendering.
+        if (epoch !== speechEpoch) return spoken;
         if (audioChunk) { ws.send(audioChunk); spoken++; }
     }
-    if (spoken === 0 && textChunks.length > 0) {
+    if (spoken === 0 && textChunks.length > 0 && epoch === speechEpoch) {
         send(ws, { type: 'speech_unavailable',
                    message: 'The reply could not be spoken; text only.' });
     }
@@ -198,6 +215,8 @@ async function speakText(text, ws) {
 // The spoken half of the approval card: acknowledge at once, run the
 // decision, then speak the outcome like any other reply.
 async function answerAloud(proposalId, approved, ws, kind = null) {
+    // The decision outranks the question still being read out.
+    silence();
     record(ws, 'user', approved ? '“Yes.”' : '“No.”');
     // The card asked; the voice answered. It leaves the screen now, not
     // after the minutes the build takes — and on every surface showing it.
@@ -294,6 +313,7 @@ module.exports = {
     handleIncomingAudio,
     respondTo,
     speakText,
+    silence,
     answerAloud,
     setBroadcast,
     chunkTextDynamically,

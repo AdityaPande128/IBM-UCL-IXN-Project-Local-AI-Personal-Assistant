@@ -106,6 +106,7 @@ function App() {
     sendDecision,
     saveFile,
     savedFile,
+    saveError,
     sendAbort,
     requestAbilities,
     removeSkill,
@@ -157,6 +158,10 @@ function App() {
   useEffect(() => {
     if (savedFile) revealItemInDir(savedFile.path).catch(() => {});
   }, [savedFile]);
+  useEffect(() => {
+    if (saveError) pushToast(saveError.text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveError]);
   const [view, setView] = useState<View>("chat");
   const inputRef = useRef<HTMLInputElement>(null);
 

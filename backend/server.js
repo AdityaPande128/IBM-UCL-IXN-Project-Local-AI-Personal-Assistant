@@ -27,6 +27,9 @@ const morningBrief = require('./services/morningBrief');
 const egress = require('./security/egress');
 const securityStore = require('./security/store');
 const filePlane = require('./services/filePlane');
+const remoteSeal = require('./services/remoteSeal');
+const channelFrames = require('./services/channelFrames');
+const fileLaneReplay = require('./services/fileLaneReplay');
 const channelAdapter = require('./services/channelAdapter');
 const memoryStore = require('./services/memoryStore');
 const memoryService = require('./services/memoryService');
@@ -223,6 +226,47 @@ conversationStore.notifyAppend(({ ws: origin, id, created, message }) => {
 });
 aiPipeline.setBroadcast(broadcast);
 
+// A connection that greets with {"type":"seal"} switches to the sealed
+// dialect: every later frame in both directions is ciphertext under the
+// pairing secret. The phone uses it on the remembered home door, where the
+// bytes cross the open internet; the token still authenticates inside.
+function sealConnection(ws) {
+    ws.sealed = true;
+    ws.sealSeen = new Map();
+    ws.sealAssemble = channelFrames.assembler();
+    ws.sealSid = 0;
+    const raw = ws.send.bind(ws);
+    ws.sendFrame = frame => raw(remoteSeal.sealBinary('mac', frame), { binary: true });
+    ws.send = (data, opts, cb) => {
+        if (typeof data === 'string') {
+            let payload;
+            try { payload = JSON.parse(data); } catch { payload = { raw: data }; }
+            return raw(remoteSeal.sealText('mac', payload), opts, cb);
+        }
+        // Binary rides framed so the phone can tell speech from file lanes.
+        for (const frame of channelFrames.chunk(channelFrames.TAG.WS_BINARY,
+            { sid: ++ws.sealSid }, Buffer.from(data))) {
+            ws.sendFrame(frame);
+        }
+        if (typeof cb === 'function') cb();
+    };
+}
+
+function sealedFileRequest(ws, whole) {
+    const sid = ++ws.sealSid;
+    fileLaneReplay.replay({ port: PORT, token: SOCKET_TOKEN }, whole.meta, whole.body,
+        (status, header, payload) => {
+            try {
+                for (const frame of channelFrames.chunk(channelFrames.TAG.FILE_RES,
+                    { sid, reqId: whole.meta.reqId, status, ...header }, payload)) {
+                    ws.sendFrame(frame);
+                }
+            } catch (err) {
+                console.warn(`[Seal] file response failed: ${err.message}`);
+            }
+        });
+}
+
 wss.on('connection', (ws) => {
     let authenticated = false;
     const authTimer = setTimeout(() => {
@@ -230,10 +274,40 @@ wss.on('connection', (ws) => {
     }, AUTH_GRACE_MS);
 
     ws.on('message', async (message, isBinary) => {
+        if (ws.sealed) {
+            if (isBinary) {
+                const clear = remoteSeal.openBinary('phone', message);
+                if (!clear) return;
+                const whole = ws.sealAssemble(clear);
+                if (!whole) return;
+                if (whole.tag === channelFrames.TAG.FILE_REQ) {
+                    // The secret opened the door; only the token opens files.
+                    if (!authenticated) return;
+                    return sealedFileRequest(ws, whole);
+                }
+                if (whole.tag === channelFrames.TAG.WS_TEXT) {
+                    message = whole.body;
+                    isBinary = false;
+                } else if (whole.tag === channelFrames.TAG.WS_BINARY) {
+                    message = whole.body;
+                } else {
+                    return;
+                }
+            } else {
+                const opened = remoteSeal.openText('mac', message.toString(), ws.sealSeen);
+                if (!opened.payload) return;
+                message = Buffer.from(JSON.stringify(opened.payload));
+                isBinary = false;
+            }
+        }
         if (!authenticated) {
             let hello = null;
             if (!isBinary) {
                 try { hello = JSON.parse(message.toString()); } catch { hello = null; }
+            }
+            if (hello && hello.type === 'seal' && !ws.sealed && remoteSeal.ready()) {
+                sealConnection(ws);
+                return;
             }
             if (hello && hello.type === 'auth' && socketAuth.verify(SOCKET_TOKEN, hello.token)) {
                 authenticated = true;
@@ -384,12 +458,23 @@ wss.on('connection', (ws) => {
                 const forgotten = memoryStore.deleteByOrigin(id);
                 if (forgotten) console.log(`[Memory] Forgot ${forgotten} fact(s) born in chat ${id}.`);
                 if (ws.conversationId === id) ws.conversationId = null;
+                // Every other surface drops the ghost row too.
+                if (removed) {
+                    broadcast({ type: 'conversation_event', kind: 'deleted',
+                        conversation: { id } }, ws);
+                }
                 ws.send(JSON.stringify({ type: 'conversation_delete_result', id, removed,
                     conversations: conversationStore.list() }));
                 return;
             }
 
             if (parsed.type === 'intent' && parsed.text) {
+                // A message flushed from a phone's outbox names the chat it
+                // was typed in; honouring it beats landing in a fresh one.
+                if (parsed.conversation != null
+                    && conversationStore.exists(Number(parsed.conversation))) {
+                    ws.conversationId = Number(parsed.conversation);
+                }
                 // The executor follows the profile's mode at the moment the
                 // intent arrives, so switching modes never needs a restart.
                 const mode = profile.current().mode;
@@ -502,6 +587,8 @@ wss.on('connection', (ws) => {
 
             if (parsed.type === 'approval' && parsed.id) {
                 const decision = parsed.decision === 'yes' ? 'yes' : 'no';
+                // The tap outranks the question still being read out.
+                aiPipeline.silence();
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
                         openclawBridge.answerProposal(parsed.id, decision, { signal })));
@@ -564,6 +651,7 @@ wss.on('connection', (ws) => {
             }
 
             if (parsed.type === 'abort') {
+                aiPipeline.silence();
                 ws.send(JSON.stringify({ type: 'abort_result', ...intentQueue.abort(parsed.id) }));
                 return;
             }
@@ -929,13 +1017,13 @@ wss.on('connection', (ws) => {
                 // Saving is the daemon's job: the artifact id resolves to the
                 // real path, the copy lands under the name the chat showed —
                 // never the inbox's hash — and "ask" raises the native panel.
-                const source = conversationStore.artifactPath(String(parsed.id));
-                if (!source || !fs.existsSync(source)) {
+                const found = conversationStore.artifactPath(String(parsed.id));
+                if (!found || !fs.existsSync(found.path)) {
                     ws.send(JSON.stringify({ type: 'file_save_result', id: parsed.id,
                         status: 'error', error: 'That file is no longer here.' }));
                     return;
                 }
-                const name = path.basename(String(parsed.name || '') || path.basename(source));
+                const name = path.basename(String(parsed.name || '') || found.name);
                 let dest;
                 if (parsed.to === 'ask') {
                     dest = await askSavePanel(name);
@@ -945,7 +1033,8 @@ wss.on('connection', (ws) => {
                         return;
                     }
                 } else {
-                    const downloads = path.join(os.homedir(), 'Downloads');
+                    const downloads = process.env.JARVIS_SAVE_DIR
+                        || path.join(os.homedir(), 'Downloads');
                     const { name: stem, ext } = path.parse(name);
                     dest = path.join(downloads, name);
                     for (let n = 2; fs.existsSync(dest); n++) {
@@ -953,7 +1042,7 @@ wss.on('connection', (ws) => {
                     }
                 }
                 try {
-                    await fs.promises.copyFile(source, dest);
+                    await fs.promises.copyFile(found.path, dest);
                     ws.send(JSON.stringify({ type: 'file_save_result', id: parsed.id,
                         status: 'saved', path: dest }));
                 } catch (err) {
@@ -1127,6 +1216,15 @@ async function boot() {
         filePlane.init({ token: SOCKET_TOKEN, inbox: INBOX_DIR });
     } catch (err) {
         console.warn(`[Files] inbox unavailable: ${err.message}`);
+    }
+
+    // The sealed dialect must be ready even when Direct is off: whatever
+    // rung crosses the internet speaks it, and the secret never rotates.
+    try {
+        remoteSeal.init(require('./services/pairingSecret')
+            .issue(process.env.JARVIS_PAIRING_SECRET_PATH));
+    } catch (err) {
+        console.warn(`[Seal] remote sealing unavailable: ${err.message}`);
     }
 
     // Jarvis Direct: the phone reaches this Mac from anywhere by punching

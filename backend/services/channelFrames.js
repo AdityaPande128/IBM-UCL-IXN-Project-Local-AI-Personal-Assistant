@@ -3,14 +3,18 @@
 //   0x01  a websocket binary frame in transit (voice in, speech out)
 //   0x02  a file-lane request from the phone
 //   0x03  a file-lane response back to it
+//   0x04  a websocket text frame too large to ride the channel whole
 // Frame: [tag][4B BE header length][header JSON][payload chunk]. The channel
 // is ordered and reliable, so sequence numbers only assert what SCTP already
 // promised — a gap means a bug, and the stream dies loudly.
 
 const CHUNK_BYTES = 64 * 1024;
-const TAG = { WS_BINARY: 0x01, FILE_REQ: 0x02, FILE_RES: 0x03 };
-const MAX_STREAM_BYTES = { [TAG.WS_BINARY]: 8 * 1024 * 1024,
-    [TAG.FILE_REQ]: 24 * 1024 * 1024, [TAG.FILE_RES]: 24 * 1024 * 1024 };
+const TAG = { WS_BINARY: 0x01, FILE_REQ: 0x02, FILE_RES: 0x03, WS_TEXT: 0x04 };
+// The binary cap matches the plain websocket's frame limit; the file caps
+// clear the HTTP lane's 50 MB so no rung silently strands a legal file.
+const MAX_STREAM_BYTES = { [TAG.WS_BINARY]: 32 * 1024 * 1024,
+    [TAG.FILE_REQ]: 52 * 1024 * 1024, [TAG.FILE_RES]: 52 * 1024 * 1024,
+    [TAG.WS_TEXT]: 16 * 1024 * 1024 };
 
 function encode(tag, header, payload) {
     const head = Buffer.from(JSON.stringify(header), 'utf8');
@@ -25,7 +29,7 @@ function encode(tag, header, payload) {
 function decode(frame) {
     if (!Buffer.isBuffer(frame) || frame.length < 5) return null;
     const tag = frame.readUInt8(0);
-    if (tag < 0x01 || tag > 0x03) return null;
+    if (tag < 0x01 || tag > 0x04) return null;
     const headLength = frame.readUInt32BE(1);
     if (5 + headLength > frame.length || headLength > 64 * 1024) return null;
     let header;

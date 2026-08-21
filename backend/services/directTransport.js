@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 
 const directCrypto = require('./directCrypto');
 const frames = require('./channelFrames');
+const fileLaneReplay = require('./fileLaneReplay');
 
 // Jarvis Direct, the Mac's half: listen on an unguessable rendezvous topic
 // for a sealed WebRTC offer, answer it, and let the phone punch straight
@@ -212,6 +213,7 @@ function bridge(dc) {
         const whole = assemble(Buffer.from(message));
         if (!whole) return;
         if (whole.tag === frames.TAG.WS_BINARY) return forward(null, whole.body);
+        if (whole.tag === frames.TAG.WS_TEXT) return forward(whole.body.toString('utf8'), null);
         // A file op before the socket authenticated is a peer with the
         // secret but not the token: refuse it, do not replay it.
         if (whole.tag === frames.TAG.FILE_REQ) {
@@ -235,6 +237,15 @@ function bridge(dc) {
                         if (JSON.parse(text).type === 'connected') session.authed = true;
                     } catch { /* not the frame we're watching for */ }
                 }
+                // libwebrtc refuses messages past a quarter megabyte; a long
+                // conversation snapshot rides framed instead of vanishing.
+                if (Buffer.byteLength(text, 'utf8') > 60000) {
+                    for (const frame of frames.chunk(frames.TAG.WS_TEXT,
+                        { sid: session.sid++ }, Buffer.from(text, 'utf8'))) {
+                        dc.sendMessageBinary(frame);
+                    }
+                    return;
+                }
                 return dc.sendMessage(text);
             }
             for (const frame of frames.chunk(frames.TAG.WS_BINARY,
@@ -255,44 +266,16 @@ function bridge(dc) {
 // local HTTP routes with the daemon's own token — the same code path, the
 // same caps, the same refusals as a LAN client.
 function fileRequest(session, whole) {
-    const { meta, body } = whole;
     const sid = session.sid++;
-    const respond = (status, header, payload) => {
-        try {
-            for (const frame of frames.chunk(frames.TAG.FILE_RES,
-                { sid, reqId: meta.reqId, status, ...header }, payload)) {
-                session.dc.sendMessageBinary(frame);
-            }
-        } catch (err) { log(`file response failed: ${err.message}`); }
-    };
-    const options = { headers: { authorization: `Bearer ${state.token}` } };
-    if (meta.op === 'put') {
-        options.method = 'PUT';
-        options.headers['x-filename'] = String(meta.name || 'upload');
-        const req = http.request(`http://127.0.0.1:${state.port}/files`, options, res => {
-            const pieces = [];
-            res.on('data', piece => pieces.push(piece));
-            res.on('end', () => respond(res.statusCode, {
-                json: Buffer.concat(pieces).toString('utf8') }));
+    fileLaneReplay.replay({ port: state.port, token: state.token },
+        whole.meta, whole.body, (status, header, payload) => {
+            try {
+                for (const frame of frames.chunk(frames.TAG.FILE_RES,
+                    { sid, reqId: whole.meta.reqId, status, ...header }, payload)) {
+                    session.dc.sendMessageBinary(frame);
+                }
+            } catch (err) { log(`file response failed: ${err.message}`); }
         });
-        req.on('error', err => respond(502, { json: JSON.stringify({ error: err.message }) }));
-        req.end(body);
-        return;
-    }
-    if (meta.op === 'get' && /^[0-9a-f]{12,16}$/.test(String(meta.id || ''))) {
-        const req = http.request(`http://127.0.0.1:${state.port}/files/${meta.id}`, options, res => {
-            const pieces = [];
-            res.on('data', piece => pieces.push(piece));
-            res.on('end', () => respond(res.statusCode, {
-                mime: res.headers['content-type'] || 'application/octet-stream',
-                name: meta.id
-            }, Buffer.concat(pieces)));
-        });
-        req.on('error', err => respond(502, { json: JSON.stringify({ error: err.message }) }));
-        req.end();
-        return;
-    }
-    respond(400, { json: JSON.stringify({ error: 'unknown file op' }) });
 }
 
 // TURN entries arrive as libdatachannel URIs — turn:user:pass@host:port,
