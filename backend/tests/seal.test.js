@@ -211,6 +211,17 @@ test('the sealed file lane: an upload and its download round-trip framed', async
     assert.equal(got.body.toString(), body.toString());
 });
 
+test('a captured sealed binary frame cannot be replayed', () => {
+    remoteSeal.init('a'.repeat(64));
+    const seen = new Map();
+    const frame = remoteSeal.sealBinary('phone', Buffer.from('run this once'));
+    assert.equal(remoteSeal.openBinary('phone', frame, seen).toString(), 'run this once');
+    // The very same bytes, captured off the open port and re-sent, open to
+    // nothing the second time — no voice command runs twice.
+    assert.equal(remoteSeal.openBinary('phone', frame, seen), null);
+    remoteSeal.init(secret()); // restore the daemon's live key
+});
+
 test('file_save resolves an artifact id to a real copy under the chosen name', async () => {
     const phone = await connectSealed();
     await phone.next(m => m.type === 'connected');
@@ -292,6 +303,7 @@ test('the binary envelope: pinned bytes, round trip, tamper and replay refusal',
     const stale = Buffer.from(sealed);
     stale.writeBigUInt64BE(1000000n, 13);
     assert.equal(remoteSeal.openBinary('phone', stale), null, 'the window closes replays');
+    remoteSeal.init(secret()); // restore the daemon's live key
 });
 
 test.after(() => {

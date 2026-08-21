@@ -108,7 +108,7 @@ function download(req, res, id) {
     const ext = found.name.includes('.') ? found.name.split('.').pop().toLowerCase() : '';
     res.writeHead(200, {
         'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
-        'Content-Disposition': `attachment; filename="${found.name.replace(/"/g, '')}"`,
+        'Content-Disposition': `attachment; filename="${found.name.replace(/[\r\n"]/g, '')}"`,
         'Content-Length': fs.statSync(found.path).size
     });
     fs.createReadStream(found.path).pipe(res);

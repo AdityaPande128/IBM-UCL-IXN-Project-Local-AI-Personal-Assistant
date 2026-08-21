@@ -233,6 +233,7 @@ aiPipeline.setBroadcast(broadcast);
 function sealConnection(ws) {
     ws.sealed = true;
     ws.sealSeen = new Map();
+    ws.sealSeenBin = new Map();
     ws.sealAssemble = channelFrames.assembler();
     ws.sealSid = 0;
     const raw = ws.send.bind(ws);
@@ -276,7 +277,7 @@ wss.on('connection', (ws) => {
     ws.on('message', async (message, isBinary) => {
         if (ws.sealed) {
             if (isBinary) {
-                const clear = remoteSeal.openBinary('phone', message);
+                const clear = remoteSeal.openBinary('phone', message, ws.sealSeenBin);
                 if (!clear) return;
                 const whole = ws.sealAssemble(clear);
                 if (!whole) return;

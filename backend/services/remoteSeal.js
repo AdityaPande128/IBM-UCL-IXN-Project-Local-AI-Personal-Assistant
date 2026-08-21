@@ -37,20 +37,32 @@ function sealBinary(from, data) {
     return Buffer.concat([Buffer.from([1]), nonce, ts, sealed]);
 }
 
-function openBinary(from, buf) {
+// The `seen` map is the binary twin of the text path's replay guard: a
+// nonce that has already opened inside the window never opens twice, so a
+// captured voice frame or file op cannot be replayed to re-run on the open
+// port. Callers that omit it (self-tests) get window-only checking.
+function openBinary(from, buf, seen) {
     if (!Buffer.isBuffer(buf) || buf.length < 1 + 12 + 8 + 16 || buf[0] !== 1) return null;
     const nonce = buf.subarray(1, 13);
     const ts = buf.subarray(13, 21);
     if (Math.abs(Date.now() - Number(ts.readBigUInt64BE())) > WINDOW_MS) return null;
+    const tag = nonce.toString('base64');
+    if (seen && seen.has(tag)) return null;
     const sealed = buf.subarray(21);
     try {
         const decipher = crypto.createDecipheriv('aes-256-gcm', key, nonce);
         decipher.setAAD(Buffer.concat([Buffer.from(from, 'utf8'), ts]));
         decipher.setAuthTag(sealed.subarray(sealed.length - 16));
-        return Buffer.concat([
+        const clear = Buffer.concat([
             decipher.update(sealed.subarray(0, sealed.length - 16)),
             decipher.final()
         ]);
+        if (seen) {
+            seen.set(tag, Date.now());
+            const cutoff = Date.now() - WINDOW_MS;
+            for (const [k, at] of seen) if (at < cutoff) seen.delete(k);
+        }
+        return clear;
     } catch {
         return null;
     }
