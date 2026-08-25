@@ -567,8 +567,15 @@ function builtins() {
             },
             produces: labels.label(ORIGIN.GENERATED, SENSITIVITY.PUBLIC),
             async run(bound) {
+                // A read step can hand over a whole document; the model gets
+                // citable chunks, never an unbounded dump.
+                const capped = Array.isArray(bound.passages)
+                    ? bound.passages.slice(0, 8).map(p => (typeof p === 'string'
+                        ? p.slice(0, 1600)
+                        : { ...p, text: String(p.text || '').slice(0, 1600) }))
+                    : bound.passages;
                 const result = await answerService.answer(String(bound.question), {
-                    passages: bound.passages
+                    passages: capped
                 });
                 if (!result.is_successful) throw new Error(result.text);
                 return {

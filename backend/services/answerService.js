@@ -344,6 +344,18 @@ function renderContext({ instruction, trusted, untrusted }) {
     return lines.join('\n');
 }
 
+// The conversation the question was asked in, rendered as context. It is
+// framing, never source material: grounded answers still cite passages.
+function historyBlock(history) {
+    const turns = Array.isArray(history) ? history.slice(-6) : [];
+    if (!turns.length) return '';
+    const lines = turns.map(t =>
+        `${t.role === 'assistant' ? 'assistant' : 'user'}: ` +
+        String(t.text || '').replace(/\s+/g, ' ').slice(0, 240));
+    return 'The conversation so far, for context only:\n'
+        + lines.join('\n') + '\n\n';
+}
+
 async function answer(query, options = {}) {
     const startedAt = Date.now();
 
@@ -368,14 +380,15 @@ async function answer(query, options = {}) {
 
     const context = egress.partitionContext(query, used);
 
+    const preamble = historyBlock(options.history);
     const messages = grounded
         ? [
             { role: 'system', content: SYSTEM_GROUNDED },
-            { role: 'user', content: renderContext(context) }
+            { role: 'user', content: preamble + renderContext(context) }
         ]
         : [
             { role: 'system', content: SYSTEM_UNGROUNDED },
-            { role: 'user', content: query }
+            { role: 'user', content: preamble + query }
         ];
 
     const finish = (answerText, refused = false) => {

@@ -372,7 +372,8 @@ function render(plan, record, failure) {
         if (spoken) {
             lines.push(spoken.values.text.trim());
         } else if (succeeded.length) {
-            lines.push(sentence(succeeded.map(clause)) || 'Done.');
+            const summary = sentence(succeeded.map(clause)) || 'Done.';
+            lines.push(failure ? `I got as far as: ${summary}` : summary);
         }
 
         if (failure && failure.aborted) {

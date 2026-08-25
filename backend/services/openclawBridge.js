@@ -128,6 +128,13 @@ async function resolveFollowUp(text, history) {
 const REFERENCES_FILES =
     /\b(pdf|file|document|docx?|report|attachment|image|photo|picture|spreadsheet|that one|it back)\b/i;
 
+// The shapes of a question about content, and of an ask to move a file
+// somewhere; the first answers from the file, the second stays routable.
+const CONTENT_QUESTION =
+    /^(what|who|when|where|why|how|does|do|is|are|can|could|summari[sz]e|read|tell|explain)\b|\b(say|says|said|contain|contains|about|mean|means|inside|summar)/i;
+const WANTS_DELIVERY =
+    /^(send|share|give|deliver|forward|email|mail|attach|save|copy|move|rename|delete|remove|open|print)\b/i;
+
 // Verbs that make a short utterance a job rather than conversation.
 const SMALL_ACTION =
     /^(send|open|find|build|make|check|read|write|search|email|mail|book|play|show|list|run|create|delete|remove|convert|download|upload|save|schedule|set|turn|call|text|browse|visit|go|fetch|get|give|share|attach|summari[sz]e|translate|extract|count|rename|move|copy|stop|pause|resume|remind|wipe|cancel|clear|forget|start|launch|close|quit|update|enable|disable|add)\b/i;
@@ -146,15 +153,27 @@ function attachmentPassages(attached) {
     const passages = [];
     for (const file of attached.slice(0, 3)) {
         try {
-            for (const record of corpusIndexer.recordsForFile(file.path)) {
+            let texts = corpusIndexer.recordsForFile(file.path)
+                .map(record => record.meta.text);
+            if (!texts.length) {
+                // Not indexed yet: read the file itself, in citable chunks.
+                const documentExtract = require('./documentExtract');
+                const extension = path.extname(file.path).toLowerCase();
+                const raw = documentExtract.extract(file.path, extension);
+                for (let at = 0; raw && at < raw.length && texts.length < 4;
+                    at += 1600) {
+                    texts.push(raw.slice(at, at + 1600));
+                }
+            }
+            for (const text of texts.slice(0, 4)) {
                 passages.push({
-                    text: record.meta.text,
+                    text: String(text).slice(0, 1600),
                     cite: `file: ${path.basename(file.path)}`
                 });
             }
-        } catch { /* an unindexed attachment answers like any other ask */ }
+        } catch { /* an unreadable attachment answers like any other ask */ }
     }
-    return passages;
+    return passages.slice(0, 8);
 }
 
 // A reply that only disclaims reach into the live web is not an answer;
@@ -448,6 +467,9 @@ async function executeIntent(intentText, options = {}) {
     }
 
     let asked = await resolveFollowUp(intentText, options.history);
+    // The resolved ask before any notes join it: the gates below match on
+    // what the user actually said, not on appended file paths.
+    const plainAsk = asked;
     // Attachments ride options, not the text, so the follow-up resolver can
     // never strip them; they rejoin the request here, after resolution.
     const attached = Array.isArray(options.attachments) ? options.attachments : [];
@@ -466,9 +488,32 @@ async function executeIntent(intentText, options = {}) {
     // A tiny conversational ask never deserves the skill factory: no digits,
     // no action verb, no file in hand — it goes straight to the answer path
     // before triage can dream bigger.
+    // A question about a file already in this conversation is answered from
+    // that file's own text, with the chat as context. It never reaches
+    // triage: the skill factory cannot read anything the corpus cannot.
+    const inHand = attached.length ? attached : (wantsFiles ? recent : []);
+    if (inHand.length && CONTENT_QUESTION.test(plainAsk)
+        && !WANTS_DELIVERY.test(plainAsk)) {
+        const pinned = attachmentPassages(inHand);
+        if (pinned.length) {
+            console.log('[Bridge] Question about a file in hand; answering from it.');
+            const answered = await answerService.answer(asked,
+                { passages: pinned, history: options.history });
+            if (answered.is_successful && !answered.refused) {
+                return {
+                    status: 'success',
+                    response: answered.text,
+                    action: 'answered',
+                    grounded: answered.grounded,
+                    sources: answered.sources,
+                    durationMs: Date.now() - startedAt
+                };
+            }
+        }
+    }
     if (!attached.length && isSmallTalk(asked)) {
         console.log('[Bridge] Small ask; answering directly.');
-        const answered = await answerService.answer(asked);
+        const answered = await answerService.answer(asked, { history: options.history });
         return {
             status: answered.is_successful ? 'success' : 'error',
             response: answered.text,
@@ -522,8 +567,10 @@ async function executeIntent(intentText, options = {}) {
             // those the same way.
             const pinned = attachmentPassages(attached.length ? attached
                 : (wantsFiles ? recent : []));
-            const answered = await answerService.answer(asked,
-                pinned.length ? { passages: pinned } : {});
+            const answered = await answerService.answer(asked, {
+                ...(pinned.length ? { passages: pinned } : {}),
+                history: options.history
+            });
             if (answered.is_successful
                 && (answered.refused || DISCLAIMS_THE_WEB.test(answered.text || ''))) {
                 // The disclaimer may be the whole point ("what's the weather")
