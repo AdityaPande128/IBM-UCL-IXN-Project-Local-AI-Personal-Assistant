@@ -196,9 +196,16 @@ function App() {
       setWakeMode(false);
       return;
     }
-    if (!connected || !voiceReady || !voiceEnabled || listening) {
+    if (!connected || !voiceReady || !voiceEnabled) {
       reportClientError(`wake: waiting (connected=${connected} voiceReady=${voiceReady} `
         + `voiceEnabled=${voiceEnabled} listening=${listening})`, true);
+      return;
+    }
+    if (listening) {
+      // A fresh socket after a daemon restart carries no wake flag; without
+      // re-declaring it, the still-open microphone turns into push-to-talk
+      // and the room gets transcribed as requests.
+      setWakeMode(true);
       return;
     }
     reportClientError("wake: opening the microphone…", true);
