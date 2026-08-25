@@ -445,10 +445,12 @@ function builtins() {
                     }
                     delivered.push({ name: path.basename(full), path: full });
                 }
-                const message = delivered.length
-                    ? `Attached ${delivered.map(f => f.name).join(', ')}.`
-                    : `Nothing could be attached${skipped.length ? `: ${skipped.join('; ')}` : '.'}`;
-                return { delivered, message };
+                if (!delivered.length) {
+                    throw new Error(`nothing could be attached${
+                        skipped.length ? `: ${skipped.join('; ')}` : ''}`);
+                }
+                return { delivered,
+                    message: `Attached ${delivered.map(f => f.name).join(', ')}.` };
             }
         }),
 

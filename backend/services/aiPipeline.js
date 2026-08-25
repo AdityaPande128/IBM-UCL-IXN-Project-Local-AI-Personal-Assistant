@@ -244,11 +244,43 @@ async function answerAloud(proposalId, approved, ws, kind = null) {
     send(ws, { type: 'pipeline_complete' });
 }
 
+// Whisper invents pleasantries from silence; the wake path has an energy
+// gate and push-to-talk deserves the same. RMS over the 16-bit samples,
+// header skipped: quiet clips never reach the model, and the classic
+// hallucinations are refused on short clips even when they do.
+const MIN_AUDIO_MS = 400;
+const MIN_RMS = 130;
+const PHANTOMS = /^(thank you\.?|thanks\.?|thanks for watching\.?|you\.?|so\.?|bye\.?|\.+)$/i;
+
+function audioStats(buffer) {
+    const start = buffer.length > 44 ? 44 : 0;
+    const samples = Math.floor((buffer.length - start) / 2);
+    if (samples <= 0) return { ms: 0, rms: 0 };
+    let sum = 0;
+    for (let i = 0; i < samples; i++) {
+        const v = buffer.readInt16LE(start + i * 2);
+        sum += v * v;
+    }
+    return { ms: (samples / 16000) * 1000, rms: Math.sqrt(sum / samples) };
+}
+
 async function handleIncomingAudio(audioBuffer, ws) {
     console.log(`[Pipeline] Audio buffer received (${audioBuffer.length} bytes). Starting cascaded pipeline.`);
 
     try {
+        const heard = audioStats(audioBuffer);
+        if (heard.ms < MIN_AUDIO_MS || heard.rms < MIN_RMS) {
+            console.log(`[Pipeline] Silence gate: ${Math.round(heard.ms)}ms at rms ${Math.round(heard.rms)}; dropped.`);
+            send(ws, { type: 'pipeline_error', error: 'I heard only silence.' });
+            return;
+        }
         let transcribedText = await transcribeAudio(audioBuffer);
+        if (transcribedText && heard.ms < 1500
+            && PHANTOMS.test(transcribedText.trim())) {
+            console.log(`[Pipeline] Phantom transcript refused: "${transcribedText.trim()}"`);
+            send(ws, { type: 'pipeline_error', error: 'I heard only silence.' });
+            return;
+        }
 
         if (!transcribedText || transcribedText.trim() === "") {
             console.warn(`[Pipeline] STT empty transcription. Returning error.`);

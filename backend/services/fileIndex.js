@@ -140,6 +140,7 @@ function crawl({ roots, maxDepth = 12, onProgress = () => {} } = {}) {
 
                 if (entry.isDirectory()) {
                     if (SKIP_DIRS.has(entry.name)) { skipped++; continue; }
+                    if (entry.name.startsWith('.')) { skipped++; continue; }
                     if (classifier.secretCheck(path.join(full, 'probe')).secret) {
                         skipped++;
                         continue;
@@ -254,6 +255,9 @@ function search(query = {}) {
         where.push("(f.dir = ? OR f.dir LIKE ? ESCAPE '\\')");
         params.push(base, `${base.replace(/[\\%_]/g, '\\$&')}${path.sep}%`);
     }
+    // Anything under a hidden directory is machinery, not the user's
+    // files; it never answers a search however well its name matches.
+    where.push("f.path NOT LIKE '%/.%'");
     if (modifiedAfter) { where.push('f.mtime >= ?'); params.push(modifiedAfter); }
     if (modifiedBefore) { where.push('f.mtime <= ?'); params.push(modifiedBefore); }
 

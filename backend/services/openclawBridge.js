@@ -480,8 +480,13 @@ async function executeIntent(intentText, options = {}) {
     // crossed this conversation earlier come back into view whenever the
     // ask sounds like it means one of them.
     const recent = Array.isArray(options.recentFiles) ? options.recentFiles : [];
+    // "What does it say?" after a delivery means the file, even though no
+    // file-word survives the sentence: a content question with a bare
+    // pronoun counts when the chat has files in hand.
+    const asksAboutIt = CONTENT_QUESTION.test(plainAsk)
+        && /\b(it|this|that|these|those)\b/i.test(plainAsk);
     const wantsFiles = !attached.length && recent.length > 0
-        && REFERENCES_FILES.test(asked);
+        && (REFERENCES_FILES.test(asked) || asksAboutIt);
     if (wantsFiles) {
         asked += `\n\n(Files earlier in this chat: ${recent.map(f => f.path).join(', ')})`;
     }

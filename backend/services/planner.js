@@ -463,6 +463,18 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
             }
         }
 
+        // A file-type filter the user never spoke is the model's invention:
+        // "my iron profile report" once became ext:"txt" and found npm logs.
+        if (capability.id === 'files.search' && inputs.ext) {
+            const spoken = String(question).toLowerCase();
+            const exts = (Array.isArray(inputs.ext) ? inputs.ext : [inputs.ext])
+                .map(e => String(e).replace(/^\./, '').toLowerCase());
+            if (!exts.every(e => spoken.includes(e))) {
+                delete inputs.ext;
+                repairs.push(`dropped_ext:${step.id}`);
+            }
+        }
+
         // "Send me the PDF" means one PDF: a delivery wired to every search
         // hit narrows to the strongest match unless the ask was plural.
         if (capability.id === 'files.deliver'
