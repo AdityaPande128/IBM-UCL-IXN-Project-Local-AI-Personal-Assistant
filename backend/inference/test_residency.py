@@ -129,13 +129,21 @@ class TestEviction(unittest.TestCase):
 
 class TestAdmission(unittest.TestCase):
 
-    def test_an_undeclared_model_is_admitted_as_transient(self):
+    def test_an_undeclared_model_on_disk_is_admitted_as_transient(self):
         mgr = manager()
+        mgr._known["org/stranger"] = 1 * GB
         with mgr.use("org/stranger"):
             pass
         entry = next(m for m in mgr.state()["models"] if m["id"] == "org/stranger")
         self.assertEqual(entry["policy"], "transient")
         self.assertIsNone(entry["tier"])
+
+    def test_an_undeclared_model_not_on_disk_is_refused_not_fetched(self):
+        mgr = manager()
+        with self.assertRaises(ResidencyError):
+            with mgr.use("org/never-downloaded"):
+                pass
+        self.assertFalse(any(m["id"] == "org/never-downloaded" for m in mgr.state()["models"]))
 
     def test_a_reload_is_counted_so_thrashing_is_visible(self):
         mgr = manager(budget_gb=11.0)

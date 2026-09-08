@@ -55,6 +55,8 @@ function downloaded(modelId) {
 }
 
 function freeDiskGb() {
+    const pinned = Number(process.env.JARVIS_DISK_FREE_GB);
+    if (pinned > 0) return pinned;
     try {
         const stats = fs.statfsSync(os.homedir());
         return (stats.bsize * stats.bavail) / GB;
@@ -64,7 +66,7 @@ function freeDiskGb() {
 }
 
 function machine(config, totalBytes) {
-    const total = totalBytes ?? os.totalmem();
+    const total = totalBytes ?? modelTiers.totalMemory();
     const defaults = (config.models || {}).hardware_defaults || {};
     return {
         total_gb: Math.round(total / GB),
@@ -214,7 +216,7 @@ function describe(config, totalBytes) {
     const catalog = models.catalog || {};
     const hardware = machine(config, totalBytes);
     const recommended = modelTiers.effective({ models: {
-        hardware_defaults: models.hardware_defaults } }, totalBytes ?? os.totalmem());
+        hardware_defaults: models.hardware_defaults } }, totalBytes ?? modelTiers.totalMemory());
     const voice = models.voice || {};
 
     const annotate = (list, recommendedModel) => (list || []).map(entry => ({

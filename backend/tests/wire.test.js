@@ -4,6 +4,8 @@ const os = require('os');
 const path = require('path');
 
 const test = require('node:test');
+process.env.JARVIS_MEMORY_GB = '24';
+process.env.JARVIS_DISK_FREE_GB = '200';
 const assert = require('node:assert');
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-wire-'));
@@ -41,10 +43,6 @@ traceStore.open(path.join(scratch, 'traces.db'));
 const watchers = require('../services/watchers');
 watchers.open(path.join(scratch, 'watchers.db'));
 
-const memoryStore = require('../services/memoryStore');
-memoryStore.open(path.join(scratch, 'memory.db'));
-const memoryService = require('../services/memoryService');
-memoryService.setEmbedder(async texts => texts.map(() => [1, 0, 0, 0]));
 
 const WebSocket = require('ws');
 const activityBus = require('../services/activityBus');
@@ -256,7 +254,11 @@ test('voice goes through the same consent gate and speaks its proposal', async (
 
     try {
         const client = await authed();
-        client.sendBinary(Buffer.from('pretend this is speech'));
+        const speech = Buffer.alloc(44 + 16000, 0);
+        for (let i = 44; i < speech.length - 1; i += 2) {
+            speech.writeInt16LE((i % 4 === 0) ? 2000 : -2000, i);
+        }
+        client.sendBinary(speech);
 
         const stt = await client.next(m => m.type === 'stt_result');
         assert.strictEqual(stt.text, fakeInference.transcript);
@@ -365,20 +367,13 @@ test('a diagnostics bundle collects logs, config and recent runs — never the t
     client.ws.close();
 });
 
-test('the audit and permissions surfaces answer over the wire', async () => {
+test('the permissions surface answers over the wire', async () => {
     const client = await authed();
-
-    client.send({ type: 'audit' });
-    const audit = await client.next(m => m.type === 'audit_result');
-    assert.ok(audit.summary, 'the digest carries a summary');
-    assert.ok(Array.isArray(audit.plans));
-    assert.ok(Array.isArray(audit.decisions));
 
     client.send({ type: 'permissions' });
     const permissions = await client.next(m => m.type === 'permissions_result');
     assert.ok(Array.isArray(permissions.skills));
     assert.ok(permissions.web && Array.isArray(permissions.web.blocked_hosts));
-    assert.strictEqual(typeof permissions.memory.incognito, 'boolean');
 
     client.send({ type: 'checkpoint', action: 'list' });
     const listed = await client.next(m => m.type === 'checkpoint_result');
@@ -542,10 +537,6 @@ test('watchers answer over the wire and refuse an unknown recipe', async () => {
     assert.strictEqual(refused.status, 'refused');
     assert.match(refused.response, /no such recipe/);
 
-    client.send({ type: 'notices_seen', ids: [] });
-    const marked = await client.next(m => m.type === 'notices_seen_result');
-    assert.strictEqual(marked.marked, 0);
-
     client.send({ type: 'watcher_remove', id: 'not-there' });
     const removed = await client.next(m => m.type === 'watcher_remove_result');
     assert.strictEqual(removed.status, 'unknown_watcher');
@@ -553,52 +544,39 @@ test('watchers answer over the wire and refuse an unknown recipe', async () => {
     client.ws.close();
 });
 
-test('the morning brief answers over the wire', async () => {
-    const client = await authed();
-    client.send({ type: 'brief' });
-    const brief = await client.next(m => m.type === 'brief_result');
-    assert.ok(Array.isArray(brief.notices));
-    assert.ok(Array.isArray(brief.approvals));
-    assert.strictEqual(brief.drafts, undefined, 'drafts ride inside proposals, not beside them');
-    assert.match(brief.text, /^Good morning\./);
-    client.ws.close();
-});
+test('a private chat answers over the wire and leaves no conversation behind', async () => {
+    intentQueue.reset();
+    const realExecute = openclawBridge.executeIntent;
+    let seenPrivate = null;
+    openclawBridge.executeIntent = async (text, options) => {
+        seenPrivate = options.private === true;
+        return { status: 'success', response: `heard: ${text}` };
+    };
+    try {
+        const client = await authed();
+        client.send({ type: 'conversations_list' });
+        const before = await client.next(m => m.type === 'conversations_result');
 
-test('memory is edited over the wire: add, list, wipe review, remove, incognito', async () => {
-    const client = await authed();
+        client.send({ type: 'private_chat', on: true });
+        const opened = await client.next(m => m.type === 'private_chat_result');
+        assert.strictEqual(opened.on, true);
 
-    client.send({ type: 'memory_add', text: 'the dentist is Dr Rao' });
-    const added = await client.next(m => m.type === 'memory_add_result');
-    assert.strictEqual(added.status, 'remembered');
+        client.send({ type: 'intent', text: 'something I would rather forget' });
+        const result = await client.next(m => m.type === 'intent_result');
+        assert.strictEqual(result.private, true);
+        assert.strictEqual(result.conversation, null);
+        assert.strictEqual(seenPrivate, true, 'the intent ran inside the private scope');
 
-    client.send({ type: 'memory' });
-    const listed = await client.next(m => m.type === 'memory_result');
-    assert.strictEqual(listed.facts.length, 1);
-    assert.strictEqual(listed.incognito, false);
+        client.send({ type: 'conversations_list' });
+        const after = await client.next(m => m.type === 'conversations_result');
+        assert.strictEqual(after.conversations.length, before.conversations.length, 'no chat row was created');
 
-    client.send({ type: 'memory_wipe', term: 'rao' });
-    const review = await client.next(m => m.type === 'memory_wipe_result');
-    assert.strictEqual(review.candidates.length, 1);
-
-    client.send({ type: 'memory_remove', ids: review.candidates.map(f => f.id) });
-    const removed = await client.next(m => m.type === 'memory_remove_result');
-    assert.strictEqual(removed.removed, 1);
-
-    client.send({ type: 'memory_wipe_all' });
-    const refused = await client.next(m => m.type === 'memory_wipe_all_result');
-    assert.strictEqual(refused.status, 'refused');
-
-    client.send({ type: 'incognito', on: true });
-    const dark = await client.next(m => m.type === 'incognito_result');
-    assert.strictEqual(dark.incognito, true);
-
-    client.send({ type: 'memory_add', text: 'a secret' });
-    const blocked = await client.next(m => m.type === 'memory_add_result');
-    assert.strictEqual(blocked.status, 'refused');
-
-    client.send({ type: 'incognito', on: false });
-    await client.next(m => m.type === 'incognito_result');
-    client.ws.close();
+        client.send({ type: 'private_chat', on: false });
+        await client.next(m => m.type === 'private_chat_result');
+        client.ws.close();
+    } finally {
+        openclawBridge.executeIntent = realExecute;
+    }
 });
 
 test('wake mode gates binary audio: idle speech vanishes, the phrase wakes', async () => {

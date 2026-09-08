@@ -17,6 +17,7 @@ interface PermissionsViewProps {
   onRestoreCheckpoint: (name: string) => void;
   onExportBundle: () => void;
   onImportBundle: (path: string) => void;
+  onResolveApproval: (id: number, decision: "yes" | "no") => void;
 }
 
 function when(iso: string): string {
@@ -38,6 +39,7 @@ export function PermissionsView({
   onRestoreCheckpoint,
   onExportBundle,
   onImportBundle,
+  onResolveApproval,
 }: PermissionsViewProps) {
   const [importPath, setImportPath] = useState("");
 
@@ -146,7 +148,7 @@ export function PermissionsView({
       </section>
 
       <section className="abilities-section">
-        <h2>Mail, phone and memory</h2>
+        <h2>Mail and phone</h2>
         <div className="build-list">
           <div className="build-row">
             <span className="ability-name">mail</span>
@@ -168,14 +170,40 @@ export function PermissionsView({
               {permissions.channel.telegram.token_present ? " · token on disk" : ""}
             </span>
           </div>
-          <div className="build-row">
-            <span className="ability-name">memory</span>
-            <span className="build-meta">
-              {permissions.memory.incognito ? "private mode — recording nothing" : "recording"}
-              {permissions.memory.secure_delete ? " · secure delete on" : ""}
-            </span>
-          </div>
         </div>
+      </section>
+
+      <section className="abilities-section">
+        <h2>Pending disclosures</h2>
+        <div className="diag-note">
+          Something the assistant wanted to send outside this Mac and stopped to ask about.
+          Approve it and the same request goes through next time; decline and it stays blocked.
+        </div>
+        {permissions.disclosures.length === 0 ? (
+          <div className="diag-note">Nothing is waiting.</div>
+        ) : (
+          <div className="build-list">
+            {permissions.disclosures.map((d) => (
+              <div className="build-row" key={d.id}>
+                <span className="ability-name">{d.summary}</span>
+                <span className="build-meta">
+                  {when(d.ts)}{d.destination ? ` · to ${d.destination}` : ""}
+                  {d.preview ? ` · ${d.preview.slice(0, 160)}` : ""}
+                </span>
+                <span className="build-meta">
+                  <button className="ob-mini-button" onClick={() => onResolveApproval(d.id, "yes")}>Approve</button>
+                  {" "}
+                  <button className="ob-mini-button" onClick={() => onResolveApproval(d.id, "no")}>Decline</button>
+                </span>
+              </div>
+            ))}
+            {permissions.disclosures_pending > permissions.disclosures.length && (
+              <div className="diag-note">
+                and {permissions.disclosures_pending - permissions.disclosures.length} more, oldest first; unanswered ones expire after a day
+              </div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="abilities-section">

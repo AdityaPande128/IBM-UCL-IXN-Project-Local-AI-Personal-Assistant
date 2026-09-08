@@ -59,4 +59,17 @@ async function embedAll(texts, { batchSize = 32, onProgress } = {}) {
     return out;
 }
 
-module.exports = { embed, embedAll, DIMENSIONS };
+function cosine(a, b) {
+    let dot = 0;
+    let magA = 0;
+    let magB = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        magA += a[i] * a[i];
+        magB += b[i] * b[i];
+    }
+    const scale = Math.sqrt(magA) * Math.sqrt(magB);
+    return scale ? dot / scale : 0;
+}
+
+module.exports = { embed, embedAll, cosine, DIMENSIONS };

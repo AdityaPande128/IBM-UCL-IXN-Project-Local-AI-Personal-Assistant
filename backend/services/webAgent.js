@@ -176,9 +176,47 @@ function buildMessages(goal, observation, history, budget = {}, steer = null) {
     ];
 }
 
+const ACTION_FIELDS = ['action', 'ref', 'text', 'submit', 'url', 'answer', 'reason'];
+function toolCallToObject(raw) {
+    const match = /call:\w*\s*\{([\s\S]*?)\}\s*(?:<tool_call\|>|$)/.exec(String(raw || ''));
+    if (!match) return null;
+    const body = match[1];
+    const out = {};
+    const keyAt = new RegExp(`(?:^|[,\\s])(${ACTION_FIELDS.join('|')})\\s*:`, 'g');
+    const starts = [];
+    let hit;
+    while ((hit = keyAt.exec(body)) !== null) starts.push({ key: hit[1], at: hit.index + hit[0].length });
+    for (let i = 0; i < starts.length; i++) {
+        const end = i + 1 < starts.length ? body.lastIndexOf(',', starts[i + 1].at) : body.length;
+        let value = body.slice(starts[i].at, end < 0 ? body.length : end).trim().replace(/^["']|["']$/g, '').trim();
+        if (starts[i].key === 'submit') value = /^true$/i.test(value);
+        out[starts[i].key] = value;
+    }
+    return out.action ? out : null;
+}
+
+function looseFields(raw) {
+    const text = String(raw || '');
+    const keyAt = new RegExp(`"(${ACTION_FIELDS.join('|')})"\\s*:\\s*`, 'g');
+    const starts = [];
+    let hit;
+    while ((hit = keyAt.exec(text)) !== null) starts.push({ key: hit[1], at: hit.index + hit[0].length, from: hit.index });
+    if (!starts.length) return null;
+    const out = {};
+    for (let i = 0; i < starts.length; i++) {
+        const end = i + 1 < starts.length ? starts[i + 1].from : text.length;
+        let value = text.slice(starts[i].at, end).trim().replace(/[,}\s]+$/, '').trim().replace(/^"|"$/g, '');
+        if (starts[i].key === 'submit') value = /^true$/i.test(value);
+        out[starts[i].key] = value;
+    }
+    return out.action ? out : null;
+}
+
 function parseAction(raw) {
-    const value = extractJson(raw);
+    let value = extractJson(raw);
+    if (!value || typeof value !== 'object') value = toolCallToObject(raw) || looseFields(raw);
     if (!value || typeof value !== 'object') {
+        console.warn(`[WebAgent] decide reply was not JSON: ${JSON.stringify(String(raw || '').slice(0, 240))}`);
         return { action: null, error: 'reply was not JSON' };
     }
 
@@ -271,6 +309,16 @@ async function act(surface, decision, observation, context, options) {
 
         const addressed = (context.dictated || []).some(value =>
             String(value).trim().toLowerCase() === String(decision.text ?? '').trim().toLowerCase());
+        if (addressed && /\b(search|find|filter)\b/i.test(name)) {
+            return {
+                ok: false,
+                refusal: 'wrong-field',
+                detail: `"${name}" is a search box, not a message. The words belong in the body of a `
+                    + 'new message: press Compose (or Reply on the right thread) first, fill the '
+                    + 'recipient, then write them there.',
+                before: found.observation || observation
+            };
+        }
         if (addressed && !unaddressed(source) && wrongCorrespondent(source, goal)) {
             return {
                 ok: false,
@@ -617,7 +665,11 @@ const OPERATOR = /\b\w+:(?=\S)/;
 
 function phrase(query) {
     const text = String(query || '').trim();
-    if (!text || /["“”]/.test(text) || OPERATOR.test(text)) return text;
+    if (!text || /["“”]/.test(text)) return text;
+    if (OPERATOR.test(text)) {
+        return text.replace(/^(\w+:)(\S+(?:\s+\S+)+)$/,
+            (whole, operator, value) => OPERATOR.test(value) ? whole : `${operator}"${value}"`);
+    }
     return /\s/.test(text) ? `"${text}"` : text;
 }
 
@@ -643,7 +695,6 @@ function fromThem(query, goal) {
 }
 
 // Who the mail is from when the request names them without an address: "the
-// dinner email from Sandhya". The name is what follows "from" — one word as
 // written, further words only while they stay capitalised — and a word that
 // is really a time or a place ("from last week", "from work") names nobody.
 const NAMED_FROM =
@@ -998,8 +1049,14 @@ const BARE_RECIPIENT = /^(to|recipients?|cc|bcc|address(es)?)$/i;
 
 const ADDRESSES = /\b(to|recipients?|cc|bcc|address(es)?)\b/i;
 
+function ownAddresses(observation) {
+    const title = String((observation && observation.title) || '');
+    return (title.match(/[\w.+-]+@[\w.-]+\.\w{2,}/g) || []).map(a => a.toLowerCase());
+}
+
 function unaddressed(observation, fresh = false) {
     const elements = (observation && observation.elements) || [];
+    const own = ownAddresses(observation);
     const recipient = element => fillable(element) && ADDRESSES.test(element.name || '');
 
     if (elements.some(element => recipient(element) && String(element.value || '').trim())) {
@@ -1010,7 +1067,8 @@ function unaddressed(observation, fresh = false) {
     // typed address into a small control and empties the box it was typed in.
     if (elements.some(element => !holdsText(element)
         && String(element.name || '').length <= 60
-        && /[\w.+-]+@[\w.-]+\.\w{2,}/.test(element.name || ''))) {
+        && /[\w.+-]+@[\w.-]+\.\w{2,}/.test(element.name || '')
+        && !own.some(address => String(element.name || '').toLowerCase().includes(address)))) {
         return false;
     }
 
@@ -1067,7 +1125,9 @@ function wrongCorrespondent(observation, goal) {
     if (!people.length) return false;
 
     const text = String((observation && observation.text) || '');
-    const addresses = text.match(/[\w.+-]+@[\w.-]+\.\w{2,}/g) || [];
+    const own = ownAddresses(observation);
+    const addresses = (text.match(/[\w.+-]+@[\w.-]+\.\w{2,}/g) || [])
+        .filter(address => !own.includes(address.toLowerCase()));
     if (!addresses.length) return false;
 
     return !addresses.some(address => people.some(person => matches(address, person)));
@@ -1128,7 +1188,6 @@ function messagesFromThem(observation, who) {
     const needle = String(who || '').trim().toLowerCase();
     if (!needle) return { blocks: [], newestLast: false };
     // An address may sit anywhere in a sender line; a bare name must open it.
-    // Prose mentions a name mid-sentence — "tell Sandhya I said hi" — but a
     // header leads with it, and only the header starts one of their messages.
     // A narrow pane wraps a name across lines, so the sender may span a few:
     // the match reports how many it took, and the reader steps past them.
@@ -1456,11 +1515,12 @@ async function browse(goal, options = {}) {
     // X to my calendar" rewritten as "add a meeting for X to the user's
     // calendar" no longer reads as a booking. Authority comes from what the
     // user actually said, so their own request tops the goal's grants up.
-    if (options.request) {
+    if (options.request && !options.readOnly) {
         for (const kind of webPolicy.mandateFrom(options.request, inputLabel)) {
             mandate.add(kind);
         }
     }
+    if (options.readOnly) mandate.clear();
 
     let home = options.url || null;
 
@@ -1495,6 +1555,16 @@ async function browse(goal, options = {}) {
                     reason: `"${found.file.name}" is credential material (${secret.reason}); `
                         + 'it never leaves this machine',
                     refusal: webPolicy.REFUSAL.CREDENTIAL,
+                    approvalId: null, actions: [], url: null, passages: [], planId: null,
+                    run_ms: Date.now() - startedAt
+                };
+            }
+            if (found.outside) {
+                return {
+                    status: 'gap', goal, answer: null,
+                    reason: `${found.outside} is outside the folders shared with Jarvis, so it `
+                        + 'stays on this machine; share its folder in Settings first',
+                    refusal: 'no-file',
                     approvalId: null, actions: [], url: null, passages: [], planId: null,
                     run_ms: Date.now() - startedAt
                 };
@@ -1843,7 +1913,8 @@ async function browse(goal, options = {}) {
         // scope and refiners into everything that follows — a from:-search
         // run inside a Sent-Items scope finds nothing. Leave the search
         // before starting this request's own work.
-        const midSearch = ((observation && observation.elements) || []).find(element =>
+        const askedSearch = Boolean(options.url) && /[#/]search[/?]/i.test(options.url);
+        const midSearch = askedSearch ? null : ((observation && observation.elements) || []).find(element =>
             !holdsText(element) && !element.disabled
             && /^(exit|close|clear)\s+search$/i.test(String(element.name || '').trim()));
         if (midSearch) {

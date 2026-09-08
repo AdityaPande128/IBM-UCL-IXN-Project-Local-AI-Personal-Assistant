@@ -623,15 +623,41 @@ function validateSchema(parsed) {
 }
 
 
-function callModel(messages) {
+function callModel(messages, overrides = {}) {
     return llmClient.complete(messages, {
         tier: TIER,
         temperature: TEMPERATURE,
         max_tokens: MAX_TOKENS,
-        timeout_ms: TIMEOUT_MS
+        timeout_ms: TIMEOUT_MS,
+        ...overrides
     });
 }
 
+function modelOverrides(options) {
+    const overrides = {};
+    if (options.model) overrides.model = options.model;
+    if (options.decoding === 'json') overrides.response_format = { type: 'json_object' };
+    if (typeof options.temperature === 'number') overrides.temperature = options.temperature;
+    return overrides;
+}
+
+
+async function recoverParameters(classification, prompt) {
+    if (classification.intent_type !== 'execute_existing' || !classification.target_skill) return;
+    const skill = skillCatalog.get(classification.target_skill);
+    if (!skill) return;
+    const first = skillExecutor.coerceParameters(skill, classification.parameters || {});
+    if (first.valid) return;
+    const recovered = await extractParameters(skill, prompt);
+    const supplied = Object.fromEntries(Object.entries(classification.parameters || {})
+        .filter(([, v]) => v !== undefined && v !== null && v !== ''));
+    const merged = { ...recovered, ...supplied };
+    if (skillExecutor.coerceParameters(skill, merged).valid) {
+        classification.parameters = merged;
+        classification.parameters_recovered = true;
+        console.log(`[Router] parameters recovered for ${skill.name}: ${Object.keys(recovered).join(', ') || 'none'}`);
+    }
+}
 
 function decideAction(classification) {
     const { intent_type, confidence, target_skill, schema_valid } = classification;
@@ -652,8 +678,11 @@ function decideAction(classification) {
 
         const skill = skillCatalog.get(target_skill);
         if (skill) {
-            const { valid } = skillExecutor.coerceParameters(skill, classification.parameters || {});
-            if (!valid) return ACTIONS.CLARIFY;
+            const { valid, errors } = skillExecutor.coerceParameters(skill, classification.parameters || {});
+            if (!valid) {
+                classification.missing_parameters = errors;
+                return ACTIONS.CLARIFY;
+            }
         }
 
         return ACTIONS.EXECUTE;
@@ -685,7 +714,7 @@ function emptyDecision(overrides) {
     };
 }
 
-async function askModel(messages, validate, label) {
+async function askModel(messages, validate, label, overrides = {}) {
     const conversation = [...messages];
     let lastRaw = null;
     let lastErrors = [];
@@ -693,7 +722,7 @@ async function askModel(messages, validate, label) {
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         let raw;
         try {
-            raw = await callModel(conversation);
+            raw = await callModel(conversation, overrides);
         } catch (err) {
             const kind = err.message.startsWith('timeout') ? 'timeout' : 'server_error';
             console.error(`[Router:${label}] Attempt ${attempt} failed (${kind}): ${err.message}`);
@@ -817,13 +846,23 @@ function validateSelection(parsed) {
     return { valid: errors.length === 0, errors, repairs };
 }
 
+const SHIPPED_PROMPTS = require('./prompts/router/v4');
+const BUILTIN_PROMPTS = {
+    triage: () => buildTriagePrompt(),
+    selection: (skills) => buildSelectionPrompt(skills),
+    single: (skills) => buildSystemPrompt(skills)
+};
+
 async function routeTwoStage(prompt, options = {}) {
     const startedAt = Date.now();
 
+    const overrides = modelOverrides(options);
+    const prompts = options.prompts || SHIPPED_PROMPTS;
     const triage = await askModel(
-        [{ role: 'system', content: buildTriagePrompt() }, { role: 'user', content: prompt }],
+        [{ role: 'system', content: (prompts.triage || SHIPPED_PROMPTS.triage)() }, { role: 'user', content: prompt }],
         validateTriage,
-        'triage'
+        'triage',
+        overrides
     );
 
     if (!triage.ok) {
@@ -847,6 +886,7 @@ async function routeTwoStage(prompt, options = {}) {
         const decision = {
             ...classification,
             action: decideAction(classification),
+        missing_parameters: classification.missing_parameters || null,
             schema_errors: [], schema_repairs: [],
             attempts: triage.attempts,
             stages: 1,
@@ -868,11 +908,12 @@ async function routeTwoStage(prompt, options = {}) {
 
     const selection = await askModel(
         [
-            { role: 'system', content: buildSelectionPrompt(selectionSet.skills) },
+            { role: 'system', content: (prompts.selection || SHIPPED_PROMPTS.selection)(selectionSet.skills) },
             { role: 'user', content: prompt }
         ],
         validateSelection,
-        'select'
+        'select',
+        overrides
     );
 
     if (!selection.ok) {
@@ -894,10 +935,12 @@ async function routeTwoStage(prompt, options = {}) {
         parameters: chosen.parameters || {},
         schema_valid: true
     };
+    await recoverParameters(classification, prompt);
 
     const decision = {
         ...classification,
         action: decideAction(classification),
+        missing_parameters: classification.missing_parameters || null,
         schema_errors: [],
         schema_repairs: selection.repairs,
         attempts: triage.attempts + selection.attempts,
@@ -926,14 +969,14 @@ async function routeSingleStage(prompt, options = {}) {
         : await skillRetriever.selectRelevant(prompt, allSkills);
     const skills = selection.skills;
 
-    const systemPrompt = buildSystemPrompt(skills);
+    const systemPrompt = ((options.prompts || SHIPPED_PROMPTS).single || SHIPPED_PROMPTS.single)(skills);
 
     const messages = [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: prompt }
     ];
 
-    const result = await askModel(messages, validateSchema, 'single');
+    const result = await askModel(messages, validateSchema, 'single', modelOverrides(options));
 
     if (!result.ok) {
         if (result.failure === 'schema_failure') {
@@ -957,10 +1000,12 @@ async function routeSingleStage(prompt, options = {}) {
         parameters: parsed.parameters || {},
         schema_valid: true
     };
+    await recoverParameters(classification, prompt);
 
     const decision = {
         ...classification,
         action: decideAction(classification),
+        missing_parameters: classification.missing_parameters || null,
         schema_errors: [],
         schema_repairs: result.repairs,
         attempts: result.attempts,
@@ -1030,5 +1075,4 @@ module.exports = {
     buildSystemPrompt,
     buildTriagePrompt,
     buildSelectionPrompt,
-    CONFIDENCE_THRESHOLD
-};
+    CONFIDENCE_THRESHOLD, BUILTIN_PROMPTS, SHIPPED_PROMPTS };

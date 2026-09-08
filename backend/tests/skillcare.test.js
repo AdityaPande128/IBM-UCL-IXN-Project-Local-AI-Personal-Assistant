@@ -38,15 +38,28 @@ test('a crashing skill answers in plain words, never a traceback', async () => {
 
 test('a permissions wall becomes a card naming the blocked folder', async () => {
     const skill = makeSkill(['python3', '-c',
-        `import sys; print("PermissionError: [Errno 13] Permission denied: '/Users/nobody/secret/file.txt'", file=sys.stderr); sys.exit(1)`]);
+        `import sys; print("PermissionError: [Errno 13] Permission denied: '/Users/nobody/reports/file.txt'", file=sys.stderr); sys.exit(1)`]);
 
     const result = await skillCare.run(skill, {});
 
     assert.strictEqual(result.status, 'needs_approval');
     assert.ok(result.proposal && result.proposal.id, 'an approval card is offered');
     assert.match(result.response, /permissions wall/);
-    assert.match(result.response, /\/Users\/nobody\/secret/);
+    assert.match(result.response, /\/Users\/nobody\/reports/);
     assert.ok(!/Errno|Traceback/.test(result.response));
+});
+
+test('a permissions wall at a credential folder gets no card at all', async () => {
+    for (const blocked of [`${os.homedir()}/.ssh/id_rsa`, '/Users/nobody/secrets/vault.txt']) {
+        const skill = makeSkill(['python3', '-c',
+            `import sys; print("PermissionError: [Errno 13] Permission denied: '${blocked}'", file=sys.stderr); sys.exit(1)`]);
+
+        const result = await skillCare.run(skill, {});
+
+        assert.strictEqual(result.status, 'error', blocked);
+        assert.strictEqual(result.proposal, undefined, `no access card for ${blocked}`);
+        assert.ok(!/Errno|Traceback/.test(result.response));
+    }
 });
 
 test('a broken generated skill with improvement off still fails politely', async (t) => {

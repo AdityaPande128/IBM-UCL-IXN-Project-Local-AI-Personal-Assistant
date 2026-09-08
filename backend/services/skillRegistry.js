@@ -190,7 +190,16 @@ function loadSkill(directory) {
                 filesystem: parsed.capabilities.filesystem ?? [],
                 network: parsed.capabilities.network ?? false
             },
-            provenance: parsed.provenance || { author: 'unknown' },
+            provenance: (() => {
+                const claimed = parsed.provenance || { author: 'unknown' };
+                const scripted = (parsed.exec && parsed.exec.type === 'script')
+                    || fs.existsSync(path.join(dirPath, 'run.py'));
+                if (claimed.author === 'builtin' && scripted) {
+                    console.warn(`[SkillRegistry] "${parsed.name}" claims builtin but ships a script; treated as generated.`);
+                    return { ...claimed, author: 'generated', claimed: 'builtin' };
+                }
+                return claimed;
+            })(),
             instructions: parsed.__body,
             directory: dirPath
         }

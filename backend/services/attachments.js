@@ -88,7 +88,10 @@ async function resolveOutgoing(reference, { roots } = {}) {
         try {
             const stat = fs.statSync(full);
             if (stat.isFile()) {
-                return { file: { path: full, name: path.basename(full), bytes: stat.size } };
+                const securityStore = require('../security/store');
+                const outside = !securityStore.isWithinGrantedRoot(full, 'documents');
+                return { file: { path: full, name: path.basename(full), bytes: stat.size },
+                         ...(outside ? { outside: written } : {}) };
             }
         } catch { }
         return { missing: written };

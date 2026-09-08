@@ -10,7 +10,7 @@ parameters:
     aliases: [app_name, application, name, target]
 exec:
   type: command
-  argv: ["osascript", "-e", "tell application \"{{app}}\" to quit"]
+  argv: ["osascript", "-e", "on run argv", "-e", "tell application (item 1 of argv) to quit", "-e", "end run", "{{app}}"]
 reply: "{{app}} closed."
 capabilities:
   exec: true

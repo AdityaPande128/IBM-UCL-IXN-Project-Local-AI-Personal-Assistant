@@ -5,6 +5,7 @@ goes as soon as anything needs the room. A model in use is never evicted.
 """
 
 import gc
+import os
 import threading
 import time
 from contextlib import contextmanager
@@ -178,9 +179,25 @@ class ResidencyManager:
         model_id = self.resolve(name)
         slot = self._slots.get(model_id)
         if slot is None:
+            if not self._on_disk(model_id):
+                raise ResidencyError(
+                    f"unknown model {model_id!r}: not a configured tier and not present locally; "
+                    "models are fetched during setup, never on request")
             slot = Slot(model_id, "transient")
             self._slots[model_id] = slot
         return slot
+
+    def _on_disk(self, model_id):
+        if model_id in self._known:
+            return True
+        if os.path.isabs(model_id):
+            return os.path.isfile(os.path.join(model_id, "config.json"))
+        if model_id.count("/") != 1:
+            return False
+        org, name = model_id.split("/")
+        hub = os.environ.get("HF_HUB_CACHE") or os.path.join(
+            os.environ.get("HF_HOME", os.path.join(os.path.expanduser("~"), ".cache", "huggingface")), "hub")
+        return os.path.isdir(os.path.join(hub, f"models--{org}--{name}", "snapshots"))
 
     def preload(self, name):
         with self._lock:

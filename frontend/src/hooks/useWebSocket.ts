@@ -77,97 +77,6 @@ export interface SettingsResult {
   error?: string;
 }
 
-export interface BriefNotice {
-  id: number;
-  watcher_id: string;
-  at: number;
-  title: string;
-  body: string;
-  seen: number;
-}
-
-export interface BriefDraft {
-  id: string;
-  kind: string;
-  summary?: string;
-  who?: string;
-  subject?: string;
-  goal?: string;
-}
-
-export interface BriefApproval {
-  id: number;
-  ts: string;
-  channel: string;
-  action: string;
-  summary: string;
-  preview?: string | null;
-}
-
-export interface BriefData {
-  at: number;
-  text: string;
-  notices: BriefNotice[];
-  proposals: BriefDraft[];
-  approvals: BriefApproval[];
-}
-
-export interface MemoryFact {
-  id: string;
-  text: string;
-  status: string;
-  pinned: boolean;
-  source: string;
-  created_at: number;
-  last_recalled_at: number | null;
-}
-
-export interface MemoryData {
-  facts: MemoryFact[];
-  incognito: boolean;
-  active: number;
-  archived: number;
-  superseded: number;
-  secure_delete: boolean;
-}
-
-export interface WipePreview {
-  term: string;
-  candidates: MemoryFact[];
-}
-
-export interface AuditData {
-  since: string;
-  generatedAt: string;
-  summary: {
-    plans: number;
-    succeeded: number;
-    failed: number;
-    decisions: number;
-    denied: number;
-    approvals: number;
-    builds: number;
-    notices: number;
-  };
-  plans: {
-    at: string; request: string; goal: string | null; status: string;
-    steps: number; surface: string | null; error: string | null;
-  }[];
-  decisions: {
-    at: string; channel: string; action: string; decision: string;
-    summary: string | null; destination: string | null;
-  }[];
-  approvals: {
-    at: string; action: string; summary: string; status: string;
-    resolvedAt: string | null;
-  }[];
-  builds: {
-    at: string; request: string; outcome: string;
-    skill: string | null; failure: string | null;
-  }[];
-  notices: { at: string; title: string; body: string; seen: boolean }[];
-}
-
 export interface PermissionsData {
   generatedAt: string;
   enforce_mode: string;
@@ -191,7 +100,11 @@ export interface PermissionsData {
   channel: {
     telegram: { enabled: boolean; bound_chat: string | null; token_present: boolean };
   };
-  memory: { incognito: boolean; secure_delete?: boolean };
+  disclosures: {
+    id: number; ts: string; channel: string; action: string; label: string;
+    destination: string | null; summary: string; preview: string | null;
+  }[];
+  disclosures_pending: number;
   sandbox_root: string;
 }
 
@@ -335,20 +248,10 @@ interface UseWebSocketReturn {
   abilities: AbilitiesData | null;
   diagnostics: DiagnosticsResult | null;
   settingsResult: SettingsResult | null;
-  brief: BriefData | null;
-  requestBrief: () => void;
   resolveApproval: (id: number, decision: "yes" | "no") => void;
-  markNoticesSeen: (ids: number[]) => void;
-  memory: MemoryData | null;
-  wipePreview: WipePreview | null;
-  requestMemory: (status?: string) => void;
-  addMemory: (text: string) => void;
-  removeMemories: (ids: string[]) => void;
-  pinMemory: (id: string, pinned: boolean) => void;
-  previewWipe: (term: string) => void;
-  clearWipePreview: () => void;
-  wipeAllMemory: () => void;
-  setIncognito: (on: boolean) => void;
+  privateChat: boolean;
+  startPrivateChat: () => void;
+  endPrivateChat: () => void;
   wakeMode: boolean;
   wakeHeardAt: number | null;
   reportClientError: (text: string, quiet?: boolean) => void;
@@ -364,8 +267,6 @@ interface UseWebSocketReturn {
   removeSkill: (name: string) => void;
   saveDiagnostics: () => void;
   updateSettings: (update: SettingsUpdate) => void;
-  audit: AuditData | null;
-  requestAudit: (since?: number) => void;
   permissions: PermissionsData | null;
   requestPermissions: () => void;
   checkpointResult: CheckpointResult | null;
@@ -448,10 +349,9 @@ export function useWebSocket(): UseWebSocketReturn {
   const [abilities, setAbilities] = useState<AbilitiesData | null>(null);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [settingsResult, setSettingsResult] = useState<SettingsResult | null>(null);
-  const [brief, setBrief] = useState<BriefData | null>(null);
-  const [memory, setMemory] = useState<MemoryData | null>(null);
-  const [wipePreview, setWipePreview] = useState<WipePreview | null>(null);
-  const [audit, setAudit] = useState<AuditData | null>(null);
+  const [privateChat, setPrivateChat] = useState(false);
+  const privateChatRef = useRef(false);
+  useEffect(() => { privateChatRef.current = privateChat; }, [privateChat]);
   const [permissions, setPermissions] = useState<PermissionsData | null>(null);
   const [checkpointResult, setCheckpointResult] = useState<CheckpointResult | null>(null);
   const [bundleResult, setBundleResult] = useState<BundleResult | null>(null);
@@ -467,7 +367,6 @@ export function useWebSocket(): UseWebSocketReturn {
   const [remoteBusy, setRemoteBusy] = useState(false);
   const enqueueAudio = useAudioQueue();
   const wsRef = useRef<WebSocket | null>(null);
-  const memoryStatusRef = useRef<string | undefined>(undefined);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const addMessage = useCallback(
@@ -521,10 +420,9 @@ export function useWebSocket(): UseWebSocketReturn {
           // is fetched on every (re)connect rather than on demand.
           ws.send(JSON.stringify({ type: "onboarding" }));
           ws.send(JSON.stringify({ type: "conversations_list" }));
-          ws.send(JSON.stringify({ type: "brief" }));
-          // The daemon's side of "which conversation is open" died with the
-          // old socket; re-select or the next message starts a new one.
-          if (activeConversationRef.current !== null) {
+          if (privateChatRef.current) {
+            ws.send(JSON.stringify({ type: "private_chat", on: true }));
+          } else if (activeConversationRef.current !== null) {
             ws.send(JSON.stringify({ type: "conversation_select", id: activeConversationRef.current }));
           }
           return;
@@ -733,9 +631,7 @@ export function useWebSocket(): UseWebSocketReturn {
               ? "Approved — ask for it again and it will go through."
               : `Declined — ${msg.reason ?? "that disclosure stays blocked"}.`
           );
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: "brief" }));
-          }
+          wsRef.current?.send(JSON.stringify({ type: "permissions" }));
           return;
         }
         if (msg.type === "state_sync") {
@@ -750,53 +646,7 @@ export function useWebSocket(): UseWebSocketReturn {
           setAbilities(data as AbilitiesData);
           return;
         }
-        if (msg.type === "brief_result") {
-          const { type: _ignored, ...data } = msg;
-          setBrief(data as BriefData);
-          return;
-        }
-        if (msg.type === "notices_seen_result") {
-          return;
-        }
-        if (msg.type === "memory_result") {
-          const { type: _ignored, ...data } = msg;
-          setMemory(data as MemoryData);
-          return;
-        }
-        if (msg.type === "memory_add_result") {
-          if (msg.status === "refused" && msg.response) {
-            addMessage("system", msg.response);
-          }
-          wsRef.current?.send(
-            JSON.stringify({ type: "memory", status: memoryStatusRef.current })
-          );
-          return;
-        }
-        if (msg.type === "memory_remove_result" || msg.type === "memory_wipe_all_result") {
-          setWipePreview(null);
-          wsRef.current?.send(
-            JSON.stringify({ type: "memory", status: memoryStatusRef.current })
-          );
-          return;
-        }
-        if (msg.type === "memory_pin_result") {
-          const fact = msg.fact as MemoryFact | null;
-          if (fact) {
-            setMemory((prev) =>
-              prev
-                ? { ...prev, facts: prev.facts.map((f) => (f.id === fact.id ? fact : f)) }
-                : prev
-            );
-          }
-          return;
-        }
-        if (msg.type === "memory_wipe_result") {
-          setWipePreview({ term: msg.term, candidates: msg.candidates ?? [] });
-          return;
-        }
-        if (msg.type === "incognito_result") {
-          const { type: _ignored, ...counts } = msg;
-          setMemory((prev) => (prev ? { ...prev, ...counts } : prev));
+        if (msg.type === "private_chat_result") {
           return;
         }
         if (msg.type === "wake_mode_result") {
@@ -814,11 +664,6 @@ export function useWebSocket(): UseWebSocketReturn {
         if (msg.type === "wake") {
           setWakeHeardAt(Date.now());
           addMessage("user", msg.command ? `“Hey Jarvis, ${msg.command}”` : "“Hey Jarvis”");
-          return;
-        }
-        if (msg.type === "audit_result") {
-          const { type: _ignored, ...data } = msg;
-          setAudit(data as AuditData);
           return;
         }
         if (msg.type === "permissions_result") {
@@ -943,6 +788,11 @@ export function useWebSocket(): UseWebSocketReturn {
   }, []);
 
   const selectConversation = useCallback((id: number | null) => {
+    if (privateChatRef.current) {
+      privateChatRef.current = false;
+      setPrivateChat(false);
+      setMessages([]);
+    }
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "conversation_select", id }));
     }
@@ -972,12 +822,6 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
-  const requestBrief = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "brief" }));
-    }
-  }, []);
-
   const reportClientError = useCallback((text: string, quiet = false) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "client_log", text, quiet }));
@@ -990,62 +834,37 @@ export function useWebSocket(): UseWebSocketReturn {
     }
   }, []);
 
-  const requestMemory = useCallback((status?: string) => {
-    memoryStatusRef.current = status;
+  const PRIVATE_BANNER = "Private mode: nothing you say here will be remembered.";
+
+  const startPrivateChat = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "memory", ...(status ? { status } : {}) }));
+      wsRef.current.send(JSON.stringify({ type: "private_chat", on: true }));
     }
+    setActiveConversation(null);
+    setRemoteBusy(false);
+    setProposal(null);
+    setMessages([{ id: `private-${Date.now()}`, type: "system", text: PRIVATE_BANNER, timestamp: new Date() }]);
+    setPrivateChat(true);
   }, []);
 
-  const addMemory = useCallback((text: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && text.trim()) {
-      wsRef.current.send(JSON.stringify({ type: "memory_add", text: text.trim() }));
-    }
-  }, []);
-
-  const removeMemories = useCallback((ids: string[]) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && ids.length) {
-      wsRef.current.send(JSON.stringify({ type: "memory_remove", ids }));
-    }
-  }, []);
-
-  const pinMemory = useCallback((id: string, pinned: boolean) => {
+  const endPrivateChat = useCallback(() => {
+    if (!privateChatRef.current) return;
+    privateChatRef.current = false;
+    setPrivateChat(false);
+    setMessages([]);
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "memory_pin", id, pinned }));
+      wsRef.current.send(JSON.stringify({ type: "private_chat", on: false }));
     }
   }, []);
 
-  const previewWipe = useCallback((term: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && term.trim()) {
-      wsRef.current.send(JSON.stringify({ type: "memory_wipe", term: term.trim() }));
-    }
-  }, []);
-
-  const clearWipePreview = useCallback(() => {
-    setWipePreview(null);
-  }, []);
-
-  const wipeAllMemory = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "memory_wipe_all", confirm: true }));
-    }
-  }, []);
-
-  const setIncognito = useCallback((on: boolean) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "incognito", on }));
-    }
-  }, []);
-
-  const markNoticesSeen = useCallback((ids: number[]) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && ids.length) {
-      wsRef.current.send(JSON.stringify({ type: "notices_seen", ids }));
-      setBrief((prev) =>
-        prev
-          ? { ...prev, notices: prev.notices.filter((n) => !ids.includes(n.id)) }
-          : prev
-      );
-    }
+  useEffect(() => {
+    const leave = () => {
+      if (privateChatRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "private_chat", on: false }));
+      }
+    };
+    window.addEventListener("beforeunload", leave);
+    return () => window.removeEventListener("beforeunload", leave);
   }, []);
 
   const removeSkill = useCallback((name: string) => {
@@ -1065,12 +884,6 @@ export function useWebSocket(): UseWebSocketReturn {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       setSettingsResult({ status: "applying" });
       wsRef.current.send(JSON.stringify({ type: "settings_update", ...update }));
-    }
-  }, []);
-
-  const requestAudit = useCallback((since?: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "audit", ...(since ? { since } : {}) }));
     }
   }, []);
 
@@ -1169,20 +982,10 @@ export function useWebSocket(): UseWebSocketReturn {
     abilities,
     diagnostics,
     settingsResult,
-    brief,
-    requestBrief,
     resolveApproval,
-    markNoticesSeen,
-    memory,
-    wipePreview,
-    requestMemory,
-    addMemory,
-    removeMemories,
-    pinMemory,
-    previewWipe,
-    clearWipePreview,
-    wipeAllMemory,
-    setIncognito,
+    privateChat,
+    startPrivateChat,
+    endPrivateChat,
     wakeMode,
     wakeHeardAt,
     reportClientError,
@@ -1198,8 +1001,6 @@ export function useWebSocket(): UseWebSocketReturn {
     removeSkill,
     saveDiagnostics,
     updateSettings,
-    audit,
-    requestAudit,
     permissions,
     requestPermissions,
     checkpointResult,

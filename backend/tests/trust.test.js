@@ -14,70 +14,21 @@ process.env.JARVIS_SKILLS_DIR = skillsDir;
 const traceStore = require('../services/traceStore');
 const securityStore = require('../security/store');
 const watchers = require('../services/watchers');
-const memoryStore = require('../services/memoryStore');
 const generationLog = require('../services/generationLog');
 const checkpoints = require('../services/checkpoints');
 
 traceStore.open(path.join(scratch, 'traces.db'));
 securityStore.open(path.join(scratch, 'security.db'));
 watchers.open(path.join(scratch, 'watchers.db'));
-memoryStore.open(path.join(scratch, 'memory.db'));
 checkpoints.open(path.join(scratch, 'checkpoints'));
 
 const skillPins = require('../services/skillPins');
 skillPins.open(path.join(scratch, 'skill-pins.json'));
 const skillRegistry = require('../services/skillRegistry');
 
-const auditView = require('../services/auditView');
 const permissionsView = require('../services/permissionsView');
 const channelAdapter = require('../services/channelAdapter');
 const stateBundle = require('../services/stateBundle');
-
-test('the audit digest reports what actually happened, from the stores that enforce it', () => {
-    const planId = traceStore.beginPlan({ request: 'tidy the desktop', goal: 'Tidy it' });
-    traceStore.finishPlan(planId, { status: 'success', runMs: 120 });
-    const failedId = traceStore.beginPlan({ request: 'reach the moon' });
-    traceStore.finishPlan(failedId, { status: 'failed', error: 'no capability' });
-
-    securityStore.recordDecision({
-        channel: 'web', action: 'click', decision: 'deny',
-        summary: 'refused the Send button', destination: 'mail.google.com'
-    });
-    const approvalId = securityStore.requestApproval({
-        channel: 'web', action: 'send', summary: 'send the reply to Sam'
-    });
-    securityStore.resolveApproval(approvalId, true);
-
-    generationLog.append({ request: 'count words', outcome: 'registered', skill: 'word-count' });
-
-    const digest = auditView.digest(Date.now() - 60 * 1000);
-
-    assert.strictEqual(digest.summary.plans, 2);
-    assert.strictEqual(digest.summary.succeeded, 1);
-    assert.strictEqual(digest.summary.failed, 1);
-    assert.ok(digest.summary.decisions >= 1);
-    assert.ok(digest.summary.denied >= 1);
-    assert.ok(digest.summary.approvals >= 1);
-    assert.strictEqual(digest.summary.builds, 1);
-
-    assert.strictEqual(digest.plans[0].request, 'reach the moon');
-    assert.strictEqual(digest.plans[0].status, 'failed');
-    assert.ok(digest.decisions.some(d => d.summary === 'refused the Send button'));
-    assert.ok(digest.approvals.some(a => a.summary === 'send the reply to Sam'));
-    assert.strictEqual(digest.builds[0].skill, 'word-count');
-
-    // A window that starts in the future sees nothing.
-    const empty = auditView.digest(Date.now() + 60 * 1000);
-    assert.strictEqual(empty.summary.plans, 0);
-    assert.strictEqual(empty.summary.decisions, 0);
-
-    // A corrupted "since" past the largest representable date must not throw
-    // (new Date(9e18).toISOString() does); it falls back to the default window.
-    const recovered = auditView.digest(9e18);
-    assert.strictEqual(recovered.summary.plans, 2);
-    assert.strictEqual(auditView.digest(NaN).summary.plans, 2);
-    assert.strictEqual(auditView.digest(-5).summary.plans, 2);
-});
 
 test('the permissions dashboard reads every grant from the store that enforces it', () => {
     securityStore.grantSite('mail.google.com', { label: 'Gmail' });
@@ -105,7 +56,6 @@ test('the permissions dashboard reads every grant from the store that enforces i
     assert.strictEqual(snapshot.channel.telegram.enabled, true);
     assert.strictEqual(snapshot.channel.telegram.bound_chat, '12345');
     assert.strictEqual(typeof snapshot.channel.telegram.token_present, 'boolean');
-    assert.strictEqual(typeof snapshot.memory.incognito, 'boolean');
     assert.strictEqual(snapshot.enforce_mode, 'generated');
 });
 

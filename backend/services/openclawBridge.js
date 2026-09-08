@@ -83,15 +83,34 @@ function plainRefusal(reasoning) {
     return `I won't do that: ${sentence.replace(/\.?$/, '.')}`;
 }
 
+const DEPENDENT_FRAGMENT =
+    /^(?:and|also|then|plus|same (?:for|with|in)|what about|how about)\b[^.?!]{0,60}[.?!]?$|^[^.?!]{0,40}\btoo[.!]?$/i;
+
 async function resolveFollowUp(text, history) {
     if (!Array.isArray(history) || history.length === 0) return text;
     // Asking the same thing again is a retry, not a follow-up: it already
     // stands alone, and a rewrite can only make it worse.
-    if (history.some(m => m.role === 'user' && m.text.trim() === text.trim())) {
+    const textOf = (m) => String((m && (m.text ?? m.content)) || '');
+    if (history.some(m => m.role === 'user' && textOf(m).trim() === text.trim())) {
         return text;
     }
+    const sameFor = /^(?:now\s+|and\s+|then\s+)?(?:do\s+|try\s+)?(?:the\s+)?same\s+(?:thing\s+|one\s+)?(?:for|with|on|to)\s+(.+?)\s*[.!?]?$/i.exec(text.trim());
+    const lastUser = [...history].reverse().find(m => m.role === 'user');
+    if (sameFor && lastUser) {
+        const FILE_TOKEN = /(?:~?\/[^\s"']+|[\w.-]+\.[a-z0-9]{1,5})/gi;
+        const previous = [...textOf(lastUser).matchAll(FILE_TOKEN)].map(m => m[0]);
+        const swap = sameFor[1].replace(/^["']|["']$/g, '');
+        if (previous.length) {
+            const old = previous[previous.length - 1];
+            const keepsDir = /\//.test(old) && !/\//.test(swap);
+            const replacement = keepsDir ? old.slice(0, old.lastIndexOf('/') + 1) + swap : swap;
+            const rewritten = textOf(lastUser).replace(old, replacement);
+            console.log(`[Bridge] Follow-up resolved by swap (${text.length} -> ${rewritten.length} chars)`);
+            return rewritten;
+        }
+    }
     const exchange = history
-        .map(m => `${m.role === 'user' ? 'user' : 'assistant'}: ${m.text}`)
+        .map(m => `${m.role === 'user' ? 'user' : 'assistant'}: ${textOf(m)}`)
         .join('\n');
     try {
         const raw = await llmClient.complete([
@@ -115,6 +134,11 @@ async function resolveFollowUp(text, history) {
             .replace(/^["']|["']$/g, '').trim();
         if (!resolved || resolved.length > 300) return text;
         if (/\bthe user\b/i.test(resolved)) return text;
+        if (/^(null|none|undefined|n\/a)$/i.test(resolved)) return text;
+        const tokens = (t) => new Set((String(t).toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []));
+        const userWords = tokens([text, ...history.filter(m => m.role === 'user').map(textOf)].join(' '));
+        const shared = [...tokens(resolved)].some(w => userWords.has(w));
+        if (!shared) return text;
         if (resolved !== text) {
             console.log(`[Bridge] Follow-up resolved (${text.length} -> ${resolved.length} chars)`);
         }
@@ -124,9 +148,77 @@ async function resolveFollowUp(text, history) {
     }
 }
 
+
+function calendarTemplate(text) {
+    const time = /from\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:to|until|-|\u2013)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i
+        .exec(text);
+    if (!time) return null;
+    let h1 = Number(time[1]), min1 = Number(time[2] || 0);
+    let h2 = Number(time[4]), min2 = Number(time[5] || 0);
+    const ap1 = time[3], ap2 = time[6];
+    if (ap1) {
+        if (/pm/i.test(ap1) && h1 < 12) h1 += 12;
+        if (/am/i.test(ap1) && h1 === 12) h1 = 0;
+    }
+    if (ap2) {
+        if (/pm/i.test(ap2) && h2 < 12) h2 += 12;
+        if (/am/i.test(ap2) && h2 === 12) h2 = 0;
+    } else if (ap1) {
+        if (h2 <= (h1 % 12)) h2 += Math.floor(h1 / 12) * 12;
+        if (h2 <= h1) h2 += 12;
+    }
+    if (!ap1 && !ap2) {
+        if (h2 <= h1) h2 += 12;
+        if (h1 < 8) { h1 += 12; h2 += 12; }
+    }
+    if ((h2 * 60 + min2) <= (h1 * 60 + min1) || h2 >= 24) return null;
+    const day = new Date();
+    if (/\btomorrow\b/i.test(text)) day.setDate(day.getDate() + 1);
+    const stamp = (h, m) => day.getFullYear()
+        + String(day.getMonth() + 1).padStart(2, '0')
+        + String(day.getDate()).padStart(2, '0')
+        + 'T' + String(h).padStart(2, '0') + String(m).padStart(2, '0') + '00';
+    const titled = /:\s*(.+?)\s+from\s/i.exec(text);
+    const title = (titled ? titled[1] : 'New event').trim().slice(0, 80);
+    const label = (h, m) => {
+        const ap = h >= 12 ? 'pm' : 'am';
+        const hh = h % 12 === 0 ? 12 : h % 12;
+        return hh + (m ? ':' + String(m).padStart(2, '0') : '') + ap;
+    };
+    return {
+        title,
+        titled: Boolean(titled),
+        when: `${label(h1, min1)} to ${label(h2, min2)}`,
+        url: 'https://calendar.google.com/calendar/render?action=TEMPLATE'
+            + '&text=' + encodeURIComponent(title)
+            + '&dates=' + stamp(h1, min1) + '/' + stamp(h2, min2),
+        dayUrl: 'https://calendar.google.com/calendar/u/0/r/day/'
+            + day.getFullYear() + '/' + (day.getMonth() + 1) + '/' + day.getDate()
+    };
+}
+
+function sourceArtifacts(sources) {
+    try {
+        const fileIndex = require('./fileIndex');
+        const names = [...new Set((sources || [])
+            .map(c => (/^file[^:]*:\s*(.+)$/.exec(String(c)) || [])[1])
+            .filter(Boolean).map(n => n.trim()))].slice(0, 1);
+        const files = names.map(name => {
+            const hit = fileIndex.search({ text: name, limit: 5 })
+                .find(r => String(r.name).toLowerCase() === name.toLowerCase());
+            return hit && { name: hit.name, path: hit.path };
+        }).filter(Boolean);
+        console.log(`[Bridge] source files: ${JSON.stringify(names)} -> `
+            + JSON.stringify(files.map(f => f.name)));
+        return files.length ? { artifacts: { files } } : {};
+    } catch {
+        return {};
+    }
+}
+
 // The asks that sound like they mean a file this chat has already seen.
 const REFERENCES_FILES =
-    /\b(pdf|file|document|docx?|report|attachment|image|photo|picture|spreadsheet|that one|it back)\b/i;
+    /\b(pdf|file|document|docx?|report|attachment|image|photo|picture|spreadsheet|that one|it back|csv|tsv|xlsx?|json|txt|md|markdown|epub|folder|letter)\b/i;
 
 // The shapes of a question about content, and of an ask to move a file
 // somewhere; the first answers from the file, the second stays routable.
@@ -134,10 +226,14 @@ const CONTENT_QUESTION =
     /^(what|who|when|where|why|how|does|do|is|are|can|could|summari[sz]e|read|tell|explain)\b|\b(say|says|said|contain|contains|about|mean|means|inside|summar)/i;
 const WANTS_DELIVERY =
     /^(send|share|give|deliver|forward|email|mail|attach|save|copy|move|rename|delete|remove|open|print)\b/i;
+const DELIVERY_ASK = /^(send|share|give|deliver|forward|attach)\b/i;
+const NAMES_A_RECIPIENT = /@|\bto\s+(?!me\b|my\b|this\b|the\s+phone\b)[a-z]/i;
+const MUTATES_FILE =
+    /\b(delete|remove|rename|move|copy|save|print|open|email|mail|send|share|forward|attach|deliver)\b/i;
 
 // Verbs that make a short utterance a job rather than conversation.
 const SMALL_ACTION =
-    /^(send|open|find|build|make|check|read|write|search|email|mail|book|play|show|list|run|create|delete|remove|convert|download|upload|save|schedule|set|turn|call|text|browse|visit|go|fetch|get|give|share|attach|summari[sz]e|translate|extract|count|rename|move|copy|stop|pause|resume|remind|wipe|cancel|clear|forget|start|launch|close|quit|update|enable|disable|add)\b/i;
+    /^(send|open|find|build|make|check|read|write|search|email|mail|book|play|show|list|run|create|delete|remove|convert|download|upload|save|schedule|set|turn|call|text|browse|visit|go|fetch|get|give|share|attach|summari[sz]e|translate|extract|count|rename|move|copy|stop|pause|resume|remind|wipe|cancel|clear|forget|start|launch|close|quit|update|enable|disable|add|mute|unmute|lower|raise|take|capture|toggle|dim|brighten|lock|unlock|skip|next|previous|kill|restart|reboot|sleep|empty|zip|unzip|pay|buy|purchase|order|transfer|wire|withdraw|deposit|export|import|install|uninstall|format|erase|shut|shutdown|sign|log|login|logout|post|publish|submit|reply|change|edit|modify|reset|hack|crack|bypass|encrypt|decrypt|dump|leak|share)\b|\b(volume|screenshot|wifi|bluetooth|brightness|screen|desktop|disk|ram|memory|password|passwords|bill|bills|money|card|bank|account|accounts|key|keys|credential|credentials|trash|firewall|security|settings|drive|payment|invoice)\b/i;
 
 function isSmallTalk(text) {
     const plain = String(text || '').trim();
@@ -191,8 +287,20 @@ async function executeSkill(decision, originalText, options = {}) {
             `"${target_skill}" is not installed`);
     }
 
+    const planner = require('./planner');
+    const described = `${skill.name} ${skill.description || ''}`;
+    if (!planner.carriesMutation(originalText, described)) {
+        console.log(`[Bridge] ${skill.name} does not speak of what "${originalText.slice(0, 60)}" asks to change; not running it.`);
+        return composeThenGenerate(originalText, options);
+    }
     const result = await skillCare.run(skill, parameters,
         { request: originalText, signal: options.signal });
+
+    if (result.status === 'error' && result.mismatch) {
+        console.log(`[Bridge] ${skill.name} does not fit this request (${result.reason}); offering to build.`);
+        return maybeProposeGeneration(originalText,
+            [`${skill.name} could not do that: ${result.reason}`], options);
+    }
 
     return {
         status: result.status === 'success' ? 'success' : result.status,
@@ -207,7 +315,14 @@ async function executeSkill(decision, originalText, options = {}) {
 }
 
 function maybeDelegate(text, options = {}, why = 'nothing installed covers this') {
-    if (!options.interactive) return runOpenClaw(text, null, options.signal);
+    if (!options.interactive) {
+        return {
+            status: 'error',
+            action: 'delegation_requires_approval',
+            response: `I couldn't do that myself (${why}). The general executor on this `
+                + 'machine might, but handing a request over needs your approval, and nobody is here to give it.'
+        };
+    }
 
     const offer = proposals.create('delegate', {
         request: text,
@@ -298,7 +413,7 @@ async function composeThenGenerate(intentText, options = {}) {
         return maybeProposeGeneration(intentText, [], options);
     }
 
-    if (plan.status === 'planned' && isRealComposition(plan)) {
+    if (plan.status === 'planned' && isRealComposition(plan) && !(plan.missing || []).length) {
         const execution = await planExecutor.run(plan, { request: intentText, signal: options.signal });
         const gate = execution.status !== 'success' && options.interactive
             && String(execution.text || '').match(/no folder has been granted for (\w+)/);
@@ -368,7 +483,109 @@ async function composeThenGenerate(intentText, options = {}) {
     return maybeProposeGeneration(intentText, gaps, options);
 }
 
+const DELIVERY_NOISE = new Set(['send', 'share', 'give', 'deliver', 'forward', 'attach', 'me', 'my', 'the',
+    'to', 'phone', 'file', 'files', 'please', 'both', 'all', 'two', 'and', 'of', 'over', 'this', 'that', 'a', 'an', 'onto', 'device', 'mobile']);
+const NEEDS_THE_BROWSER =
+    /\b(e-?mails?|my (?:mailbox|inbox)|gmail|outlook|my calendar|attachments? from|website|web ?page|browser|online)\b/i;
+const NOTE_ASK = /^(?:please\s+)?(?:note that|note:|remember that|remember,? we|remember,? i|remember:|for the record|keep in mind|just so you know|fyi)\b/i;
+const WHERE_IS = /^(?:where(?:'s| is| are| did i (?:save|put|download|leave))|find(?: me)? (?:the )?(?:path|location)(?: of| to)?)\b/i;
+const CREDENTIAL_ASK =
+    /\b(?:log(?:\s*in)?(?:to)?|login|sign(?:\s*in)?(?:to)?)\b[^.]{0,50}\b(?:account|bank|banking|balance|monzo|password|credentials?)\b|\b(?:my|the)\s+(?:bank|banking)\s+(?:account|balance|app)\b|\bcheck my (?:bank )?balance\b|\b(?:enter|type|fill in|use) my (?:password|pin|card (?:number|details)|credentials)\b/i;
+const MAIL_QUESTION = /\b(?:e-?mails?|inbox|mailbox|gmail|outlook)\b/i;
+const MAIL_CHECK =
+    /^(?:please\s+)?(?:check|look (?:in|at|through)|see|search|go through|scan)\b[^.]{0,40}\b(?:e-?mails?|inbox|mailbox|gmail|outlook)\b/i;
+const ORDER_STATUS =
+    /\b(?:order|parcel|package|delivery|shipment|refund)\b[^.]{0,60}\b(?:shipped|dispatched|arrived|delivered|on its way|status|refunded|been sent)\b|\bhas my (?:order|parcel|package|delivery)\b/i;
+const MAIL_MUTATION =
+    /^(?:please\s+)?(?:send|email|e-mail|mail|tell|message|text|reply|respond|draft|compose|write|forward|delete|archive|mark|unsubscribe)\b|\b(?:reply|respond|forward|draft|compose|send)\s+(?:to|a|an|the|it|him|her|them)\b/i;
+const CALENDAR_WEEK =
+    /\b(?:calendar|agenda|schedule|diary)\b[^.]*\b(?:this|next|the|coming) week\b|\b(?:this|next|the|coming) week\b[^.]*\b(?:calendar|agenda|diary)\b/i;
+const CALENDAR_WRITE_SHAPE = /\b(?:create|book|schedule|add|put|set\s+up|delete|remove|cancel|move|clear)\b/i;
+const OWN_MAIL_ASK =
+    /^(?:please\s+)?(?:tell|email|e-mail|mail|message|write to|reply to|respond to|draft)\b(?![^.]*\b(?:his|her|their|someone else'?s?|\w+'s)\s+(?:e-?mail|account|inbox|mailbox|machine|computer|phone|password|credentials))/i;
+
+function mailSearchTerms(text) {
+    const quoted = /["\u201c]([^"\u201d]{3,80})["\u201d]/.exec(text);
+    if (quoted) {
+        const phrase = quoted[1].trim();
+        return /\b(?:titled|subject|called|named|headed)\b/i.test(text.slice(0, quoted.index)) ? `subject:"${phrase}"` : phrase;
+    }
+    const body = String(text).replace(/^\s*\S+/, '');
+    const runs = body.match(/\b[A-Z][\w'&-]*(?:\s+(?:of|the|and|for|de|du|von)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*)*/g) || [];
+    const best = runs.map(r => r.trim()).sort((a, b) => b.length - a.length)[0];
+    if (!best || best.length < 3) return null;
+    return /\b(?:responded|replied|reply|replies|wrote|written|got back|heard (?:back )?from|sent me)\b/i.test(text) && !/\s/.test(best)
+        ? `from:${best}` : best;
+}
+
+function locateByName(text) {
+    const fileIndex = require('./fileIndex');
+    const noise = new Set([...DELIVERY_NOISE, 'where', 'is', 'are', 'did', 'save', 'put', 'download', 'leave',
+        'find', 'path', 'location', 'letter', 'document', 'doc', 'folder']);
+    const words = String(text).toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 2 && !noise.has(w));
+    if (!words.length) return [];
+    let rows = [];
+    try { rows = fileIndex.search({ text: words.join(' '), limit: 30 }); } catch { return []; }
+    const need = words.length === 1 ? 1 : Math.ceil(words.length * 0.6);
+    const carrying = rows.filter(row => {
+        const name = String(row.name || '').toLowerCase();
+        return words.filter(w => name.includes(w)).length >= need;
+    });
+    return carrying.slice(0, 3).map(row => ({ name: row.name, path: row.path }));
+}
+
+const withoutPaths = (text) => String(text).replace(/(?:~|\/)[^\s"']*/g, ' ');
+
+function deliverByName(intentText) {
+    const fileIndex = require('./fileIndex');
+    const classifier = require('../security/classifier');
+    const words = intentText.toLowerCase().split(/[^a-z0-9.]+/).filter(w => w.length >= 2 && !DELIVERY_NOISE.has(w));
+    const ask = () => ({ status: 'needs_clarification', action: 'clarify',
+        response: 'I could not tell which file you mean. Which file should I send?', decision: { action: 'clarify' } });
+    if (!words.length) return ask();
+    let hits = [];
+    try {
+        const share = (f) => words.filter(w => String(f.name).toLowerCase().includes(w)).length / words.length;
+        const enough = (f) => words.length === 1 ? share(f) === 1 : (share(f) >= 0.6 && share(f) * words.length >= 2);
+        hits = fileIndex.search({ text: words.join(' '), limit: 12 })
+            .filter(enough)
+            .filter(f => securityStore.isWithinGrantedRoot(f.path, 'documents'));
+    } catch { hits = []; }
+    const secret = hits.find(f => classifier.secretCheck(f.path).secret);
+    if (secret) {
+        return { status: 'refused', action: 'refused',
+            response: `I won't send ${secret.name}: it looks like credential material.` };
+    }
+    if (!hits.length) return ask();
+    const plural = /\b(both|all|every|two|these|those|each)\b/i.test(intentText) || /\b\w+s\b/.test(words.join(' ')) && hits.length === 2;
+    const chosen = plural ? hits.slice(0, 3) : (hits.length === 1 ? hits : []);
+    if (!chosen.length) {
+        const names = hits.slice(0, 5).map(f => f.name).join(', ');
+        return { status: 'needs_clarification', action: 'clarify',
+            response: `Which one do you mean: ${names}?`, decision: { action: 'clarify' } };
+    }
+    console.log(`[Bridge] Delivering by name: ${chosen.map(f => f.name).join(', ')}`);
+    const files = chosen.map(f => ({ name: f.name, path: f.path }));
+    return { status: 'success', action: 'delivered', response: `Attached ${files.map(f => f.name).join(', ')}.`, artifacts: { files } };
+}
+
 function maybeProposeGeneration(intentText, gaps, options = {}) {
+    if (DELIVERY_ASK.test(intentText.trim()) && !NAMES_A_RECIPIENT.test(intentText)) {
+        return deliverByName(intentText);
+    }
+    if (NEEDS_THE_BROWSER.test(withoutPaths(intentText))) {
+        const why = gaps.length ? gaps.join('; ') : 'the browse lane could not finish it';
+        return { status: 'error', action: 'web',
+            response: `I could not do that in the browser: ${why}.` };
+    }
+    if (!profile.improvementEnabled()) {
+        return { status: 'refused', action: 'generation_off',
+            response: 'Building new skills is switched off. Turn on self-improvement in settings if you want me to learn this.' };
+    }
+    if (!llmClient.modelForTier('smith')) {
+        return { status: 'refused', action: 'no_builder',
+            response: 'This machine doesn\'t run a builder model — its memory class is too small to write new skills. Everything already installed keeps working.' };
+    }
     if (!options.interactive) return generateThenExecute(intentText, gaps, options);
 
     const missing = gaps.length
@@ -452,7 +669,12 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
     };
 }
 
-async function executeIntent(intentText, options = {}) {
+function executeIntent(intentText, options = {}) {
+    if (!options.private) return executeIntentRecorded(intentText, options);
+    return require('./incognito').privately(() => executeIntentRecorded(intentText, options));
+}
+
+async function executeIntentRecorded(intentText, options = {}) {
     const startedAt = Date.now();
     console.log(`[Bridge] Processing intent (${intentText.length} chars)`);
 
@@ -467,6 +689,16 @@ async function executeIntent(intentText, options = {}) {
     }
 
     let asked = await resolveFollowUp(intentText, options.history);
+    if (Array.isArray(options.history) && options.history.length
+        && asked === intentText && DEPENDENT_FRAGMENT.test(intentText.trim())) {
+        return {
+            status: 'needs_clarification',
+            action: 'clarify',
+            response: 'I am not sure what that refers to. Which file or folder do you mean?',
+            decision: { action: 'clarify' },
+            durationMs: Date.now() - startedAt
+        };
+    }
     // The resolved ask before any notes join it: the gates below match on
     // what the user actually said, not on appended file paths.
     const plainAsk = asked;
@@ -497,24 +729,282 @@ async function executeIntent(intentText, options = {}) {
     // that file's own text, with the chat as context. It never reaches
     // triage: the skill factory cannot read anything the corpus cannot.
     const inHand = attached.length ? attached : (wantsFiles ? recent : []);
+    const pronounOnly = /\b(that|it|this)\b/i.test(plainAsk)
+        && plainAsk.trim().split(/\s+/).length <= 5;
+    if (DELIVERY_ASK.test(plainAsk) && !NAMES_A_RECIPIENT.test(plainAsk) && recent.length
+        && (REFERENCES_FILES.test(plainAsk) || pronounOnly)) {
+        const generic = new Set(['report', 'pdf', 'file', 'document', 'the']);
+        const askTokens = plainAsk.toLowerCase().split(/[^a-z0-9]+/)
+            .filter(t => t.length >= 3 && !generic.has(t));
+        const named = recent.filter(f => askTokens.some(t =>
+            String(f.name || '').toLowerCase().includes(t)));
+        const pronouny = /\b(that|it|this)\b/i.test(plainAsk);
+        const targets = named.length ? named.slice(-2)
+            : (pronouny ? [recent[recent.length - 1]] : []);
+        const fsNode = require('fs');
+        const deliverable = targets.filter(f => {
+            try {
+                return f && f.path
+                    && securityStore.isWithinGrantedRoot(f.path, 'documents')
+                    && fsNode.statSync(f.path).isFile();
+            } catch { return false; }
+        });
+        if (deliverable.length) {
+            console.log('[Bridge] Delivering the file in hand directly.');
+            const files = deliverable.map(f =>
+                ({ name: f.name || path.basename(f.path), path: f.path }));
+            return {
+                status: 'success',
+                response: `Attached ${files.map(f => f.name).join(', ')}.`,
+                action: 'delivered',
+                artifacts: { files },
+                durationMs: Date.now() - startedAt
+            };
+        }
+    }
     if (inHand.length && CONTENT_QUESTION.test(plainAsk)
-        && !WANTS_DELIVERY.test(plainAsk)) {
+        && !MUTATES_FILE.test(plainAsk)) {
         const pinned = attachmentPassages(inHand);
         if (pinned.length) {
             console.log('[Bridge] Question about a file in hand; answering from it.');
-            const answered = await answerService.answer(asked,
+            let answered = await answerService.answer(asked,
                 { passages: pinned, history: options.history });
-            if (answered.is_successful && !answered.refused) {
+            if (answered.is_successful && answered.refused) {
+                const named = inHand[0] && (inHand[0].name || path.basename(inHand[0].path));
+                const spelled = named
+                    ? asked.replace(/\b(it|this|that)\b/i, `the file "${named}"`) : asked;
+                const again = await answerService.answer(spelled,
+                    { passages: pinned, history: options.history, temperature: 0 });
+                if (again.is_successful && !again.refused) answered = again;
+            }
+            if (answered.is_successful) {
                 return {
                     status: 'success',
                     response: answered.text,
                     action: 'answered',
                     grounded: answered.grounded,
+                    refused: Boolean(answered.refused),
+                    sources: answered.sources,
+                    artifacts: { files: inHand.slice(0, 2).map(f =>
+                        ({ name: f.name || path.basename(f.path),
+                           path: f.path })) },
+                    durationMs: Date.now() - startedAt
+                };
+            }
+        }
+    }
+    const conversationStore = require('./conversationStore');
+    if (!inHand.length && conversationStore.RECALL_SHAPE.test(plainAsk)
+        && !MUTATES_FILE.test(plainAsk)) {
+        let recalled = await answerService.answer(asked, { history: options.history });
+        if (recalled.is_successful && recalled.grounded && recalled.refused) {
+            const again = await answerService.answer(
+                `${asked}\n\n(The retrieved passages are things I said in earlier chats with you. Tell me what I said there, quoting the detail I am asking about.)`,
+                { history: options.history, temperature: 0 });
+            if (again.is_successful && again.grounded && !again.refused) recalled = again;
+        }
+        if (recalled.is_successful && recalled.grounded && !recalled.refused) {
+            console.log('[Bridge] Recall question; answered from earlier chats.');
+            return {
+                status: 'success',
+                response: recalled.text,
+                action: 'answered',
+                grounded: true,
+                sources: recalled.sources,
+                durationMs: Date.now() - startedAt
+            };
+        }
+        if (recalled.is_successful) {
+            const best = (recalled.passages || []).find(p => /^The user said: /.test(p.text));
+            console.log(`[Bridge] Recall question; ${best ? 'quoting the earlier chat' : 'nothing found in earlier chats'}.`);
+            return {
+                status: 'success',
+                response: best
+                    ? `Here is what you said in an earlier chat: "${best.text.replace(/^The user said: /, '')}" (${best.cite}).`
+                    : 'I have nothing from our earlier chats about that.',
+                action: 'answered',
+                grounded: Boolean(best),
+                sources: best ? [best.cite] : [],
+                durationMs: Date.now() - startedAt
+            };
+        }
+    }
+    if (!inHand.length && CONTENT_QUESTION.test(plainAsk) && /\?\s*$/.test(plainAsk.trim())
+        && !MUTATES_FILE.test(plainAsk) && !MAIL_QUESTION.test(plainAsk)
+        && !conversationStore.RECALL_SHAPE.test(plainAsk)) {
+        let remembered = [];
+        try { remembered = await conversationStore.answerSource.retrieve(plainAsk); } catch { remembered = []; }
+        if (remembered.some(p => /^The user said: /.test(p.text))) {
+            const answered = await answerService.answer(asked,
+                { passages: remembered, history: options.history, temperature: 0 });
+            if (answered.is_successful && answered.grounded && !answered.refused) {
+                console.log('[Bridge] Question answered from an earlier chat.');
+                return {
+                    status: 'success',
+                    response: answered.text,
+                    action: 'answered',
+                    grounded: true,
                     sources: answered.sources,
                     durationMs: Date.now() - startedAt
                 };
             }
         }
+    }
+    if (!inHand.length && NOTE_ASK.test(plainAsk) && !/\?\s*$/.test(plainAsk)) {
+        console.log('[Bridge] A note for the record; acknowledged.');
+        return {
+            status: 'success',
+            response: 'Noted.',
+            action: 'answered',
+            grounded: true,
+            durationMs: Date.now() - startedAt
+        };
+    }
+    if (!inHand.length && WHERE_IS.test(plainAsk) && !MUTATES_FILE.test(plainAsk)) {
+        const located = locateByName(plainAsk);
+        if (located.length) {
+            console.log('[Bridge] Location question; answered from the index.');
+            return {
+                status: 'success',
+                response: located.length === 1
+                    ? `It is at ${located[0].path}.`
+                    : `I found ${located.length}:\n${located.map(f => `- ${f.path}`).join('\n')}`,
+                action: 'answered',
+                grounded: true,
+                sources: located.map(f => `file: ${f.name}`),
+                artifacts: { files: located.map(f => ({ name: f.name, path: f.path })) },
+                durationMs: Date.now() - startedAt
+            };
+        }
+    }
+    if (CREDENTIAL_ASK.test(plainAsk)) {
+        console.log('[Bridge] Credential boundary; refusing.');
+        return {
+            status: 'refused',
+            response: 'I won\'t log into an account for you: signing in needs your password, and I never handle credentials or payment details. Open it yourself and I can help from there.',
+            action: 'refused',
+            decision: { action: 'refuse', reasoning: 'credential boundary' },
+            durationMs: Date.now() - startedAt
+        };
+    }
+    const mailQuestion = !inHand.length
+        && ((CONTENT_QUESTION.test(plainAsk) && MAIL_QUESTION.test(plainAsk))
+            || MAIL_CHECK.test(plainAsk) || ORDER_STATUS.test(plainAsk))
+        && !MAIL_MUTATION.test(plainAsk)
+        && !conversationStore.RECALL_SHAPE.test(plainAsk);
+    const calendarWeek = !inHand.length && CALENDAR_WEEK.test(plainAsk)
+        && !MAIL_MUTATION.test(plainAsk) && !CALENDAR_WRITE_SHAPE.test(plainAsk);
+    if (mailQuestion || calendarWeek) {
+        const mailProvider = require('./mailProvider');
+        const account = mailProvider.forRequest(plainAsk, require('../utils/configReader').readConfig());
+        const terms = calendarWeek ? null : mailSearchTerms(plainAsk);
+        const url = calendarWeek
+            ? (/google/.test(account.calendar) ? 'https://calendar.google.com/calendar/u/0/r/week' : account.calendar)
+            : ((terms && mailProvider.searchUrl(account.url, terms)) || account.url);
+        console.log(`[Bridge] ${calendarWeek ? 'Calendar week' : `Mail question (${terms || 'inbox'})`}; reading the signed-in site.`);
+        const webAgent = require('./webAgent');
+        const browsed = await webAgent.browse(plainAsk,
+            { url, request: plainAsk, readOnly: true, ...(options.signal ? { signal: options.signal } : {}) });
+        const unanswered = /\b(?:found nothing|does not (?:display|show|contain)|no (?:e-?mail|message|event)s?\b[^.]{0,30}\b(?:content|found|visible|shown))\b/i;
+        if (browsed.status === 'success' && browsed.answer && !unanswered.test(browsed.answer)) {
+            return {
+                status: 'success',
+                response: browsed.answer,
+                action: 'web',
+                durationMs: Date.now() - startedAt
+            };
+        }
+        return {
+            status: 'error',
+            response: `I could not read that from ${calendarWeek ? 'the calendar' : 'your mail'}`
+                + (browsed.reason ? `: ${browsed.reason}` : '') + '.',
+            action: 'web',
+            durationMs: Date.now() - startedAt
+        };
+    }
+    if (!inHand.length && CONTENT_QUESTION.test(plainAsk)
+        && REFERENCES_FILES.test(plainAsk) && !MUTATES_FILE.test(plainAsk)) {
+        const answered = await answerService.answer(asked,
+            { history: options.history });
+        if (answered.is_successful && answered.grounded && !answered.refused
+            && !DISCLAIMS_THE_WEB.test(answered.text || '')) {
+            console.log('[Bridge] Content question; grounded answer stands.');
+            return {
+                status: 'success',
+                response: answered.text,
+                action: 'answered',
+                grounded: true,
+                sources: answered.sources,
+                ...sourceArtifacts(answered.sources),
+                durationMs: Date.now() - startedAt
+            };
+        }
+    }
+    const CALENDAR_WRITE =
+        /\b(create|book|schedule|add|put|set\s+up)\s+(?:a|an|the|new|this|that|my)?\s*(?:calendar\s+)?(event|meeting|appointment)\b|\b(add|put)\b[^.]{0,40}\b(?:to|on|in)\s+(?:my\s+)?calendar\b/i;
+    const calendarAsk = CALENDAR_WRITE.test(intentText) ? intentText
+        : (CALENDAR_WRITE.test(plainAsk) ? plainAsk : null);
+    if (calendarAsk
+        && !/\b(delete|remove|cancel|clear)\b/i.test(calendarAsk)) {
+        console.log('[Bridge] Calendar write; sending the browse lane.');
+        const webAgent = require('./webAgent');
+        const plan = calendarTemplate(calendarAsk);
+        console.log(`[Bridge] calendar ask: "${calendarAsk}" -> `
+            + (plan ? plan.url : 'no template'));
+        const browsed = await webAgent.browse(
+            plan
+                ? `Book this event onto my calendar: ${plan.title}, `
+                    + `${plan.when}. The form is already filled in; save it.`
+                : asked,
+            {
+                url: plan ? plan.url : 'https://calendar.google.com/calendar/u/0/r',
+                ...(options.signal ? { signal: options.signal } : {})
+            });
+        if (plan) {
+            const chipEvidence = browsed.status === 'success' && plan.titled
+                && String(browsed.answer || '').toLowerCase().includes(plan.title.toLowerCase());
+            if (chipEvidence) {
+                console.log('[Bridge] booking confirmed by the grid chip.');
+                return {
+                    status: 'success',
+                    response: `Booked: ${plan.title}, ${plan.when}. `
+                        + `It is on the calendar.`,
+                    action: 'web',
+                    durationMs: Date.now() - startedAt
+                };
+            }
+            const check = await webAgent.browse(
+                `Is there an event called ${plan.title} in my calendar `
+                    + `between ${plan.when.replace(' to ', ' and ')} today?`,
+                { url: plan.dayUrl,
+                  ...(options.signal ? { signal: options.signal } : {}) });
+            const answerText = String(check.answer || '');
+            const seen = check.status === 'success'
+                && (/\byes\b/i.test(answerText)
+                    || answerText.toLowerCase()
+                        .includes(plan.title.toLowerCase()));
+            console.log(`[Bridge] booking verify: ${check.status} / `
+                + String(check.answer || check.reason || '').slice(0, 120));
+            return {
+                status: seen ? 'success' : 'error',
+                response: seen
+                    ? `Booked: ${plan.title}, ${plan.when}. I checked the `
+                        + `calendar and it is there.`
+                    : `I tried to book "${plan.title}" but could not confirm `
+                        + `it on the calendar afterwards`
+                        + (browsed.reason ? ` (${browsed.reason})` : '') + '.',
+                action: 'web',
+                durationMs: Date.now() - startedAt
+            };
+        }
+        return {
+            status: browsed.status === 'success' ? 'success' : 'error',
+            response: browsed.answer
+                || (browsed.status === 'success'
+                    ? 'Done.' : browsed.reason || 'The calendar could not be updated.'),
+            action: 'web',
+            durationMs: Date.now() - startedAt
+        };
     }
     if (!attached.length && isSmallTalk(asked)) {
         console.log('[Bridge] Small ask; answering directly.');
@@ -529,7 +1019,7 @@ async function executeIntent(intentText, options = {}) {
         };
     }
     const decision = await router.route(asked);
-    const routeTraceId = routerTraces.record(intentText, decision);
+    const routeTraceId = routerTraces.record(asked, decision);
     activityBus.publish('router', 'decision', {
         action: decision.action, skill: decision.target_skill || null,
         confidence: decision.confidence ?? null
@@ -543,6 +1033,11 @@ async function executeIntent(intentText, options = {}) {
 
     switch (decision.action) {
         case router.ACTIONS.REFUSE:
+            if (OWN_MAIL_ASK.test(plainAsk) && !CREDENTIAL_ASK.test(plainAsk)) {
+                console.log('[Bridge] Router refused a message from the user\'s own mailbox; composing instead.');
+                outcome = await composeThenGenerate(asked, options);
+                break;
+            }
             outcome = {
                 status: 'refused',
                 response: plainRefusal(decision.reasoning),
@@ -553,7 +1048,10 @@ async function executeIntent(intentText, options = {}) {
         case router.ACTIONS.CLARIFY:
             outcome = {
                 status: 'needs_clarification',
-                response: decision.is_successful
+                response: decision.missing_parameters && decision.missing_parameters.length
+                    ? `I can do that with ${decision.target_skill}, but I need one more thing: `
+                        + decision.missing_parameters.map(e => String(e).split(' — ')[1] || String(e)).join('; ') + '.'
+                    : decision.is_successful
                     ? 'I\'m not confident I understood that. Could you rephrase it?'
                     : decision.intent_type === 'timeout'
                         ? 'The model answered too slowly just now — the machine may be '
@@ -702,5 +1200,8 @@ async function answerProposal(id, decision, context = {}) {
 module.exports = {
     initialize, executeIntent, isConnected, disconnect, callOpenClawAgent,
     answerProposal,
-    composeThenGenerate, isRealComposition, maybeProposeGeneration, maybeDelegate
+    composeThenGenerate, isRealComposition, maybeProposeGeneration, maybeDelegate,
+    calendarTemplate,
+    mailSearchTerms,
+    GATES: { NOTE_ASK, WHERE_IS, CREDENTIAL_ASK, MAIL_QUESTION, MAIL_CHECK, ORDER_STATUS, MAIL_MUTATION, CALENDAR_WEEK, OWN_MAIL_ASK }
 };

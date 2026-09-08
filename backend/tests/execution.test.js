@@ -139,14 +139,17 @@ test('a skill can hand back files and a table through the result envelope', asyn
     const script = [
         'import json',
         "print('before')",
-        `print('JARVIS_RESULT ' + json.dumps({'files': ['${real}', '${missing}'], ` +
+        `print('JARVIS_RESULT ' + json.dumps({'files': ['${real}', '${missing}', '/etc/hosts'], ` +
             "'table': {'columns': ['n'], 'rows': [[i] for i in range(150)]}}))",
         "print('after')"
     ].join('\n');
-    const result = await skillExecutor.execute(makeSkill(['python3', '-c', script]), {});
+    const skill = makeSkill(['python3', '-c', script]);
+    skill.parameters = { folder: { type: 'string', required: true, description: 'where the report is' } };
+    const result = await skillExecutor.execute(skill, { folder: dir });
 
     assert.strictEqual(result.status, 'success');
-    assert.strictEqual(result.artifacts.files.length, 1, 'missing files must be dropped');
+    assert.strictEqual(result.artifacts.files.length, 1,
+        'missing files and files outside the run\'s scope must be dropped');
     assert.strictEqual(result.artifacts.files[0].name, 'report.csv');
     assert.ok(result.artifacts.files[0].bytes > 0);
     assert.strictEqual(result.artifacts.table.rows.length, 100, 'rows must be capped');

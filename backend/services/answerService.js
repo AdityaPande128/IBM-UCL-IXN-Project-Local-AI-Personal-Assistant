@@ -150,7 +150,6 @@ function corpusSource(name, { label, minScore = CORPUS_MIN_SCORE, margin = CORPU
 
 registerSource(corpusSource('documents', { label: 'document' }));
 registerSource(corpusSource('mail', { label: 'email' }));
-registerSource(require('./memoryService').answerSource);
 registerSource(require('./conversationStore').answerSource);
 
 const MAX_ONDEMAND_FILES = 3;
@@ -274,9 +273,14 @@ function fit(passages, budget = MAX_CONTEXT_CHARS) {
     const kept = [];
     let used = 0;
 
-    for (const passage of passages) {
+    const ordered = [...passages].sort((a, b) => {
+        const sa = typeof a.score === 'number' ? a.score : Infinity;
+        const sb = typeof b.score === 'number' ? b.score : Infinity;
+        return sb - sa;
+    });
+    for (const passage of ordered) {
         const block = `[${passage.cite}]\n${passage.text}`;
-        if (used + block.length > budget) break;
+        if (used + block.length > budget) continue;
         kept.push({ ...passage, block });
         used += block.length;
     }
@@ -381,6 +385,7 @@ async function answer(query, options = {}) {
     const context = egress.partitionContext(query, used);
 
     const preamble = historyBlock(options.history);
+    const temperature = options.temperature ?? TEMPERATURE;
     const messages = grounded
         ? [
             { role: 'system', content: SYSTEM_GROUNDED },
@@ -397,6 +402,7 @@ async function answer(query, options = {}) {
             grounded,
             refused,
             sources: [...new Set(used.map(p => p.cite))],
+            passages: used.map(p => ({ text: p.text, cite: p.cite })),
             latency_ms: Date.now() - startedAt,
             is_successful: true
         };
@@ -412,7 +418,7 @@ async function answer(query, options = {}) {
     try {
         const first = await llmClient.complete(messages, {
             tier: TIER,
-            temperature: TEMPERATURE,
+            temperature,
             max_tokens: MAX_TOKENS,
             timeout_ms: TIMEOUT_MS
         });
@@ -433,7 +439,7 @@ async function answer(query, options = {}) {
                     'That says what looking would do, not what was found. Answer from the '
                     + 'sources themselves — the time, the place, the words they state. If they '
                     + 'do not state it, say plainly that they do not.' }
-            ], { tier: TIER, temperature: TEMPERATURE, max_tokens: MAX_TOKENS,
+            ], { tier: TIER, temperature, max_tokens: MAX_TOKENS,
                  timeout_ms: TIMEOUT_MS }).catch(() => null);
 
             if (retry !== null) {

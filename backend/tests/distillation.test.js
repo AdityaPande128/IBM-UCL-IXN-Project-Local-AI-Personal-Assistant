@@ -671,7 +671,7 @@ test('a name is not a correspondent', async () => {
         });
 
         await assert.rejects(
-            () => procedureRunner.replay(recipe, { person: 'Sandhya' }, { label: USER, trace: false }),
+            () => procedureRunner.replay(recipe, { person: 'Priya' }, { label: USER, trace: false }),
             err => err.notApplicable && /full email address/.test(err.message));
     } finally { world.cleanup(); }
 });
@@ -693,7 +693,7 @@ test('a recipe learned on Gmail declines when the mail lives on Outlook', async 
         await assert.rejects(
             () => procedureRunner.replay(recipe, {}, {
                 label: USER, trace: false,
-                request: 'what did Sandhya ask me about in her latest email?'
+                request: 'what did Priya ask me about in her latest email?'
             }),
             err => err.notApplicable && /learned on mail\.google\.com/.test(err.message));
     } finally {
@@ -733,15 +733,15 @@ test('an address the user never said is refused even though it is well formed', 
         });
 
         await assert.rejects(
-            () => procedureRunner.replay(recipe, { person: 'sandhya@example.com' }, {
+            () => procedureRunner.replay(recipe, { person: 'priya@example.com' }, {
                 label: USER, trace: false,
-                request: 'draft a reply to Sandhya saying "Sounds good to me"'
+                request: 'draft a reply to Priya saying "Sounds good to me"'
             }),
             err => err.notApplicable && /made up/.test(err.message));
 
-        const allowed = await procedureRunner.replay(recipe, { person: 'sandhya@example.com' }, {
+        const allowed = await procedureRunner.replay(recipe, { person: 'priya@example.com' }, {
             label: USER, trace: false,
-            request: 'reply to sandhya@example.com saying hello'
+            request: 'reply to priya@example.com saying hello'
         }).catch(err => err);
         assert.ok(!(allowed instanceof Error) || !allowed.notApplicable,
             'an address the user named is not refused');
@@ -760,7 +760,7 @@ test('refusing the arguments does not count against the recipe', async () => {
             steps: [{ action: 'fill', name: 'To', slot: 'person' }]
         });
 
-        await procedureRunner.replay(recipe, { person: 'Sandhya' }, { label: USER, trace: false })
+        await procedureRunner.replay(recipe, { person: 'Priya' }, { label: USER, trace: false })
             .catch(() => {});
 
         const after = procedureStore.get('post-send');
@@ -821,12 +821,12 @@ test('a recipe that declines hands the request back to the loop', async () => {
 
         const family = capabilityGraph.get('procedure.post');
         const result = await family.run(
-            { action: 'send', person: 'sandhya@example.com' },
-            { label: USER, request: 'draft a reply to Sandhya saying "Sounds good to me"' }
+            { action: 'send', person: 'priya@example.com' },
+            { label: USER, request: 'draft a reply to Priya saying "Sounds good to me"' }
         );
 
         assert.strictEqual(result.text, 'the loop did it');
-        assert.deepStrictEqual(asked, ['draft a reply to Sandhya saying "Sounds good to me"']);
+        assert.deepStrictEqual(asked, ['draft a reply to Priya saying "Sounds good to me"']);
     } finally { capabilityGraph.reset(); world.cleanup(); }
 });
 
@@ -847,15 +847,15 @@ test('a request for a draft does not run the recipe that sends', async () => {
         });
 
         await assert.rejects(
-            () => procedureRunner.replay(sends, { person: 'sandhya@example.com', words: 'Sounds good' }, {
+            () => procedureRunner.replay(sends, { person: 'priya@example.com', words: 'Sounds good' }, {
                 label: USER, trace: false,
-                request: 'draft a reply to sandhya@example.com saying "Sounds good"'
+                request: 'draft a reply to priya@example.com saying "Sounds good"'
             }),
             err => err.notApplicable && /asked for a draft/.test(err.message));
 
-        const allowed = await procedureRunner.replay(sends, { person: 'sandhya@example.com', words: 'Sounds good' }, {
+        const allowed = await procedureRunner.replay(sends, { person: 'priya@example.com', words: 'Sounds good' }, {
             label: USER, trace: false,
-            request: 'reply to sandhya@example.com saying "Sounds good"'
+            request: 'reply to priya@example.com saying "Sounds good"'
         }).catch(err => err);
         assert.ok(!(allowed instanceof Error) || !allowed.notApplicable);
     } finally { world.cleanup(); }
@@ -870,11 +870,11 @@ test('a recorded Reply is pressed when the user asked to reply, and not otherwis
     assert.strictEqual(webPolicy.checkClick(shared).allowed, false);
 
     const asked = webPolicy.mandateFrom(
-        'reply to sandhyapandey31@gmail.com saying "Hello, thank you for sending that over!"', USER);
+        'reply to priya@example.com saying "Hello, thank you for sending that over!"', USER);
     assert.ok(asked.has('compose') && asked.has('send'));
     assert.strictEqual(webPolicy.checkClick({ ...shared, mandate: asked }).allowed, true);
 
-    const read = webPolicy.mandateFrom('what did Sandhya ask me about in her latest email?', USER);
+    const read = webPolicy.mandateFrom('what did Priya ask me about in her latest email?', USER);
     assert.strictEqual(webPolicy.checkClick({ ...shared, mandate: read }).allowed, false);
 
     assert.strictEqual(

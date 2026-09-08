@@ -49,12 +49,13 @@ PART 1 — a JSON object with the metadata. Do NOT include the script here:
   "tests": [
     {
       "name": "<what this case checks>",
-      "fixtures": [ { "path": "relative/file.txt", "content": "..." } ],
+      "fixtures": [ { "path": "relative/file.txt", "content": "..." }, { "path": "relative/empty-folder/" } ],
       "parameters": { "<param_name>": "<value>" },
       "expect": {
         "exit_code": 0,
         "stdout_contains": "<shortest distinctive substring, like '3' or 'output.csv' — never a sentence>",
-        "files_exist": ["relative/output.txt"]
+        "files_exist": ["relative/output.txt"],
+        "files_missing": ["relative/removed.txt"]
       }
     }
   ]
@@ -76,6 +77,7 @@ Rules for the script:
 4. Print a short human-readable summary of what was done to stdout. Exit non-zero on failure.
 5. Expand a leading ~ in any path argument with os.path.expanduser.
 6. Do not delete or overwrite user data unless the request explicitly asks for it.
+7a. A parameter that names where output goes (an output file or folder) is optional, with a default the script derives beside the input (a fixed name in the same folder): a request that names only the input must still run.
 7. If the skill's outcome is a file the user will open, the script's LAST stdout line must be the marker JARVIS_RESULT followed by one JSON object naming it, like: JARVIS_RESULT {"files": ["/absolute/path/to/output.csv"]} — one line, nothing after it. Skills that only report an answer print no marker.
 
 Rules for "tests":
@@ -84,6 +86,7 @@ Rules for "tests":
 10. The assertions must actually demonstrate the skill worked, not merely that it ran.
 11. Compute each expected value by hand from the fixture content before writing it down — a test that asserts a wrong expectation rejects a correct script.
 12. In "stdout_contains", assert the smallest distinctive substring (a number, a filename), never a full sentence — you will not phrase the sentence identically in the script.
+13. A fixture path ending in "/" is an empty folder. "files_missing" lists paths the script must have removed; use it for anything that deletes.
 
 Already installed: ${taken}
 
@@ -110,6 +113,12 @@ function describeVerificationFailure(verification) {
         if (r.argv) lines.push(`  ran: ${r.argv}`);
         if (r.stdout) lines.push(`  stdout: ${r.stdout}`);
         if (r.stderr) lines.push(`  stderr: ${r.stderr}`);
+        const expected = /stdout did not contain "(-?[\d,.]+)"/.exec(String(r.reason || ''));
+        const printed = expected && String(r.stdout || '').match(/-?\d[\d,]*(?:\.\d+)?/g);
+        if (expected && printed && printed.length && !printed.includes(expected[1])) {
+            lines.push(`  The test expected ${expected[1]} but the script printed ${printed.join(', ')}. `
+                + 'Add the fixture\'s values one by one before rewriting anything: if they give the printed number, the expectation is the mistake and the test must change, not the script.');
+        }
     }
     lines.push('Diagnose the failure from the output above — especially any traceback — before rewriting. '
         + 'If the test\'s expectation is itself wrong — recompute it by hand from the fixtures — fix the test, not the script.');
@@ -117,7 +126,7 @@ function describeVerificationFailure(verification) {
 }
 
 
-async function callModel(messages, attempt = 1) {
+async function callModel(messages, attempt = 1, overrides = {}) {
     try {
         // Warmer on each retry: at low temperature a rejected attempt tends to be
         // reproduced verbatim, and a repair loop that regenerates the same
@@ -126,7 +135,8 @@ async function callModel(messages, attempt = 1) {
             tier: TIER,
             temperature: Math.min(0.7, TEMPERATURE + 0.2 * (attempt - 1)),
             max_tokens: MAX_TOKENS,
-            timeout_ms: TIMEOUT_MS
+            timeout_ms: TIMEOUT_MS,
+            ...overrides
         });
     } catch (err) {
         if (err.message === 'timeout') {
@@ -328,13 +338,48 @@ async function writeSkill(manifest, candidate) {
 }
 
 
+function dataShapeNote(head) {
+    const lines = String(head || '').split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 2 && lines.every(l => /^"[^"]*,[^"]*"$/.test(l))) {
+        return '\nNote: every line of this file is wrapped in one pair of double quotes, so a CSV reader sees one field per line; strip the outer quotes from each line before splitting it on commas.';
+    }
+    return '';
+}
+
+function sampleNamedFiles(request) {
+    const fs = require('fs');
+    const os = require('os');
+    const text = String(request || '');
+    const named = new Set();
+    for (const hit of text.match(/(?:~|\/)[^\s"'(),]+/g) || []) {
+        named.add(hit.replace(/^~/, os.homedir()));
+    }
+    for (const hit of text.match(/\b[\w.-]+\.(?:csv|tsv|txt|json|md|log)\b/gi) || []) {
+        try {
+            const found = require('./fileIndex').search({ text: hit, limit: 3 })
+                .find(row => String(row.name).toLowerCase() === hit.toLowerCase());
+            if (found) named.add(found.path);
+        } catch { /* no index, no sample */ }
+    }
+    const samples = [];
+    for (const file of [...named].slice(0, 2)) {
+        try {
+            if (!/\.(csv|tsv|txt|json|md|log)$/i.test(file) || !fs.statSync(file).isFile()) continue;
+            const head = fs.readFileSync(file, 'utf8').split('\n').slice(0, 5).join('\n').slice(0, 600);
+            if (head.trim()) samples.push(`The file ${file} begins:\n${head}${dataShapeNote(head)}`);
+        } catch { /* unreadable files are not sampled */ }
+    }
+    return samples.length
+        ? `\n\nWrite the script for this data exactly as it is, and make one test fixture a verbatim copy of these lines:\n${samples.join('\n\n')}` : '';
+}
+
 async function generate(request, options = {}) {
     const startedAt = Date.now();
 
     // A machine whose memory class maps no smith tier builds nothing. The
     // generic generation.model fallback must not answer here: it names a
     // model this class may not be able to hold at all.
-    if (!llmClient.modelForTier(TIER)) {
+    if (!options.model && !llmClient.modelForTier(TIER)) {
         return { status: 'error',
                  reason: 'This machine\'s memory class maps no builder model, '
                      + 'so new skills cannot be written here.',
@@ -342,15 +387,20 @@ async function generate(request, options = {}) {
     }
 
     const gaps = (options.gaps || []).filter(Boolean);
-    const userTurn = gaps.length
+    const shaped = sampleNamedFiles(request);
+    const userTurn = (gaps.length
         ? `${request}\n\nThis was attempted with the existing skills and could not be ` +
           `done. What is missing: ${gaps.join('; ')}. Write the skill that fills that gap.`
-        : request;
+        : request) + shaped;
 
     const messages = [
-        { role: 'system', content: buildPrompt(skillRegistry.list()) },
+        { role: 'system', content: (options.promptBuilder || buildPrompt)(skillRegistry.list()) },
         { role: 'user', content: userTurn }
     ];
+
+    const overrides = {};
+    if (options.model) overrides.model = options.model;
+    if (options.seed !== undefined) overrides.seed = Number(options.seed);
 
     let lastReason = null;
     let stage = ledger.STAGES.REQUESTED;
@@ -362,7 +412,8 @@ async function generate(request, options = {}) {
         stage = ledger.STAGES.MODEL_CALL;
         let raw;
         try {
-            raw = await callModel(messages, attempt);
+            raw = await callModel(messages, attempt, overrides.seed === undefined
+                ? overrides : { ...overrides, seed: overrides.seed + attempt - 1 });
         } catch (err) {
             ledger.append({
                 request, outcome: 'rejected', stage,
@@ -393,7 +444,7 @@ async function generate(request, options = {}) {
         stage = ledger.STAGES.PARSED;
 
         const existing = skillRegistry.resolveName(candidate.name);
-        if (existing) {
+        if (existing && existing !== options.repair) {
             console.log(`[SkillGenerator] "${existing}" already covers this request; reusing it.`);
             ledger.append({
                 request, outcome: 'reused', stage,
@@ -594,6 +645,8 @@ async function generate(request, options = {}) {
 }
 
 module.exports = {
+    sampleNamedFiles,
+    dataShapeNote,
     generate,
     buildPrompt,
     validateEnvelope,

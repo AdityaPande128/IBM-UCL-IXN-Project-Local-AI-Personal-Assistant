@@ -111,6 +111,14 @@ function httpPost(urlPath, body, contentType) {
     });
 }
 
+function audioSeconds(bytes) {
+    return Math.max(0, bytes - 44) / 2 / 16000;
+}
+
+function plausibleTranscript(text, bytes) {
+    return String(text || '').length <= 40 + 30 * audioSeconds(bytes);
+}
+
 async function transcribeAudio(audioBuffer) {
     console.log(`[STT: mlx-whisper] Sending ${audioBuffer.length} bytes to inference server...`);
 
@@ -129,6 +137,10 @@ async function transcribeAudio(audioBuffer) {
     try {
         const result = await httpPost('/stt', multipartBody, `multipart/form-data; boundary=${boundary}`);
         if (result.type === 'json' && result.data.text) {
+            if (!plausibleTranscript(result.data.text, audioBuffer.length)) {
+                console.log(`[STT: mlx-whisper] implausible transcript (${result.data.text.length} chars for ${audioSeconds(audioBuffer.length).toFixed(1)}s); dropped`);
+                return null;
+            }
             console.log(`[STT: mlx-whisper] transcribed ${result.data.text.length} chars`);
             return result.data.text;
         }
@@ -230,7 +242,13 @@ async function answerAloud(proposalId, approved, ws, kind = null) {
     const job = intentQueue.submit(({ signal }) =>
         openclawBridge.answerProposal(proposalId, approved ? 'yes' : 'no', { signal }));
     send(ws, { type: 'intent_accepted', id: job.id, position: job.position });
-    let result = await job.result;
+    let result;
+    try {
+        result = await job.result;
+    } catch (err) {
+        result = { status: 'error', action: 'error', error: String((err && err.message) || err) };
+    }
+    if (!result || typeof result !== 'object') result = { status: 'error', action: 'error' };
     const responseText = result.response || result.error
         || (approved ? 'Done.' : 'Okay, leaving it.');
     result = { ...result, response: responseText };
@@ -310,7 +328,13 @@ async function respondTo(transcribedText, ws) {
             const job = intentQueue.submit(({ signal }) =>
                 openclawBridge.executeIntent(transcribedText, { interactive: true, signal }));
             send(ws, { type: 'intent_accepted', id: job.id, position: job.position });
-            llmResult = await job.result;
+            try {
+                llmResult = await job.result;
+            } catch (err) {
+                llmResult = { status: err && err.name === 'AbortError' ? 'aborted' : 'error',
+                    action: 'error', error: String((err && err.message) || err) };
+            }
+            if (!llmResult || typeof llmResult !== 'object') llmResult = { status: 'error', action: 'error' };
 
             const responseText = llmResult.response
                 || llmResult.error
@@ -355,6 +379,7 @@ module.exports = {
     chunkTextDynamically,
     speakableSummary,
     transcribeAudio,
+    plausibleTranscript,
     synthesizeChunk,
     MAX_TTS_CHUNKS,
     MAX_SPOKEN_CHARS

@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ConversationSummary } from "../hooks/useWebSocket";
 
-type View = "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions";
+type View = "chat" | "abilities" | "permissions";
 
 interface SidebarProps {
   open: boolean;
   conversations: ConversationSummary[];
   activeConversation: number | null;
   view: View;
-  inboxCount: number;
-  incognito: boolean;
+  privateChat: boolean;
   profileName: string;
   profileAvatar: string;
   onNewChat: () => void;
+  onNewPrivateChat: () => void;
   onSelectConversation: (id: number) => void;
   onDeleteConversation: (id: number) => void;
   onSelectView: (view: View) => void;
@@ -20,10 +20,7 @@ interface SidebarProps {
 }
 
 const NAV: { view: View; label: string; icon: string }[] = [
-  { view: "inbox", label: "Inbox", icon: "M3 8l7-5 7 5v8a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 3 16V8z M3 12h4l1.5 2h3L13 12h4" },
-  { view: "memory", label: "Memory", icon: "M10 3a5 5 0 0 1 5 5c0 1.5-.6 2.6-1.5 3.6-.7.8-1 1.4-1 2.4h-5c0-1-.3-1.6-1-2.4C5.6 10.6 5 9.5 5 8a5 5 0 0 1 5-5z M8 17h4" },
   { view: "abilities", label: "Skills", icon: "M10 2l2.4 4.9L17.8 8l-3.9 3.8.9 5.4L10 14.6l-4.8 2.6.9-5.4L2.2 8l5.4-1.1z" },
-  { view: "audit", label: "Audit", icon: "M4 3h12v14H4z M7 7h6 M7 10h6 M7 13h4" },
   { view: "permissions", label: "Permissions", icon: "M10 2l6 2.5V9c0 4-2.6 6.9-6 8.5C6.6 15.9 4 13 4 9V4.5z M7.5 9.6l2 2 3-3.4" },
 ];
 
@@ -58,8 +55,8 @@ function storedWidth() {
 }
 
 export function Sidebar({
-  open, conversations, activeConversation, view, inboxCount, incognito,
-  profileName, profileAvatar, onNewChat, onSelectConversation,
+  open, conversations, activeConversation, view, privateChat,
+  profileName, profileAvatar, onNewChat, onNewPrivateChat, onSelectConversation,
   onDeleteConversation, onSelectView, onOpenSettings,
 }: SidebarProps) {
   const [arming, setArming] = useState<number | null>(null);
@@ -95,6 +92,14 @@ export function Sidebar({
       <button className="sidebar-new" onClick={onNewChat}>
         <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12" /></svg>
         New chat
+      </button>
+      <button
+        className={`sidebar-new sidebar-new--private ${privateChat ? "sidebar-new--active" : ""}`}
+        onClick={onNewPrivateChat}
+        title="A chat that is not remembered"
+      >
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 9V6.5a5 5 0 0 1 10 0V9 M4 9h12v8H4z M10 12v2" /></svg>
+        Private chat
       </button>
 
       <div className="sidebar-section-label">Chats</div>
@@ -158,12 +163,6 @@ export function Sidebar({
           >
             <svg viewBox="0 0 20 20" aria-hidden="true"><path d={item.icon} /></svg>
             {item.label}
-            {item.view === "inbox" && inboxCount > 0 && (
-              <span className="sidebar-badge">{inboxCount}</span>
-            )}
-            {item.view === "memory" && incognito && (
-              <span className="sidebar-badge sidebar-badge--quiet">private</span>
-            )}
           </button>
         ))}
         <button

@@ -149,6 +149,7 @@ function beginPlan({
     request, goal = null, status = 'planned', stepCount = 0, planMs = null, detail = null,
     parentPlanId = null, parentStep = null, surface = null
 }) {
+    if (require('./incognito').isIncognito()) return null;
     const result = handle().prepare(`
         INSERT INTO plans
             (ts, request, goal, status, step_count, plan_ms, detail,
@@ -162,10 +163,29 @@ function beginPlan({
     return Number(result.lastInsertRowid);
 }
 
+function orphaned(err) {
+    return /FOREIGN KEY|no such table/i.test(String(err && err.message));
+}
+
 function recordStep(planId, {
     ordinal, key, capability, tier = null, status,
     label = null, inputs = null, value = undefined, summary = null,
     error = null, durationMs = null
+}) {
+    if (planId == null) return null;
+    try {
+        return recordStepInsert(planId, {
+            ordinal, key, capability, tier, status, label, inputs, value, summary, error, durationMs
+        });
+    } catch (err) {
+        if (!orphaned(err)) throw err;
+        console.warn(`[TraceStore] step ${key} of plan ${planId} not recorded: ${err.message}`);
+        return null;
+    }
+}
+
+function recordStepInsert(planId, {
+    ordinal, key, capability, tier, status, label, inputs, value, summary, error, durationMs
 }) {
     const result = handle().prepare(`
         INSERT INTO steps
@@ -191,6 +211,16 @@ function summariseInputs(inputs) {
 }
 
 function finishPlan(planId, { status, runMs = null, error = null, detail = undefined }) {
+    if (planId == null) return;
+    try {
+        finishPlanUpdate(planId, { status, runMs, error, detail });
+    } catch (err) {
+        if (!orphaned(err)) throw err;
+        console.warn(`[TraceStore] plan ${planId} not finished: ${err.message}`);
+    }
+}
+
+function finishPlanUpdate(planId, { status, runMs, error, detail }) {
     if (detail === undefined) {
         handle().prepare('UPDATE plans SET status = ?, run_ms = ?, error = ? WHERE id = ?')
             .run(status, runMs, error, planId);

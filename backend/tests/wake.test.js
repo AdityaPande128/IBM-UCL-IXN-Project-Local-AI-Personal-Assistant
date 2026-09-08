@@ -54,3 +54,11 @@ test('silence and a broken transcriber both stay quiet', async (t) => {
     wakeWord.setTranscriber(async () => { throw new Error('stt down'); });
     assert.deepStrictEqual(await wakeWord.probe(Buffer.alloc(4)), { wake: false });
 });
+
+test('a transcript far longer than its clip could hold is refused as a hallucination', () => {
+    const { plausibleTranscript } = require('../services/aiPipeline');
+    const oneSecond = 44 + 2 * 16000;
+    assert.ok(plausibleTranscript('hey jarvis what is the time', oneSecond));
+    assert.ok(!plausibleTranscript('x'.repeat(892), oneSecond));
+    assert.ok(plausibleTranscript('x'.repeat(150), 44 + 2 * 16000 * 5));
+});

@@ -22,7 +22,8 @@ function complete(messages, opts = {}) {
     const tier = opts.tier;
     const defaults = (tier && TIER_SETTINGS[tier]) || {};
 
-    const model = opts.model || tier || defaults.model;
+    const studyTier = tier && process.env[`JARVIS_STUDY_TIER_${tier.toUpperCase()}`];
+    const model = opts.model || studyTier || tier || defaults.model;
     const temperature = opts.temperature ?? defaults.temperature ?? 0;
     const max_tokens = opts.max_tokens ?? defaults.max_tokens ?? 300;
     const timeout_ms = opts.timeout_ms ?? defaults.timeout_ms ?? 30000;
@@ -52,7 +53,8 @@ function complete(messages, opts = {}) {
         }
         const payload = JSON.stringify({
             model, messages, temperature, max_tokens,
-            ...(opts.response_format ? { response_format: opts.response_format } : {})
+            ...(opts.response_format ? { response_format: opts.response_format } : {}),
+            ...(opts.seed !== undefined ? { seed: opts.seed } : {})
         });
 
         const req = http.request({

@@ -14,7 +14,7 @@ function has(object, key) {
     return Object.prototype.hasOwnProperty.call(object, key);
 }
 
-function findValue(canonicalName, spec, supplied) {
+function findValue(canonicalName, spec, supplied, declared = null) {
     if (has(supplied, canonicalName)) return supplied[canonicalName];
 
     for (const alias of spec.aliases || []) {
@@ -22,9 +22,14 @@ function findValue(canonicalName, spec, supplied) {
     }
 
     const target = canonicalName.toLowerCase();
+    const names = (declared || [canonicalName]).map(n => n.toLowerCase());
     for (const [key, value] of Object.entries(supplied)) {
         const k = key.toLowerCase();
-        if (k === target || k.includes(target) || target.includes(k)) return value;
+        if (k === target) return value;
+        const loose = k.includes(target) || target.includes(k);
+        if (!loose) continue;
+        const claimants = names.filter(n => n === k || k.includes(n) || n.includes(k));
+        if (claimants.length === 1) return value;
     }
     return undefined;
 }
@@ -96,13 +101,15 @@ function coerceParameters(skill, supplied = {}) {
     const errors = [];
     const coerced = {};
 
+    const declared = Object.keys(skill.parameters || {});
     for (const [name, spec] of Object.entries(skill.parameters || {})) {
-        const raw = findValue(name, spec, supplied || {});
+        let raw = findValue(name, spec, supplied || {}, declared);
+        if (typeof raw === 'string' && /^\s*(null|none|undefined|n\/a|nil)\s*$/i.test(raw)) raw = undefined;
 
         if (raw === undefined || raw === null || raw === '') {
             if (spec.required) {
                 errors.push(`${name} is required — ${spec.description || 'no description'}`);
-            } else if (spec.default !== undefined) {
+            } else if (spec.default !== undefined && spec.default !== null) {
                 coerced[name] = spec.default;
             }
             continue;
@@ -149,7 +156,17 @@ function substitute(template, parameters, skillDir) {
 }
 
 function buildArgv(skill, parameters) {
-    return skill.exec.argv.map(part => substitute(part, parameters, skill.directory));
+    const parts = skill.exec.argv;
+    const out = [];
+    for (let i = 0; i < parts.length; i++) {
+        const token = /^\{\{\s*([a-zA-Z0-9_]+)\s*\}\}$/.exec(String(parts[i]));
+        if (token && token[1] !== '__dir__' && !has(parameters, token[1])) {
+            if (out.length && /^--?[\w-]+$/.test(String(out[out.length - 1]))) out.pop();
+            continue;
+        }
+        out.push(substitute(parts[i], parameters, skill.directory));
+    }
+    return out;
 }
 
 
@@ -213,6 +230,29 @@ function parseArtifacts(stdout) {
         artifacts: Object.keys(artifacts).length ? artifacts : null,
         text: typeof parsed.text === 'string' && parsed.text.trim() ? parsed.text.trim() : null
     };
+}
+
+function scopedArtifacts(artifacts, parameters, tempDir) {
+    if (!artifacts) return null;
+    if (!Array.isArray(artifacts.files)) return artifacts;
+    let scopes = [];
+    try { scopes = skillSandbox.deriveScopesFromParameters(parameters) || []; } catch { scopes = []; }
+    const securityStore = require('../security/store');
+    const classifier = require('../security/classifier');
+    const within = (target, base) => target === base || target.startsWith(base + path.sep);
+    const kept = artifacts.files.filter(file => {
+        let real;
+        try { real = fs.realpathSync(file.path); } catch { return false; }
+        if (classifier.secretCheck(real).secret) return false;
+        if (tempDir && within(real, tempDir)) return true;
+        if (scopes.some(scope => { try { return within(real, fs.realpathSync(scope)); } catch { return false; } })) return true;
+        try { return securityStore.isWithinGrantedRoot(real, 'documents'); } catch { return false; }
+    });
+    const dropped = artifacts.files.length - kept.length;
+    if (dropped) console.warn(`[SkillExecutor] ${dropped} artifact path(s) outside the run's scope were not picked up.`);
+    const out = { ...artifacts };
+    if (kept.length) out.files = kept; else delete out.files;
+    return Object.keys(out).length ? out : null;
 }
 
 function runProcess(argv, timeoutMs, cwd, env) {
@@ -331,6 +371,7 @@ async function execute(skill, supplied = {}, options = {}) {
 
     const reply = substitute(skill.reply, coercion.parameters, skill.directory);
     const body = parsed.text !== null ? parsed.text : parsed.stdout;
+    const artifacts = scopedArtifacts(parsed.artifacts, coercion.parameters, tempDir);
 
     return {
         status: 'success',
@@ -339,7 +380,7 @@ async function execute(skill, supplied = {}, options = {}) {
         version: skill.version,
         parameters: coercion.parameters,
         stdout: parsed.stdout,
-        ...(parsed.artifacts ? { artifacts: parsed.artifacts } : {}),
+        ...(artifacts ? { artifacts } : {}),
         sandboxed: enforced,
         durationMs
     };

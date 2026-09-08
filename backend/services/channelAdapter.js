@@ -225,6 +225,42 @@ function unpair() {
     pairingAttempts = 0;
 }
 
+async function sendDocument(chatId, filePath, name) {
+    if (transport) {
+        return transport('sendDocument',
+            { chat_id: chatId, name, bytes: fs.statSync(filePath).size });
+    }
+    const secret = token();
+    if (!secret) throw new Error('no telegram token');
+    const data = fs.readFileSync(filePath);
+    const safe = String(name || path.basename(filePath)).replace(/["\r\n]/g, '');
+    const boundary = '----JarvisChannel' + Date.now();
+    const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="document"; `
+            + `filename="${safe}"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+        data,
+        Buffer.from(`\r\n--${boundary}--\r\n`)
+    ]);
+    await new Promise((resolve, reject) => {
+        const req = https.request({
+            hostname: 'api.telegram.org',
+            path: `/bot${secret}/sendDocument`,
+            method: 'POST',
+            headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': body.length
+            }
+        }, res => {
+            res.resume();
+            res.on('end', resolve);
+        });
+        req.on('error', reject);
+        req.write(body);
+        req.end();
+    });
+}
+
 async function say(chatId, text) {
     await call('sendMessage', { chat_id: chatId, text: String(text).slice(0, MAX_TEXT) });
 }
@@ -254,6 +290,8 @@ async function transcribe(fileId) {
     const file = await call('getFile', { file_id: fileId });
     return deps.transcribe(file.file_path);
 }
+
+const PRIVATE_PREFIX = /^\/private\b\s*/i;
 
 async function handleMessage(message) {
     const chatId = message.chat && message.chat.id;
@@ -325,7 +363,16 @@ async function handleMessage(message) {
         return;
     }
 
-    const result = await deps.execute(text).catch(err => ({
+    const privateAsk = PRIVATE_PREFIX.test(text);
+    if (privateAsk) {
+        text = text.replace(PRIVATE_PREFIX, '').trim();
+        if (!text) {
+            await say(chatId, 'Write the message after /private and nothing from it will be remembered.');
+            return;
+        }
+    }
+
+    const result = await deps.execute(text, { private: privateAsk }).catch(err => ({
         status: 'error', response: `That failed: ${err.message}`
     }));
 
@@ -336,8 +383,21 @@ async function handleMessage(message) {
         return;
     }
 
-    const reply = (result && (result.response || result.error)) || 'Done.';
+    const reply = (privateAsk ? '(private) ' : '')
+        + ((result && (result.response || result.error)) || 'Done.');
     await say(chatId, reply);
+
+    const files = (result && result.artifacts
+        && Array.isArray(result.artifacts.files)) ? result.artifacts.files : [];
+    for (const file of files.slice(0, 3)) {
+        if (!file || !file.path) continue;
+        let allowed = false;
+        try { allowed = require('../security/store').isWithinGrantedRoot(file.path, 'documents'); } catch { allowed = false; }
+        if (!allowed) { console.warn(`[Channel] not sending ${file.name || file.path}: outside the granted folders`); continue; }
+        await sendDocument(chatId, file.path, file.name)
+            .catch(err => say(chatId,
+                `I could not attach ${file.name || 'the file'}: ${err.message}`));
+    }
 
     if (spokenBack && typeof deps.speak === 'function') {
         await deps.speak(chatId, reply, call).catch(() => null);
@@ -462,5 +522,6 @@ module.exports = {
     start, stop, status, poll, handleUpdate, unpair, wire, resetOffset,
     setTransport, useBinding, currentPairingCode, boundChat,
     downloadFile, sendVoiceNote,
+    sendDocument,
     TOKEN_PATH
 };

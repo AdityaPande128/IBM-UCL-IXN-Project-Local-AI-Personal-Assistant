@@ -19,13 +19,18 @@ function memoryClass(defaults, totalBytes) {
     return chosen;
 }
 
+function totalMemory() {
+    const pinned = Number(process.env.JARVIS_MEMORY_GB);
+    return pinned > 0 ? pinned * GB : os.totalmem();
+}
+
 function effective(config, totalBytes) {
     const models = config.models || {};
     if (models.tiers) return models.tiers;
     const defaults = models.hardware_defaults;
     if (!defaults || !Object.keys(defaults).length) return {};
-    const chosen = memoryClass(defaults, totalBytes ?? os.totalmem());
+    const chosen = memoryClass(defaults, totalBytes ?? totalMemory());
     return defaults[String(chosen)] || {};
 }
 
-module.exports = { effective, memoryClass };
+module.exports = { totalMemory, effective, memoryClass };

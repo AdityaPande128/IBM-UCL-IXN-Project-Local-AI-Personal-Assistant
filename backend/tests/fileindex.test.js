@@ -237,3 +237,18 @@ test('the refusal names the command that would grant access', async () => {
 
     cleanup(dir);
 });
+
+test('files.search treats the root as no restriction, ranks before it truncates, and prefers a granted file', () => {
+    const { dir, root } = fixture();
+    fs.mkdirSync(path.join(root, 'elsewhere'));
+    fs.writeFileSync(path.join(root, 'notes', 'AWS Certified Cloud Practitioner.pdf'), 'x');
+    fs.writeFileSync(path.join(root, 'elsewhere', 'AWS Certified Cloud Practitioner certificate.pdf'), 'x');
+    fileIndex.crawl({ roots: [root] });
+    store.grantRoot(path.join(root, 'notes'), 'documents');
+    const capabilityGraph = require('../services/capabilityGraph');
+    const search = capabilityGraph.list().find(c => c.id === 'files.search');
+    const result = search.run({ text: 'AWS Certified Cloud Practitioner certificate', dir: '/', limit: '1' });
+    assert.ok(result.best && result.best.endsWith(path.join('notes', 'AWS Certified Cloud Practitioner.pdf')));
+    assert.strictEqual(result.files.length, 1);
+    cleanup(dir);
+});

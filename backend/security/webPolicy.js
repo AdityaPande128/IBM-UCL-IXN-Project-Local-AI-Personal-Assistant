@@ -54,6 +54,9 @@ function isPrivateV4(host) {
     if (a === 169 && b === 254) return true;   // link-local, incl. cloud metadata
     if (a === 172 && b >= 16 && b <= 31) return true;
     if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;   // carrier-grade NAT: tailnets live here
+    if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking range, never public
+    if (a >= 224) return true;                            // multicast and reserved
     return false;
 }
 
@@ -267,8 +270,11 @@ const IRREVERSIBLE = [
       pattern: /\bsave\b|\bschedule event\b/i,
       what: 'puts an event on the calendar' },
     { kind: 'compose',
-      pattern: /\b(reply|forward|compose|new message|write)\b/i,
+      pattern: /\b(reply|compose|new message|write)\b/i,
       what: 'starts a message to other people' },
+    { kind: 'forward',
+      pattern: /\bforward\b/i,
+      what: 'forwards a message to other people' },
     { kind: 'account',
       pattern: /\b(sign ?up|create account|register)\b/i,
       what: 'creates an account' }
@@ -278,8 +284,10 @@ const AS_NOUN = /\b(my|your|his|her|their|our|its|the|a|an|this|that|these|those
 
 const MANDATES = [
     { kind: 'send',
-      pattern: /\b(send|reply|respond|forward|write (to|back))\b/i },
-    { kind: 'send', pattern: /\b(email|message)\b/i, notAfter: AS_NOUN },
+      pattern: /\b(send|reply|respond|write (to|back))\b/i },
+    { kind: 'forward', pattern: /\bforward\b/i },
+    { kind: 'send',
+      pattern: /(?:^|\b(?:please|kindly|can you|could you|would you|now|then|and|also)\s+)(?:e-?mail|message)\s+(?!me\b|us\b|from\b|about\b)\S/i },
     { kind: 'send', pattern: /\btell\s+(?!me\b|us\b)/i },
     { kind: 'compose', pattern: /\b(draft|compose)\b/i },
     // Booking is calendar work unless the words nearby say commerce — "book a
@@ -307,6 +315,7 @@ const INTENT_MANDATE = {
     read: [],
     compose: ['compose'],
     send: ['compose', 'send'],
+    forward: ['compose', 'send', 'forward'],
     book: ['compose', 'book'],
     save: ['save'],
     spend: [],
@@ -432,6 +441,10 @@ function checkAttach({ path, mandate, label, destination } = {}) {
         return refuse(REFUSAL.CREDENTIAL,
             'credential material must never be transmitted; no approval can authorise this');
     }
+    if (!require('./store').isWithinGrantedRoot(String(path || ''), 'documents')) {
+        return refuse(REFUSAL.UNREQUESTED,
+            `"${name}" is outside the folders shared with Jarvis, so it stays on this machine`);
+    }
 
     egress.guard({
         channel: egress.CHANNEL.NETWORK,
@@ -457,9 +470,8 @@ function checkClick({ element, label, destination, mandate, home } = {}) {
 
     const name = element.name || '';
 
-    const match = name.length <= MAX_CONTROL_LABEL_CHARS
-        ? IRREVERSIBLE.find(entry => entry.pattern.test(name))
-        : null;
+    const probe = name.length <= MAX_CONTROL_LABEL_CHARS ? name : name.slice(0, 24);
+    const match = IRREVERSIBLE.find(entry => entry.pattern.test(probe));
 
     const strayed = home && destination && safeHost(home) !== safeHost(destination);
 

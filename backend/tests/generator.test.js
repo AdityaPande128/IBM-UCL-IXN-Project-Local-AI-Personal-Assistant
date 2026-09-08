@@ -560,3 +560,81 @@ test('generate refuses before any model call when the class maps no smith', () =
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('groundedTrial: a clean exit that found nothing in the data fails the trial', async () => {
+    const os = require('os');
+    const path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grounded-empty-'));
+    const real = path.join(dir, 'cities.csv');
+    fs.writeFileSync(real, '"City,Population"\n"London,10"\n');
+    try {
+        const empty = await verifier.groundedTrial({
+            parameters: { input_csv: { type: 'string', required: true, description: 'CSV to read.' } },
+            script: 'import argparse, json\np = argparse.ArgumentParser()\np.add_argument("--input_csv")\n' +
+                    'p.parse_args()\nprint("Total: 0")\nprint("JARVIS_RESULT " + json.dumps({"total": 0}))'
+        }, `add up the population in ${real}`, 10000);
+        assert.equal(empty.passed, false);
+        assert.ok(empty.reason.includes('found nothing'));
+        assert.ok(empty.reason.includes('"City,Population"'), 'the data head reaches the repair loop');
+
+        const named = verifier.extractRequestPaths('sum the population in cities.csv and /tmp/other.csv');
+        assert.equal(named[0], '/tmp/other.csv');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('runTestCase: a fixture ending in a slash is a folder, and files_missing is checked', async () => {
+    const script = 'import argparse, os, shutil\np = argparse.ArgumentParser()\np.add_argument("--directory")\n' +
+        'a = p.parse_args()\nfor name in os.listdir(a.directory):\n    full = os.path.join(a.directory, name)\n' +
+        '    if os.path.isdir(full) and not os.listdir(full):\n        os.rmdir(full)\nprint("done")';
+    const testCase = {
+        fixtures: [{ path: 'relative/empty one/' }, { path: 'relative/keep/still here.txt', content: 'x' }],
+        parameters: { directory: 'relative' },
+        expect: { exit_code: 0, stdout_contains: 'done', files_exist: ['relative/keep/still here.txt'],
+                  files_missing: ['relative/empty one/'] }
+    };
+    const outcome = await verifier.runTestCase(script, testCase, ['directory'], 10000);
+    assert.equal(outcome.passed, true, outcome.reason);
+
+    const lazy = await verifier.runTestCase('import argparse\np = argparse.ArgumentParser()\np.add_argument("--directory")\n' +
+        'p.parse_args()\nprint("done")', testCase, ['directory'], 10000);
+    assert.equal(lazy.passed, false);
+    assert.ok(lazy.reason.includes('still exists'));
+});
+
+test('groundedTrial: a printout whose every number is zero fails the trial even without a result line', async () => {
+    const os = require('os');
+    const path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grounded-zero-'));
+    const real = path.join(dir, 'cities.csv');
+    fs.writeFileSync(real, '"City,Population"\n"London,10"\n');
+    try {
+        const zero = await verifier.groundedTrial({
+            parameters: { input_csv: { type: 'string', required: true, description: 'CSV to read.' } },
+            script: 'import argparse\np = argparse.ArgumentParser()\np.add_argument("--input_csv")\n' +
+                    'p.parse_args()\nprint("Total population: 0")'
+        }, `add up the population in ${real}`, 10000);
+        assert.equal(zero.passed, false);
+        assert.ok(zero.reason.includes('found nothing'));
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('sampleNamedFiles tells the smith when every line of a CSV is wrapped in quotes', () => {
+    const { dataShapeNote } = require('../services/skillGenerator');
+    assert.ok(dataShapeNote('"City,Population"\n"London,10"\n"Leeds,5"').includes('strip the outer quotes'));
+    assert.strictEqual(dataShapeNote('City,Population\nLondon,10\nLeeds,5'), '');
+    assert.strictEqual(dataShapeNote('"a","b"\n"1","2"'), '');
+});
+
+test('describeVerificationFailure names the printed number when a hand-computed expectation misses', () => {
+    const { describeVerificationFailure } = require('../services/skillGenerator');
+    const text = describeVerificationFailure({ results: [{ name: 'sum', passed: false,
+        reason: 'stdout did not contain "35515420"', stdout: 'Total population: 11530440' }] });
+    assert.ok(text.includes('expected 35515420 but the script printed 11530440'));
+    const traceback = describeVerificationFailure({ results: [{ name: 'sum', passed: false,
+        reason: 'exit code 1, expected 0', stderr: 'Traceback' }] });
+    assert.ok(!traceback.includes('but the script printed'));
+});
