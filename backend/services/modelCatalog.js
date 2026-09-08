@@ -55,6 +55,8 @@ function downloaded(modelId) {
 }
 
 function freeDiskGb() {
+    const pinned = Number(process.env.JARVIS_DISK_FREE_GB);
+    if (pinned > 0) return pinned;
     try {
         const stats = fs.statfsSync(os.homedir());
         return (stats.bsize * stats.bavail) / GB;

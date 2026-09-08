@@ -5,6 +5,7 @@ const path = require('path');
 
 const test = require('node:test');
 process.env.JARVIS_MEMORY_GB = '24';
+process.env.JARVIS_DISK_FREE_GB = '200';
 const assert = require('node:assert');
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-wire-'));
