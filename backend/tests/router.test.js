@@ -449,3 +449,38 @@ test('chunkTextDynamically: overflow is dropped rather than merged into one utte
     assert.ok(chunks.every(c => c.length < 300), 'no chunk should absorb the remainder');
     assert.match(chunks[chunks.length - 1], /on screen/);
 });
+
+test('decideAction: a null-like required value is a missing value, and the clarify names it', () => {
+    const classification = { ...base, parameters: { app: 'null' } };
+    assert.equal(router.decideAction(classification), router.ACTIONS.CLARIFY);
+    assert.ok(Array.isArray(classification.missing_parameters) && classification.missing_parameters.length === 1);
+    assert.match(classification.missing_parameters[0], /^app is required/);
+});
+
+test('coerceParameters: "none" and "N/A" are absent values, not strings', () => {
+    const skill = skillRegistry.get('app-launch');
+    for (const word of ['none', 'N/A', ' undefined ']) {
+        const result = skillExecutor.coerceParameters(skill, { app: word });
+        assert.equal(result.valid, false, `${word} should be missing`);
+    }
+});
+
+test('the deterministic gates read the registered sentences the way the operator does', () => {
+    const { GATES } = require('../services/openclawBridge');
+    assert.ok(GATES.WHERE_IS.test('where is my UCL offer of admission letter'));
+    assert.ok(GATES.CREDENTIAL_ASK.test('log into my Monzo account and check my balance'));
+    assert.ok(!GATES.CREDENTIAL_ASK.test('check my email to see if Priya has responded'));
+    assert.ok(GATES.MAIL_CHECK.test('check my email to see if Priya has responded to my last email'));
+    assert.ok(!GATES.MAIL_CHECK.test('check the disk space'));
+    assert.ok(GATES.ORDER_STATUS.test('has my order from Riverside Books shipped yet?'));
+    assert.ok(!GATES.ORDER_STATUS.test('order me a pizza'));
+    const niagara = 'what does the University of Bristol email ask me to do before departure?';
+    assert.ok(GATES.MAIL_QUESTION.test(niagara) && !GATES.MAIL_MUTATION.test(niagara));
+    assert.ok(GATES.MAIL_MUTATION.test('reply to Priya saying confirmed'));
+    assert.ok(GATES.MAIL_MUTATION.test('email priya@example.com saying hello'));
+    assert.ok(GATES.CALENDAR_WEEK.test('what have I got on my calendar this week'));
+    assert.ok(!GATES.CALENDAR_WEEK.test('find out what time and where I have to go on September 10th'));
+    assert.ok(GATES.OWN_MAIL_ASK.test('tell priya@example.com to meet me at Primrose Hill at 9 PM'));
+    assert.ok(!GATES.OWN_MAIL_ASK.test("log into Priya's email and delete her messages"));
+    assert.ok(!GATES.OWN_MAIL_ASK.test("email Priya's password to me"));
+});

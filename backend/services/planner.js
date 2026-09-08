@@ -291,6 +291,29 @@ function referencesIn(value, found = []) {
     return found;
 }
 
+const MUTATION_FAMILIES = [
+    [/\b(delete|remove|erase|trash|get rid of)\b/, /\b(delete|remov|eras|trash|clean|empty|prune|purge)/],
+    [/\bempty\b(?! folder)/, /\b(empty|delete|remov|trash|clean|purge)/],
+    [/\brename\b/, /\brenam/],
+    [/\b(move|organi[sz]e|sort .* into|tidy)\b/, /\b(mov|organi|sort|tidy|arrang|flatten)/],
+    [/\b(copy|duplicate|back ?up)\b/, /\b(cop|duplicat|backup|back up)/],
+    [/\b(convert|turn .* into)\b/, /\b(convert|to json|to csv|to markdown|export|transform)/],
+    [/\bsplit\b/, /\bsplit/],
+    [/\b(merge|combine|concatenate|join)\b/, /\b(merg|combin|concat|join)/],
+    [/\b(zip|compress|archive)\b/, /\b(zip|compress|archiv)/],
+    [/\b(unzip|extract|decompress)\b/, /\b(unzip|extract|decompress)/],
+    [/\b(send|email|e-mail|mail|tell|message|text|reply|respond|draft|compose|write to)\b/, /\b(send|mail|compos|draft|repl|messag|browse)/]
+];
+
+function carriesMutation(question, described) {
+    const asked = String(question || '').toLowerCase();
+    for (const [verbs, family] of MUTATION_FAMILIES) {
+        if (!verbs.test(asked)) continue;
+        return family.test(String(described || '').toLowerCase());
+    }
+    return true;
+}
+
 function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, question = '' } = {}) {
     const errors = [];
     const repairs = [];
@@ -506,6 +529,31 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
         if (!useful) unused.push({ index, step, capability, isLast });
     });
 
+    const asked = String(question).toLowerCase();
+    if (parsed.steps.length >= 2 && MUTATION_FAMILIES.some(([verbs]) => verbs.test(asked))) {
+        const last = parsed.steps[parsed.steps.length - 1];
+        if (last && String(last.capability) === 'answer') {
+            parsed.steps.pop();
+            repairs.push('dropped_answer_after_mutation');
+        }
+    }
+    for (const [verbs, family] of MUTATION_FAMILIES) {
+        if (!verbs.test(asked)) continue;
+        const carried = parsed.steps.some(step => {
+            const capability = seen.get(step.id);
+            if (!capability) return false;
+            const said = `${capability.id} ${capability.description || ''}`.toLowerCase();
+            return family.test(said);
+        });
+        if (!carried) {
+            const verb = (asked.match(verbs) || [''])[0].trim();
+            errors.push(`the request asks to ${verb}, and no step does that: a step that only lists, reads or `
+                + `searches has not done the job. Either use a capability that ${verb}s, or leave the steps out `
+                + `and name "${verb}" in "missing"`);
+        }
+        break;
+    }
+
     // A plan that stops at gathered passages is completed, not rejected: the
     // answer step it forgot is appended deterministically, the way a stronger
     // planner ends the same plan unprompted. A plan that stops at found paths
@@ -548,6 +596,21 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
                   + 'gathering for is not one the list can do: then leave the step out '
                   + 'and name that job in "missing"')
         );
+    }
+
+    const registry = require('./skillRegistry');
+    const generated = parsed.steps.filter(step => {
+        const capability = seen.get(step.id);
+        if (!capability || capability.kind !== 'skill') return false;
+        const manifest = registry.get(capability.source);
+        return Boolean(manifest && (manifest.provenance || {}).author === 'generated');
+    });
+    if (generated.length >= 2 && !generated.some(step => referencesIn(step.inputs).length)) {
+        errors.push(
+            `${generated.map(s => s.id).join(', ')}: ${generated.length} generated skills `
+            + 'run side by side on one request without one feeding the next, which is an '
+            + 'approximation rather than a plan. If one of them does the whole job, use it '
+            + 'alone; otherwise leave them out and put the job in "missing".');
     }
 
     if (parsed.steps.length === 0 && declaredMissing.length === 0) {
@@ -760,5 +823,4 @@ module.exports = {
     buildPlanPrompt,
     selectCapabilities,
     MAX_STEPS,
-    REFERENCE
-};
+    REFERENCE, carriesMutation, MUTATION_FAMILIES };

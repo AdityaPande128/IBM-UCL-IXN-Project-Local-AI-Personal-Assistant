@@ -317,12 +317,12 @@ test('a query of more than one word is searched for as a phrase', () => {
     assert.strictEqual(webAgent.phrase('August 15'), '"August 15"');
     assert.strictEqual(webAgent.phrase('Riverside Books'), '"Riverside Books"');
 
-    assert.strictEqual(webAgent.phrase('Sandhya'), 'Sandhya');
+    assert.strictEqual(webAgent.phrase('Priya'), 'Priya');
 
-    assert.strictEqual(webAgent.phrase('from:sandhyapandey31@gmail.com'),
-        'from:sandhyapandey31@gmail.com');
-    assert.strictEqual(webAgent.phrase('to:sandhyapandey31@gmail.com'),
-        'to:sandhyapandey31@gmail.com');
+    assert.strictEqual(webAgent.phrase('from:priya@example.com'),
+        'from:priya@example.com');
+    assert.strictEqual(webAgent.phrase('to:priya@example.com'),
+        'to:priya@example.com');
     assert.strictEqual(webAgent.phrase('newer_than:2d from:sam'), 'newer_than:2d from:sam');
 
     assert.strictEqual(webAgent.phrase('"August 15"'), '"August 15"');
@@ -331,41 +331,41 @@ test('a query of more than one word is searched for as a phrase', () => {
 });
 
 test('a question about what someone sent is asked of mail from them', () => {
-    const ASKED = 'what did Sandhya ask me about in her latest email?';
-    assert.strictEqual(webAgent.fromThem('sandhya', ASKED), 'from:sandhya');
-    assert.strictEqual(webAgent.fromThem('Sandhya', 'Report what Sandhya asked in her last message'),
-        'from:Sandhya');
+    const ASKED = 'what did Priya ask me about in her latest email?';
+    assert.strictEqual(webAgent.fromThem('priya', ASKED), 'from:priya');
+    assert.strictEqual(webAgent.fromThem('Priya', 'Report what Priya asked in her last message'),
+        'from:Priya');
 
-    assert.strictEqual(webAgent.fromThem('from:sandhya', ASKED), 'from:sandhya');
-    assert.strictEqual(webAgent.fromThem('to:sandhya', ASKED), 'to:sandhya');
+    assert.strictEqual(webAgent.fromThem('from:priya', ASKED), 'from:priya');
+    assert.strictEqual(webAgent.fromThem('to:priya', ASKED), 'to:priya');
 
     assert.strictEqual(
-        webAgent.fromThem('sandhya', 'do I have any unread emails from Sandhya'),
-        'from:sandhya');
+        webAgent.fromThem('priya', 'do I have any unread emails from Priya'),
+        'from:priya');
 
     assert.strictEqual(webAgent.fromThem('"August 15"', ASKED), '"August 15"');
     assert.strictEqual(
         webAgent.fromThem('Riverside Books', 'has my order from Riverside Books shipped yet?'),
         'Riverside Books');
 
-    assert.strictEqual(webAgent.fromThem('sandhya', 'find the sandhya folder'), 'sandhya');
+    assert.strictEqual(webAgent.fromThem('priya', 'find the priya folder'), 'priya');
     assert.strictEqual(webAgent.fromThem(null, ASKED), null);
 });
 
 test("a forwarded message's own headers are not this message's", () => {
     const PAGE = {
-        text: 'Sandhya Pandey  22 Jun 2026, 11:38  to me\n'
+        text: 'Priya Sharma  22 Jun 2026, 11:38  to me\n'
             + '---------- Forwarded message ---------\n'
-            + 'From: Sandhya Pandey <sandhyapandey31@gmail.com>\n'
+            + 'From: Priya Sharma <priya@example.com>\n'
             + 'Date: Fri, 24 Mar 2023 at 18:15\n'
-            + 'Subject: Audio from Sandhya\n'
+            + 'Subject: Audio from Priya\n'
             + 'To: <imtingoo@gmail.com>\n'
             + 'AUD-20230324-WA0078.aac'
     };
-    const ASKED = 'what did Sandhya ask me about in her latest email?';
+    const ASKED = 'what did Priya ask me about in her latest email?';
 
     const misdated = webAgent.ungrounded(
-        "Sandhya sent an audio message on Fri, 24 Mar 2023, 18:15 to imtingoo@gmail.com.",
+        "Priya sent an audio message on Fri, 24 Mar 2023, 18:15 to imtingoo@gmail.com.",
         PAGE, ASKED);
     assert.match(String(misdated), /Forwarded message/);
     assert.match(String(misdated), /2023|18:15|imtingoo/);
@@ -378,8 +378,8 @@ test("a forwarded message's own headers are not this message's", () => {
 
     assert.strictEqual(webAgent.ungrounded(
         'She asked about the 2023 invoice.',
-        { text: 'Sandhya Pandey wrote about the 2023 invoice' },
-        'what did Sandhya ask about?'), null);
+        { text: 'Priya Sharma wrote about the 2023 invoice' },
+        'what did Priya ask about?'), null);
 });
 
 test('dictated words land in the message body, not the first empty box', () => {
@@ -422,14 +422,14 @@ test("words quoted back below a wrote: line are not this message's", () => {
 test('a machine that sends in someone\'s name is not replied to', () => {
     assert.strictEqual(webAgent.automated({
         text: 'drive-shares-dm-noreply@google.com to me — Share a document? '
-            + 'Sandhya Pande (sandhyapandey31@gmail.com) is requesting access'
+            + 'Priya Pande (priya@example.com) is requesting access'
     }), true);
     assert.strictEqual(webAgent.automated({
         text: 'notifications@forge.example commented on your pull request'
     }), true);
 
     assert.strictEqual(webAgent.automated({
-        text: 'sandhyapandey31@gmail.com to aditya.pande.128@gmail.com — here is the link'
+        text: 'priya@example.com to aditya.pande.128@gmail.com — here is the link'
     }), false);
 
     assert.strictEqual(webAgent.automated({ text: 'no addresses at all' }), false);
@@ -444,9 +444,9 @@ test('the first result is the one that gets opened', () => {
             { ref: 'a3', role: 'link',
               name: 'Inbox (no subject) - https://www.idp.com/find-a-course/computer-science/postgraduate/canada/' },
             { ref: 'a4', role: 'link',
-              name: 'Inbox Share request for "phy_acknowlegement" - Share a document? Sandhya Pande is requesting access' }
+              name: 'Inbox Share request for "phy_acknowlegement" - Share a document? Priya Pande is requesting access' }
         ],
-        text: 'Sandhya Pandey , (no subject) , Jun 22 , https://www.idp.com/find-a-course/'
+        text: 'Priya Sharma , (no subject) , Jun 22 , https://www.idp.com/find-a-course/'
     };
     assert.strictEqual(webAgent.topRow(RESULTS).ref, 'a3');
 
@@ -465,7 +465,7 @@ test('the first result is the one that gets opened', () => {
     assert.strictEqual(webAgent.topRow({
         elements: [
             { ref: 'a1', role: 'checkbox',
-              name: 'Sandhya, me 3, Fwd: Important Steps to Ensure Your Payment to UCL Tuition Fees' },
+              name: 'Priya, me 3, Fwd: Important Steps to Ensure Your Payment to UCL Tuition Fees' },
             { ref: 'a2', role: 'link',
               name: 'Inbox Fwd: Important Steps to Ensure Your Payment to UCL Tuition Fees is Processed' }
         ], text: ''
@@ -486,17 +486,17 @@ test('a name of two words is searched for as one thing', () => {
         webAgent.subject('find out what time and where I have to go on August 15th'),
         ['August 15th']);
 
-    assert.deepStrictEqual(webAgent.subject('what did Sandhya ask me about?'), ['Sandhya']);
+    assert.deepStrictEqual(webAgent.subject('what did Priya ask me about?'), ['Priya']);
     assert.deepStrictEqual(
-        webAgent.subject('reply to sandhyapandey31@gmail.com saying "hello there"'),
-        ['sandhyapandey31@gmail.com']);
+        webAgent.subject('reply to priya@example.com saying "hello there"'),
+        ['priya@example.com']);
 
     assert.deepStrictEqual(webAgent.subject('Check my email'), []);
     assert.deepStrictEqual(webAgent.subject('reply saying "Sounds Good To Me"'), []);
 });
 
 test('a request that names its correspondent by address alone is still guarded', () => {
-    const GOAL = 'reply to sandhyapandey31@gmail.com saying "Hello, thank you for sending that over!"';
+    const GOAL = 'reply to priya@example.com saying "Hello, thank you for sending that over!"';
 
     assert.strictEqual(webAgent.wrongCorrespondent({
         text: 'LinkedIn <linkedin@em.linkedin.com> to aditya.pande.128@gmail.com '
@@ -504,11 +504,11 @@ test('a request that names its correspondent by address alone is still guarded',
     }, GOAL), true);
 
     assert.strictEqual(webAgent.wrongCorrespondent({
-        text: 'Sandhya Pande <sandhyapandey31@gmail.com> via drive-shares-dm-noreply@google.com '
+        text: 'Priya Pande <priya@example.com> via drive-shares-dm-noreply@google.com '
             + 'requested access to phy_acknowlegement'
     }, GOAL), false);
     assert.strictEqual(webAgent.wrongCorrespondent({
-        text: 'sandhyapandey31@gmail.com languages@rkmath.org'
+        text: 'priya@example.com languages@rkmath.org'
     }, GOAL), false);
 
     assert.strictEqual(webAgent.wrongCorrespondent({
@@ -1600,19 +1600,19 @@ test('the site\'s own no-results notice is concluded from, never given as the an
     const real = llmClient.complete;
 
     llmClient.complete = async messages => {
-        if (isIntentCall(messages)) return intentReply({ query: 'sandhya' });
+        if (isIntentCall(messages)) return intentReply({ query: 'priya' });
         return JSON.stringify({ action: 'done',
             answer: 'We didn\'t find anything. Try a different keyword.' });
     };
 
     try {
-        const result = await webAgent.browse('do I have any unread emails from Sandhya', {
+        const result = await webAgent.browse('do I have any unread emails from Priya', {
             url: `${site.origin}/search`, allowPrivate: true, maxActions: 4
         });
 
         assert.strictEqual(result.status, 'success');
         assert.match(String(result.answer), /found nothing about/);
-        assert.match(String(result.answer), /sandhya/i);
+        assert.match(String(result.answer), /priya/i);
         assert.doesNotMatch(String(result.answer), /didn['’]t find anything/i,
             'the page\'s empty-state banner must not be the answer');
     } finally {
@@ -2354,7 +2354,7 @@ test('an event takes its name from the dictated words or the request\'s own obje
         'Squash with Sam');
     assert.strictEqual(
         webAgent.eventName({ write: [] },
-            'find the dinner email from sandhya@example.com and put the dinner on my calendar'),
+            'find the dinner email from priya@example.com and put the dinner on my calendar'),
         'Dinner');
     assert.strictEqual(
         webAgent.eventName({}, 'add the team stand-up to my calendar'),
@@ -2366,11 +2366,11 @@ test('an event takes its name from the dictated words or the request\'s own obje
 
 test('a correspondent can be named without an address', () => {
     assert.strictEqual(
-        webAgent.namedFrom('find the dinner email from Sandhya and put the dinner on my calendar'),
-        'Sandhya');
+        webAgent.namedFrom('find the dinner email from Priya and put the dinner on my calendar'),
+        'Priya');
     assert.strictEqual(
-        webAgent.namedFrom('the email from Sandhya Pandey about dinner'),
-        'Sandhya Pandey');
+        webAgent.namedFrom('the email from Priya Sharma about dinner'),
+        'Priya Sharma');
     assert.strictEqual(webAgent.namedFrom('the invite from last week'), null,
         'a time is not a correspondent');
     assert.strictEqual(webAgent.namedFrom('an email from my landlord'), null);
@@ -2381,16 +2381,16 @@ test('a correspondent can be named without an address', () => {
 test('a bare name opens their messages only from the sender line', () => {
     const pane = {
         elements: [],
-        text: 'Dinner\nSandhya Pandey\nMon 7/28/2026 9:15 AM\nSee you at the recital.\n'
-            + 'Sandhya Pandey\nTue 8/12/2026 1:05 PM\nDinner is at nine.\n'
+        text: 'Dinner\nPriya Sharma\nMon 7/28/2026 9:15 AM\nSee you at the recital.\n'
+            + 'Priya Sharma\nTue 8/12/2026 1:05 PM\nDinner is at nine.\n'
     };
-    assert.strictEqual(webAgent.latestFromThem(pane, 'Sandhya'), 'Dinner is at nine.');
+    assert.strictEqual(webAgent.latestFromThem(pane, 'Priya'), 'Dinner is at nine.');
 
     const prose = {
         elements: [],
-        text: 'From: Aditya Pande\nDate: July 3\nCan you tell Sandhya the plan moved?\n'
+        text: 'From: Aditya Pande\nDate: July 3\nCan you tell Priya the plan moved?\n'
     };
-    assert.strictEqual(webAgent.latestFromThem(prose, 'Sandhya'), null,
+    assert.strictEqual(webAgent.latestFromThem(prose, 'Priya'), null,
         'a name mentioned mid-sentence is not a sender line');
 
     // A narrow pane wraps the sender's name across lines.
@@ -2413,7 +2413,7 @@ test('a booking whose details live in an email becomes a card, not a keystroke',
     llmClient.complete = async () => 'not even json';
 
     try {
-        const goal = 'find the dinner email from sandhya@example.com and put the dinner on my calendar';
+        const goal = 'find the dinner email from priya@example.com and put the dinner on my calendar';
         const result = await webAgent.browse(goal, {
             url: `${site.origin}/mail`, allowPrivate: true, maxActions: 8,
             request: goal, calendarUrl: `${site.origin}/calendar/timed`
@@ -2493,7 +2493,7 @@ test('a correspondent named by bare name still books from their email', async ()
     llmClient.complete = async () => 'not even json';
 
     try {
-        const goal = 'find the dinner email from Sandhya and put the dinner on my calendar';
+        const goal = 'find the dinner email from Priya and put the dinner on my calendar';
         const result = await webAgent.browse(goal, {
             url: `${site.origin}/mail`, allowPrivate: true, maxActions: 8,
             request: goal, calendarUrl: `${site.origin}/calendar/timed`
@@ -2501,7 +2501,7 @@ test('a correspondent named by bare name still books from their email', async ()
 
         assert.strictEqual(result.status, 'needs_approval', result.reason || result.answer);
         assert.ok(result.proposal, 'the run must come back carrying the card');
-        assert.match(result.proposal.will, /the email from Sandhya says/);
+        assert.match(result.proposal.will, /the email from Priya says/);
         assert.match(result.proposal.found, /Alleycats/);
 
         const proposals = require('../services/proposals');
@@ -2649,4 +2649,24 @@ test('a save the calendar never recorded is not claimed as a booking', async () 
         await site.close();
         store.cleanup();
     }
+});
+
+test('a question that names an email as a noun grants no send, and a reply mandate does not cover Forward', () => {
+    const question = webPolicy.mandateFrom('what does the University of Bristol email ask me to do before departure?', USER);
+    assert.deepStrictEqual([...question], []);
+    assert.deepStrictEqual([...webPolicy.mandateFrom('what did her last message say', USER)], []);
+    const verb = webPolicy.mandateFrom('email priya@example.com saying hello', USER);
+    assert.deepStrictEqual([...verb].sort(), ['compose', 'send']);
+    assert.deepStrictEqual([...webPolicy.mandateFrom('please message Sam that I am late', USER)].sort(), ['compose', 'send']);
+    const replying = webPolicy.mandateFrom('reply to the "Confirmation needed" email saying "confirmed"', USER);
+    assert.ok(replying.has('send') && !replying.has('forward'));
+    const forwarding = webPolicy.mandateFrom('forward the invoice email to sam@example.com', USER);
+    assert.ok(forwarding.has('forward') && forwarding.has('send'));
+    const pressed = webPolicy.checkClick({ element: { name: 'Forward', role: 'button' }, label: USER,
+        mandate: replying, home: 'https://mail.google.com/', destination: 'https://mail.google.com/' });
+    assert.strictEqual(pressed.allowed, false);
+    assert.strictEqual(pressed.refusal, webPolicy.REFUSAL.IRREVERSIBLE);
+    const replied = webPolicy.checkClick({ element: { name: 'Send', role: 'button' }, label: USER,
+        mandate: replying, home: 'https://mail.google.com/', destination: 'https://mail.google.com/' });
+    assert.strictEqual(replied.allowed, true);
 });

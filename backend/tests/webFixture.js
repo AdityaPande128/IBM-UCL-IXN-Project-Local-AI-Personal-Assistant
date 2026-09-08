@@ -205,7 +205,7 @@ const MAILBOX = [
       subject: 'Re: Barbican on the 15th', date: 'July 29', replies: 1,
       body: `Wonderful, I'll be there.` },
 
-    { id: 'm6', box: 'inbox', from: 'Sandhya Pandey', address: 'sandhya@example.com',
+    { id: 'm6', box: 'inbox', from: 'Priya Sharma', address: 'priya@example.com',
       subject: 'Dinner — are you free on Saturday evening this week?', date: 'July 5',
       body: `Let's do dinner Saturday 9pm at Alleycats in Westminster.` },
 

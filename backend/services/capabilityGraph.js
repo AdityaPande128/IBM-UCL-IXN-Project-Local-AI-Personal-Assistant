@@ -1,4 +1,5 @@
 const path = require('path');
+const os = require('os');
 
 const skillRegistry = require('./skillRegistry');
 const labels = require('../security/labels');
@@ -343,16 +344,25 @@ function builtins() {
             },
             produces: labels.label(ORIGIN.FILE, SENSITIVITY.PERSONAL),
             run(bound) {
-                const files = fileIndex.search({
+                const limit = Math.min(Number(bound.limit) || 20, 50);
+                const dir = bound.dir ? corpusIndexer.expandHome(bound.dir) : undefined;
+                const unscoped = !dir || /^\/+$/.test(dir) || path.resolve(dir) === os.homedir();
+                const ranked = fileIndex.search({
                     text: bound.text,
                     ext: bound.ext,
-                    dir: bound.dir ? corpusIndexer.expandHome(bound.dir) : undefined,
-                    limit: Math.min(Number(bound.limit) || 20, 50)
+                    dir: unscoped ? undefined : dir,
+                    limit: Math.max(limit, 20)
                 });
+                const words = String(bound.text || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 2);
+                const share = f => words.length ? words.filter(w => String(f.name).toLowerCase().includes(w)).length / words.length : 1;
+                const qualifying = ranked.filter(f => words.length <= 1 ? share(f) === 1 : share(f) >= 0.6);
+                const best = qualifying.find(f => securityStore.isWithinGrantedRoot(f.path, 'documents'))
+                    || qualifying[0] || null;
+                const files = best ? [best, ...ranked.filter(f => f !== best)].slice(0, limit) : ranked.slice(0, limit);
                 return {
                     files,
                     paths: files.map(f => f.path),
-                    best: files.length ? files[0].path : null
+                    best: best ? best.path : null
                 };
             }
         }),
@@ -523,8 +533,19 @@ function builtins() {
             async run(bound, context = {}) {
                 const webAgent = require('./webAgent');
 
+                let url = bound.url || undefined;
+                if (!url) {
+                    const { GATES } = require('./openclawBridge');
+                    const text = `${bound.goal} ${context.request || ''}`;
+                    if (GATES.MAIL_QUESTION.test(text) || GATES.MAIL_CHECK.test(text)
+                        || GATES.ORDER_STATUS.test(text)) {
+                        const mailProvider = require('./mailProvider');
+                        url = mailProvider.forRequest(context.request || String(bound.goal),
+                            require('../utils/configReader').readConfig()).url || undefined;
+                    }
+                }
                 const result = await webAgent.browse(String(bound.goal), {
-                    url: bound.url || undefined,
+                    url,
                     label: context.label,
                     request: context.request || '',
                     parentPlanId: context.planId ?? null,
