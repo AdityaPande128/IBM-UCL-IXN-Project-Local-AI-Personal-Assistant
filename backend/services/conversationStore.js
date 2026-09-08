@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
 const configReader = require('../utils/configReader');
-const memoryService = require('./memoryService');
+const incognito = require('./incognito');
 
 // Every surface records through append, so this is the one choke point where
 // a second surface can hear the conversation grow. The listener must never
@@ -82,7 +82,7 @@ function titleFrom(text) {
 // when a conversation just came into being.
 function append(ws, role, text, artifacts) {
     if (!ROLES.has(role) || !String(text || '').trim()) return null;
-    if (memoryService.isIncognito()) return null;
+    if (incognito.isIncognito()) return null;
 
     // A conversation that fails to record must never break the exchange
     // it was recording.
@@ -98,6 +98,8 @@ function write(ws, role, text, artifacts) {
     const store = ready();
     const now = new Date().toISOString();
     let created = null;
+
+    if (ws.conversationId && !exists(ws.conversationId)) ws.conversationId = null;
 
     if (!ws.conversationId) {
         const seed = role === 'user' ? text : 'New chat';
@@ -185,9 +187,10 @@ function remove(conversationId) {
 // When the user asks to recall an earlier discussion, the matching exchanges
 // are paged back in as answer passages — nothing is recalled unasked.
 const RECALL_SHAPE = new RegExp([
-    '\\b(remember|recall|last time|earlier|yesterday|last week|previous(ly)?',
-    '|our (chat|conversation)s?|we (said|spoke|talked|discussed|decided)',
-    '|did (i|we) (say|ask|mention|decide|talk)|what did (i|we)',
+    '\\b(remember|recall|remind me|last time|earlier|yesterday|last week|previous(ly)?',
+    '|our (chat|conversation)s?|we (said|spoke|talked|discussed|decided|agreed)',
+    '|did (i|we) (say|ask|mention|decide|talk|tell)|what did (i|we)|what was (my|the|his|her|their)',
+    '|i (told|mentioned to|said to) you|you (noted|wrote down)|for the record',
     '|talk(ed)? about|discuss(ed)?)\\b'
 ].join(''), 'i');
 
@@ -198,6 +201,9 @@ const RECALL_STOP = new Set([
     'said', 'earlier', 'yesterday', 'remember', 'recall', 'chat',
     'conversation', 'talked', 'talk', 'discussed', 'discuss', 'time'
 ]);
+
+const DISCLAIMS_MEMORY =
+    /\b(do(?:es)? not|don't|cannot|can't|no)\b[^.]{0,40}\b(memory|recall|remember|record|access to (?:our |previous |earlier |past )?(?:conversations?|chats?))\b/i;
 
 function recallWords(query) {
     return [...new Set((String(query).toLowerCase().match(/[a-z0-9]{3,}/g) || []))]
@@ -237,7 +243,6 @@ const answerSource = {
         if (!rows.length) return [];
 
         const embedClient = require('./embedClient');
-        const memoryStore = require('./memoryStore');
         const securityLabels = require('../security/labels');
         const retrieval = (configReader.readConfig().retrieval || {});
         const minScore = retrieval.corpus_min_score ?? 0.62;
@@ -254,20 +259,21 @@ const answerSource = {
         const [queryVector, ...vectors] = await embedClient.embed(
             [query, ...passages.map(p => p.embedText)]);
         const scored = passages.map((passage, i) => ({
-            ...passage, score: memoryStore.cosine(queryVector, vectors[i])
+            ...passage, score: embedClient.cosine(queryVector, vectors[i])
         }));
 
-        const kept = scored.filter(p => p.score >= minScore);
+        const kept = scored.filter(p => p.score >= minScore
+            && !(p.text.startsWith('The assistant said') && DISCLAIMS_MEMORY.test(p.embedText)));
         if (!kept.length) return [];
         kept.sort((a, b) => b.score - a.score);
         const best = kept[0].score;
-        return kept
-            .filter(p => p.score >= best - margin)
-            .slice(0, 3)
-            .map(({ embedText, ...passage }) => passage);
+        const chosen = kept.filter(p => p.score >= best - margin).slice(0, 3);
+        const bestUser = kept.find(p => p.text.startsWith('The user said'));
+        if (bestUser && !chosen.includes(bestUser)) chosen[chosen.length - 1] = bestUser;
+        return chosen.map(({ embedText, ...passage }) => passage);
     }
 };
 
-module.exports = { open, append, list, messages, exists, remove, clear, titleFrom,
+module.exports = { open, append, list, messages, exists, remove, clear, titleFrom, RECALL_SHAPE,
     searchMessages, answerSource, notifyAppend, artifactPath, stampArtifacts,
     DEFAULT_PATH };

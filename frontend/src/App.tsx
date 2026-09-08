@@ -8,9 +8,6 @@ import { PushToTalk } from "./components/PushToTalk";
 import { ApprovalCard } from "./components/ApprovalCard";
 import { ActivityPanel } from "./components/ActivityPanel";
 import { AbilitiesView } from "./components/AbilitiesView";
-import { InboxView } from "./components/InboxView";
-import { MemoryView } from "./components/MemoryView";
-import { AuditView } from "./components/AuditView";
 import { PermissionsView } from "./components/PermissionsView";
 import { Onboarding } from "./components/Onboarding";
 import { Sidebar } from "./components/Sidebar";
@@ -27,13 +24,10 @@ import { useServices, serviceBanner } from "./hooks/useServices";
 import { applyTheme } from "./theme";
 import "./index.css";
 
-type View = "chat" | "abilities" | "inbox" | "memory" | "audit" | "permissions";
+type View = "chat" | "abilities" | "permissions";
 
 const VIEW_TITLES: Record<Exclude<View, "chat">, string> = {
   abilities: "Skills",
-  inbox: "Inbox",
-  memory: "Memory",
-  audit: "Audit",
   permissions: "Permissions",
 };
 
@@ -83,20 +77,10 @@ function App() {
     abilities,
     diagnostics,
     settingsResult,
-    brief,
-    requestBrief,
     resolveApproval,
-    markNoticesSeen,
-    memory,
-    wipePreview,
-    requestMemory,
-    addMemory,
-    removeMemories,
-    pinMemory,
-    previewWipe,
-    clearWipePreview,
-    wipeAllMemory,
-    setIncognito,
+    privateChat,
+    startPrivateChat,
+    endPrivateChat,
     wakeMode,
     wakeHeardAt,
     reportClientError,
@@ -112,8 +96,6 @@ function App() {
     removeSkill,
     saveDiagnostics,
     updateSettings,
-    audit,
-    requestAudit,
     permissions,
     requestPermissions,
     checkpointResult,
@@ -273,6 +255,12 @@ function App() {
     inputRef.current?.focus();
   }, [selectConversation]);
 
+  const newPrivateChat = useCallback(() => {
+    startPrivateChat();
+    setView("chat");
+    inputRef.current?.focus();
+  }, [startPrivateChat]);
+
   const inShell = "__TAURI_INTERNALS__" in window;
 
   useEffect(() => {
@@ -383,7 +371,9 @@ function App() {
 
   const activeTitle =
     view === "chat"
-      ? conversations.find((c) => c.id === activeConversation)?.title ?? "New chat"
+      ? privateChat
+        ? "Private chat"
+        : conversations.find((c) => c.id === activeConversation)?.title ?? "New chat"
       : VIEW_TITLES[view];
 
   return (
@@ -393,19 +383,17 @@ function App() {
         conversations={conversations}
         activeConversation={activeConversation}
         view={view}
-        inboxCount={brief
-          ? brief.notices.length + brief.proposals.length + brief.approvals.length
-          : 0}
-        incognito={memory?.incognito ?? false}
+        privateChat={privateChat}
         profileName={profile?.name ?? ""}
         profileAvatar={profile?.avatar ?? ""}
         onNewChat={newChat}
+        onNewPrivateChat={newPrivateChat}
         onSelectConversation={(id) => {
           selectConversation(id);
           setView("chat");
         }}
         onDeleteConversation={deleteConversation}
-        onSelectView={setView}
+        onSelectView={(next) => { if (next !== "chat") endPrivateChat(); setView(next); }}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
@@ -541,42 +529,12 @@ function App() {
                 <ApprovalCard proposal={proposal} onDecision={sendDecision} />
               </div>
             )}
-            {view === "inbox" && (
-              <InboxView
-                brief={brief}
-                onRefresh={requestBrief}
-                onDecision={sendDecision}
-                onResolveApproval={resolveApproval}
-                onMarkSeen={markNoticesSeen}
-              />
-            )}
-            {view === "memory" && (
-              <MemoryView
-                memory={memory}
-                wipePreview={wipePreview}
-                onRefresh={requestMemory}
-                onAdd={addMemory}
-                onRemove={removeMemories}
-                onPin={pinMemory}
-                onPreviewWipe={previewWipe}
-                onClearWipePreview={clearWipePreview}
-                onWipeAll={wipeAllMemory}
-                onSetIncognito={setIncognito}
-              />
-            )}
             {view === "abilities" && (
               <AbilitiesView
                 key={connected ? "online" : "offline"}
                 abilities={abilities}
                 onRefresh={requestAbilities}
                 onRemoveSkill={removeSkill}
-              />
-            )}
-            {view === "audit" && (
-              <AuditView
-                key={connected ? "online" : "offline"}
-                audit={audit}
-                onRefresh={requestAudit}
               />
             )}
             {view === "permissions" && (
@@ -591,6 +549,7 @@ function App() {
                 onRestoreCheckpoint={restoreCheckpoint}
                 onExportBundle={exportBundle}
                 onImportBundle={importBundle}
+                onResolveApproval={(id, decision) => { resolveApproval(id, decision); }}
               />
             )}
           </main>
@@ -669,12 +628,10 @@ function App() {
           onSetWake={setWake}
           profileError={profileError}
           downloads={downloads}
-          incognito={memory?.incognito ?? false}
           onRefresh={requestAbilities}
           onSaveDiagnostics={saveDiagnostics}
           onUpdateSettings={updateSettings}
           onUpdateProfile={updateProfile}
-          onSetIncognito={setIncognito}
           onDownloadAction={downloadAction}
           onClose={() => setSettingsOpen(false)}
         />

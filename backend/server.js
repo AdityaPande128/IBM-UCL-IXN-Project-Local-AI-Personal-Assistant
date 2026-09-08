@@ -23,7 +23,6 @@ const settings = require('./services/settings');
 const modelTiers = require('./services/modelTiers');
 const availability = require('./services/availability');
 const watchers = require('./services/watchers');
-const morningBrief = require('./services/morningBrief');
 const egress = require('./security/egress');
 const securityStore = require('./security/store');
 const filePlane = require('./services/filePlane');
@@ -31,12 +30,9 @@ const remoteSeal = require('./services/remoteSeal');
 const channelFrames = require('./services/channelFrames');
 const fileLaneReplay = require('./services/fileLaneReplay');
 const channelAdapter = require('./services/channelAdapter');
-const memoryStore = require('./services/memoryStore');
-const memoryService = require('./services/memoryService');
 const wakeWord = require('./services/wakeWord');
 const distiller = require('./services/distiller');
 const configReader = require('./utils/configReader');
-const auditView = require('./services/auditView');
 const permissionsView = require('./services/permissionsView');
 const checkpoints = require('./services/checkpoints');
 const stateBundle = require('./services/stateBundle');
@@ -183,6 +179,7 @@ const server = http.createServer((req, res) => {
 });
 
 const MAX_FRAME_BYTES = (config.limits && config.limits.max_frame_bytes) || 32 * 1024 * 1024;
+const MAX_INTENT_CHARS = (config.limits && config.limits.max_intent_chars) || 20000;
 const wss = new WebSocket.Server({ server, maxPayload: MAX_FRAME_BYTES });
 
 const clients = new Set();
@@ -464,7 +461,20 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            if (parsed.type === 'private_chat') {
+                const on = parsed.on === true;
+                ws.privateChat = on;
+                ws.privateHistory = on ? [] : null;
+                ws.privateFiles = on ? [] : null;
+                if (on) ws.conversationId = null;
+                ws.send(JSON.stringify({ type: 'private_chat_result', on }));
+                return;
+            }
+
             if (parsed.type === 'conversation_select') {
+                ws.privateChat = false;
+                ws.privateHistory = null;
+                ws.privateFiles = null;
                 const wanted = parsed.id == null ? null : Number(parsed.id);
                 const id = wanted !== null && conversationStore.exists(wanted) ? wanted : null;
                 ws.conversationId = id;
@@ -476,10 +486,6 @@ wss.on('connection', (ws) => {
             if (parsed.type === 'conversation_delete' && parsed.id) {
                 const id = Number(parsed.id);
                 const removed = conversationStore.remove(id);
-                // Facts inferred from this chat go with it; what the user
-                // typed into the Remember box has no origin and stays.
-                const forgotten = memoryStore.deleteByOrigin(id);
-                if (forgotten) console.log(`[Memory] Forgot ${forgotten} fact(s) born in chat ${id}.`);
                 if (ws.conversationId === id) ws.conversationId = null;
                 // Every other surface drops the ghost row too.
                 if (removed) {
@@ -488,6 +494,12 @@ wss.on('connection', (ws) => {
                 }
                 ws.send(JSON.stringify({ type: 'conversation_delete_result', id, removed,
                     conversations: conversationStore.list() }));
+                return;
+            }
+
+            if (parsed.type === 'intent' && parsed.text && String(parsed.text).length > MAX_INTENT_CHARS) {
+                ws.send(JSON.stringify({ type: 'intent_result', status: 'error', action: 'error',
+                    response: `That message is too long to handle (over ${MAX_INTENT_CHARS.toLocaleString()} characters). Attach it as a file instead.` }));
                 return;
             }
 
@@ -509,14 +521,17 @@ wss.on('connection', (ws) => {
                 // resolver's rewrite used to strip it.
                 const attached = filePlane.resolveAttachments(parsed.attachments);
                 const intentText = parsed.text;
-                const history = ws.conversationId
+                const privateChat = ws.privateChat === true;
+                const history = privateChat ? (ws.privateHistory || []).slice(-6)
+                    : ws.conversationId
                     ? conversationStore.messages(ws.conversationId).slice(-6)
                         .filter(m => m.role === 'user' || m.role === 'assistant')
                         .map(m => ({ role: m.role, text: String(m.text || '').slice(0, 240) }))
                     : [];
                 // Files that crossed this conversation recently, so "that
                 // PDF" still means something three messages later.
-                const recentFiles = ws.conversationId
+                const recentFiles = privateChat ? (ws.privateFiles || []).slice(-5)
+                    : ws.conversationId
                     ? conversationStore.messages(ws.conversationId).slice(-12)
                         .flatMap(m => (m.artifacts && Array.isArray(m.artifacts.files))
                             ? m.artifacts.files : [])
@@ -529,20 +544,32 @@ wss.on('connection', (ws) => {
                             interactive: true, signal, history,
                             attachments: attached,
                             recentFiles,
+                            ...(privateChat ? { private: true } : {}),
                             ...(mode === 'openclaw' ? { executor: 'openclaw' } : {})
                         })));
                 ws.send(JSON.stringify({ type: 'intent_accepted', id: job.id, position: job.position }));
-                const started = conversationStore.append(ws, 'user', parsed.text,
-                    attached.length ? { files: attached.map(a =>
-                        ({ id: a.id, name: a.name, path: a.path })) } : undefined);
-                if (started) ws.send(JSON.stringify({ type: 'conversation_started', ...started }));
+                if (privateChat) {
+                    ws.privateHistory.push({ role: 'user', text: String(parsed.text).slice(0, 240) });
+                } else {
+                    const started = conversationStore.append(ws, 'user', parsed.text,
+                        attached.length ? { files: attached.map(a =>
+                            ({ id: a.id, name: a.name, path: a.path })) } : undefined);
+                    if (started) ws.send(JSON.stringify({ type: 'conversation_started', ...started }));
+                }
                 // The reply belongs to the conversation the intent was born
                 // in, however the socket wanders while the work runs.
                 const convoId = ws.conversationId;
                 if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
                     conversation: { id: convoId }, busy: true }, ws);
 
-                const result = await job.result;
+                let result;
+                try {
+                    result = await job.result;
+                } catch (err) {
+                    result = { status: err && err.name === 'AbortError' ? 'aborted' : 'error',
+                        action: 'error', response: String((err && err.message) || err || 'The request failed.') };
+                }
+                if (!result || typeof result !== 'object') result = { status: 'error', action: 'error', response: 'No response.' };
                 // Stamp before sending: the live message must carry the same
                 // download ids the stored copy will, or the chip that arrives
                 // now has nothing to fetch. Stamping preserves existing ids,
@@ -551,9 +578,20 @@ wss.on('connection', (ws) => {
                     result.artifacts = conversationStore.stampArtifacts(result.artifacts);
                 }
                 ws.send(JSON.stringify({ type: 'intent_result', id: job.id,
-                    conversation: convoId, ...result }));
-                conversationStore.append(ws, result.status === 'error' ? 'error' : 'assistant',
-                    result.response ?? result.error ?? 'No response.', result.artifacts);
+                    conversation: convoId, ...(privateChat ? { private: true } : {}), ...result }));
+                if (privateChat) {
+                    if (ws.privateHistory) {
+                        ws.privateHistory.push({ role: 'assistant',
+                            text: String(result.response ?? result.error ?? '').slice(0, 240) });
+                        ws.privateHistory = ws.privateHistory.slice(-12);
+                        const files = (result.artifacts && Array.isArray(result.artifacts.files))
+                            ? result.artifacts.files.filter(f => f && f.path) : [];
+                        ws.privateFiles = [...(ws.privateFiles || []), ...files].slice(-5);
+                    }
+                } else {
+                    conversationStore.append(ws, result.status === 'error' ? 'error' : 'assistant',
+                        result.response ?? result.error ?? 'No response.', result.artifacts);
+                }
                 if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
                     conversation: { id: convoId }, busy: false }, ws);
                 if (result && result.proposal) {
@@ -575,14 +613,6 @@ wss.on('connection', (ws) => {
                     catch { /* spoken replies are best-effort */ }
                 }
 
-                // Inference never writes memory: anything durable it spots in
-                // this exchange becomes a consent card, not a row.
-                if (result.status === 'success') {
-                    memoryService.inferFrom(
-                        `user: ${parsed.text}\nassistant: ${result.response || ''}`,
-                        ws.conversationId)
-                        .catch(() => null);
-                }
                 return;
             }
 
@@ -626,7 +656,14 @@ wss.on('connection', (ws) => {
                 const convoId = ws.conversationId;
                 if (convoId) broadcast({ type: 'conversation_event', kind: 'busy',
                     conversation: { id: convoId }, busy: true }, ws);
-                const result = await job.result;
+                let result;
+                try {
+                    result = await job.result;
+                } catch (err) {
+                    result = { status: 'error', action: 'error',
+                        response: String((err && err.message) || err || 'The approval could not be carried out.') };
+                }
+                if (!result || typeof result !== 'object') result = { status: 'error', action: 'error', response: 'No response.' };
                 if (result && result.artifacts) {
                     result.artifacts = conversationStore.stampArtifacts(result.artifacts);
                 }
@@ -782,12 +819,6 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            if (parsed.type === 'audit') {
-                ws.send(JSON.stringify({ type: 'audit_result',
-                    ...auditView.digest(parsed.since) }));
-                return;
-            }
-
             if (parsed.type === 'permissions') {
                 ws.send(JSON.stringify({ type: 'permissions_result',
                     ...permissionsView.snapshot(config) }));
@@ -898,91 +929,9 @@ wss.on('connection', (ws) => {
                 return;
             }
 
-            if (parsed.type === 'notices_seen' && Array.isArray(parsed.ids)) {
-                ws.send(JSON.stringify({
-                    type: 'notices_seen_result',
-                    marked: watchers.markSeen(parsed.ids)
-                }));
-                return;
-            }
-
             if (parsed.type === 'wake_mode') {
                 ws.wakeMode = parsed.on === true;
                 ws.send(JSON.stringify({ type: 'wake_mode_result', on: ws.wakeMode }));
-                return;
-            }
-
-            if (parsed.type === 'memory') {
-                ws.send(JSON.stringify({
-                    type: 'memory_result',
-                    facts: memoryStore.list({ status: parsed.status || 'active' }),
-                    ...memoryService.status()
-                }));
-                return;
-            }
-
-            if (parsed.type === 'memory_add' && parsed.text) {
-                try {
-                    const fact = await memoryService.add(String(parsed.text));
-                    ws.send(JSON.stringify({ type: 'memory_add_result',
-                        status: 'remembered', fact }));
-                } catch (err) {
-                    ws.send(JSON.stringify({ type: 'memory_add_result',
-                        status: 'refused', response: err.message }));
-                }
-                return;
-            }
-
-            if (parsed.type === 'memory_remove' && Array.isArray(parsed.ids)) {
-                ws.send(JSON.stringify({
-                    type: 'memory_remove_result',
-                    removed: memoryStore.hardDelete(parsed.ids)
-                }));
-                return;
-            }
-
-            if (parsed.type === 'memory_pin' && parsed.id) {
-                ws.send(JSON.stringify({
-                    type: 'memory_pin_result',
-                    fact: memoryStore.setPinned(parsed.id, parsed.pinned !== false)
-                }));
-                return;
-            }
-
-            if (parsed.type === 'memory_wipe' && parsed.term) {
-                ws.send(JSON.stringify({
-                    type: 'memory_wipe_result',
-                    term: parsed.term,
-                    candidates: memoryStore.wipeCandidates(parsed.term)
-                }));
-                return;
-            }
-
-            if (parsed.type === 'memory_wipe_all') {
-                if (parsed.confirm !== true) {
-                    ws.send(JSON.stringify({ type: 'memory_wipe_all_result',
-                        status: 'refused', response: 'A full wipe needs confirm: true.' }));
-                    return;
-                }
-                ws.send(JSON.stringify({ type: 'memory_wipe_all_result',
-                    status: 'wiped', removed: memoryStore.wipeAll() }));
-                return;
-            }
-
-            if (parsed.type === 'incognito') {
-                ws.send(JSON.stringify({
-                    type: 'incognito_result',
-                    ...memoryService.setIncognito(parsed.on !== false)
-                }));
-                return;
-            }
-
-            if (parsed.type === 'brief') {
-                const brief = morningBrief.assemble({
-                    browse: goal => intentQueue.submit(({ signal }) =>
-                        webAgent.browse(String(goal), { signal })).result
-                });
-                ws.send(JSON.stringify({ type: 'brief_result', ...brief }));
                 return;
             }
 
@@ -1098,6 +1047,18 @@ wss.on('connection', (ws) => {
                 if (parsed.action === 'stop' && parsed.model) {
                     modelDownloads.manager.stop(String(parsed.model));
                 }
+                const knownModel = (id) => {
+                    const cfg = configReader.readConfig();
+                    const voice = (cfg.models || {}).voice || {};
+                    return Boolean(modelCatalog.catalogEntry(cfg, id))
+                        || [voice.stt, voice.tts].some(v => v && v.model === id)
+                        || Object.values(modelTiers.effective(cfg)).some(spec => spec && spec.model === id);
+                };
+                if (parsed.action === 'start' && parsed.model && !knownModel(String(parsed.model))) {
+                    ws.send(JSON.stringify({ type: 'download_status', ...modelDownloads.manager.status(),
+                        voice_ready: voiceReady(), refused: `${String(parsed.model)} is not in the model catalogue` }));
+                    return;
+                }
                 if (parsed.action === 'start' && parsed.model) {
                     const model = String(parsed.model);
                     const known = modelDownloads.manager.status().queue
@@ -1144,10 +1105,35 @@ function channelSnapshot() {
     };
 }
 
+const channelMemory = { history: [], files: [] };
+
 function channelDeps() {
     return {
-        execute: text => intentQueue.submit(({ signal }) =>
-            openclawBridge.executeIntent(String(text), { interactive: true, signal })).result,
+        execute: async (text, { private: privateAsk = false } = {}) => {
+            const result = await intentQueue.submit(({ signal }) =>
+                openclawBridge.executeIntent(String(text), {
+                    interactive: true, signal,
+                    history: channelMemory.history.slice(-6),
+                    recentFiles: channelMemory.files.slice(-5),
+                    ...(privateAsk ? { private: true } : {})
+                })).result;
+            if (privateAsk) return result;
+            channelMemory.history.push({ role: 'user',
+                text: String(text).slice(0, 240) });
+            if (result && result.response) {
+                channelMemory.history.push({ role: 'assistant',
+                    text: String(result.response).slice(0, 240) });
+            }
+            channelMemory.history = channelMemory.history.slice(-12);
+            const files = (result && result.artifacts
+                && Array.isArray(result.artifacts.files))
+                ? result.artifacts.files : [];
+            for (const file of files) {
+                if (file && file.path) channelMemory.files.push(file);
+            }
+            channelMemory.files = channelMemory.files.slice(-5);
+            return result;
+        },
         answer: (id, decision) =>
             openclawBridge.answerProposal(id, decision === 'yes' ? 'yes' : 'no'),
         transcribe: async filePath => {
@@ -1218,12 +1204,9 @@ async function boot() {
         const held = availability.start();
         if (held.holding) console.log('[Jarvis] Stay-awake assertion held (releases itself on battery).');
         watchers.start();
-        memoryService.start();
         distiller.start();
-        morningBrief.start({
-            browse: goal => intentQueue.submit(({ signal }) =>
-                webAgent.browse(String(goal), { signal })).result
-        });
+        const swept = securityStore.prune();
+        if (swept.expired) console.log(`[Security] ${swept.expired} unanswered disclosure(s) expired.`);
         channelAdapter.start(channelDeps());
     } catch (err) {
         console.warn(`[Jarvis] Availability startup failed: ${err.message}`);

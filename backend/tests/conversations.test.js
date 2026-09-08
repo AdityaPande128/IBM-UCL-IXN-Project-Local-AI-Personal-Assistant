@@ -5,7 +5,7 @@ const os = require('os');
 const path = require('path');
 
 const conversationStore = require('../services/conversationStore');
-const memoryService = require('../services/memoryService');
+const incognito = require('../services/incognito');
 
 function scratchStore() {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-conv-'));
@@ -77,17 +77,15 @@ test('deleting a conversation removes its rows', () => {
     }
 });
 
-test('incognito records nothing, and blank or malformed messages never land', () => {
+test('a private scope records nothing, and blank or malformed messages never land', () => {
     const store = scratchStore();
     try {
         const ws = {};
-        memoryService.setIncognito(true);
-        try {
+        incognito.privately(() => {
             assert.strictEqual(conversationStore.append(ws, 'user', 'secret question'), null);
             assert.strictEqual(ws.conversationId, undefined, 'no conversation came into being');
-        } finally {
-            memoryService.setIncognito(false);
-        }
+        });
+        assert.strictEqual(incognito.isIncognito(), false, 'the scope ends with the call');
 
         assert.strictEqual(conversationStore.append(ws, 'user', '   '), null);
         assert.strictEqual(conversationStore.append(ws, 'wizard', 'hm'), null);
@@ -120,5 +118,24 @@ test('recall pages an old chat back in, and skips the question just asked', () =
             'an ordinary question never pages old chats in');
     } finally {
         store.cleanup();
+    }
+});
+
+test('recall passages drop the assistant\'s own memory disclaimers and keep the user\'s words', async () => {
+    const embedClient = require('../services/embedClient');
+    const original = embedClient.embed;
+    embedClient.embed = async (texts) => texts.map((t, i) => i === 0 ? [1, 0]
+        : /do not have memory/.test(t) ? [1, 0] : /15th/.test(t) ? [0.9, 0.4359] : [0, 1]);
+    const ws = {};
+    try {
+        conversationStore.append(ws, 'user', 'remember we decided to submit the draft on the 15th, not the 21st');
+        conversationStore.append(ws, 'assistant', 'I do not have memory of our previous conversations, so I cannot recall that.');
+        const passages = await conversationStore.answerSource.retrieve('what did we decide about the draft submission date last time?');
+        assert.ok(passages.length >= 1);
+        assert.ok(passages.every(p => !/do not have memory/.test(p.text)));
+        assert.ok(passages.some(p => p.text.startsWith('The user said') && /15th/.test(p.text)));
+    } finally {
+        embedClient.embed = original;
+        if (ws.conversationId) conversationStore.remove(ws.conversationId);
     }
 });

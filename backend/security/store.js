@@ -81,6 +81,7 @@ function open(target = DEFAULT_PATH) {
 
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA foreign_keys = ON');
+    db.exec('PRAGMA secure_delete = ON');
     db.exec(SCHEMA);
     db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 
@@ -97,13 +98,18 @@ function handle() {
 // rewrite what happened. Settled approvals, though, age out: they are
 // working state, not testimony.
 const RETAIN_DAYS = 90;
+const PENDING_DAYS = 1;
 
 function prune(now = Date.now()) {
     const cutoff = new Date(now - RETAIN_DAYS * 24 * 3600 * 1000).toISOString();
+    const stale = new Date(now - PENDING_DAYS * 24 * 3600 * 1000).toISOString();
+    const expired = handle()
+        .prepare("UPDATE approvals SET status = 'expired', resolved_ts = ? WHERE status = 'pending' AND ts < ?")
+        .run(new Date(now).toISOString(), stale).changes;
     const approvals = handle()
         .prepare("DELETE FROM approvals WHERE status != 'pending' AND ts < ?")
         .run(cutoff).changes;
-    return { approvals };
+    return { approvals, expired };
 }
 
 function close() {
@@ -174,10 +180,10 @@ function requestApproval(request) {
     return Number(result.lastInsertRowid);
 }
 
-function pendingApprovals() {
+function pendingApprovals(limit = 10000) {
     return handle()
-        .prepare("SELECT * FROM approvals WHERE status = 'pending' ORDER BY id ASC")
-        .all()
+        .prepare("SELECT * FROM approvals WHERE status = 'pending' ORDER BY id ASC LIMIT ?")
+        .all(limit)
         .map(row => ({ ...row, label: labels.deserialise(row.label) }));
 }
 
@@ -277,10 +283,23 @@ function grantedRoots(collection) {
     return rows;
 }
 
+function realOrNearest(p) {
+    let probe = path.resolve(p);
+    const tail = [];
+    while (!fs.existsSync(probe)) {
+        tail.unshift(path.basename(probe));
+        const parent = path.dirname(probe);
+        if (parent === probe) break;
+        probe = parent;
+    }
+    try { probe = fs.realpathSync(probe); } catch { /* keep the resolved form */ }
+    return tail.length ? path.join(probe, ...tail) : probe;
+}
+
 function isWithinGrantedRoot(target, collection) {
-    const resolved = path.resolve(target);
+    const resolved = realOrNearest(target);
     return grantedRoots(collection).some(row => {
-        const base = path.resolve(row.path);
+        const base = realOrNearest(row.path);
         return resolved === base || resolved.startsWith(base + path.sep);
     });
 }

@@ -52,6 +52,7 @@ function classOf(intentType) {
 
 function record(prompt, decision) {
     if (!decision || !decision.schema_valid) return null;
+    try { if (require('./incognito').isIncognito()) return null; } catch { /* not wired in tests */ }
     const result = handle().prepare(`
         INSERT INTO decisions (ts, prompt, intent_type, intent_class,
                                confidence, reasoning, target_skill)

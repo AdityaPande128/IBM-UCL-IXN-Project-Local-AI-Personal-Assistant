@@ -31,12 +31,10 @@ interface SettingsViewProps {
   wakeWanted: boolean;
   onSetWake: (on: boolean) => void;
   downloads: DownloadsData | null;
-  incognito: boolean;
   onRefresh: () => void;
   onSaveDiagnostics: () => void;
   onUpdateSettings: (update: SettingsUpdate) => void;
   onUpdateProfile: (update: ProfileUpdate) => void;
-  onSetIncognito: (on: boolean) => void;
   onDownloadAction: (action: "start" | "stop" | "status", model?: string) => void;
   onClose: () => void;
 }
@@ -89,9 +87,9 @@ function readAvatar(file: File): Promise<string> {
 export function SettingsView({
   connected, abilities, channel, diagnostics, settingsResult, profile, profileError,
   wakeWanted, onSetWake,
-  downloads, incognito, onRefresh, onRequestChannel, onSetChannelToken,
+  downloads, onRefresh, onRequestChannel, onSetChannelToken,
   onClearChannel, onSaveDiagnostics, onUpdateSettings, onUpdateProfile,
-  onSetIncognito, onDownloadAction, onClose,
+  onDownloadAction, onClose,
 }: SettingsViewProps) {
   const [tab, setTab] = useState<TabId>("profile");
   const [nameEdit, setNameEdit] = useState<string | null>(null);
@@ -391,17 +389,6 @@ export function SettingsView({
                       <option value="jarvis">Jarvis — checked and verified</option>
                       <option value="openclaw">OpenClaw with Jarvis enhancements</option>
                     </select>
-                  </div>
-                  <div className="settings-field">
-                    <span className="settings-label">Private mode</span>
-                    <label className="ob-check">
-                      <input
-                        type="checkbox"
-                        checked={incognito}
-                        onChange={(e) => onSetIncognito(e.target.checked)}
-                      />
-                      Nothing from this session is remembered
-                    </label>
                   </div>
                   <div className="settings-field">
                     <span className="settings-label">Improvement</span>

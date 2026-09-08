@@ -15,7 +15,6 @@ const skillSandbox = require('./skillSandbox');
 const skillPins = require('./skillPins');
 const securityStore = require('../security/store');
 const mailProvider = require('./mailProvider');
-const memoryService = require('./memoryService');
 
 // A generated skill's pin has three honest states: verified against its pin,
 // not yet pinned (it pins itself the first time it runs), or drifted — and
@@ -88,7 +87,8 @@ function snapshot(config) {
                 .map(({ account, name, label }) => ({ account, provider: name, label }))
         },
         channel: channelLines(config),
-        memory: memoryService.status(),
+        disclosures: securityStore.pendingApprovals(20),
+        disclosures_pending: securityStore.pendingApprovals(1000).length,
         sandbox_root: path.join(os.homedir(), 'Jarvis_Sandbox')
     };
 }

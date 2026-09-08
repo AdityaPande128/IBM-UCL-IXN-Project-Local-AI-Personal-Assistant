@@ -39,10 +39,6 @@ const traceStore = require('../services/traceStore');
 traceStore.open(path.join(scratch, 'traces.db'));
 const watchers = require('../services/watchers');
 watchers.open(path.join(scratch, 'watchers.db'));
-const memoryStore = require('../services/memoryStore');
-memoryStore.open(path.join(scratch, 'memory.db'));
-const memoryService = require('../services/memoryService');
-memoryService.setEmbedder(async texts => texts.map(() => [1, 0, 0, 0]));
 
 const WebSocket = require('ws');
 const directCrypto = require('../services/directCrypto');

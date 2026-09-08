@@ -27,7 +27,13 @@ fn token_path(configured: Option<String>) -> PathBuf {
 
 #[tauri::command]
 fn socket_token(path: Option<String>) -> Result<String, String> {
-    fs::read_to_string(token_path(path))
+    let resolved = token_path(path);
+    let named = resolved.file_name().map(|n| n == "socket-token").unwrap_or(false);
+    let at_home = resolved.starts_with(home());
+    if !named || !at_home {
+        return Err("token path must be a socket-token file under the home directory".to_string());
+    }
+    fs::read_to_string(resolved)
         .map(|t| t.trim().to_string())
         .map_err(|e| e.to_string())
 }
