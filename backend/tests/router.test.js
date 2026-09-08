@@ -484,3 +484,12 @@ test('the deterministic gates read the registered sentences the way the operator
     assert.ok(!GATES.OWN_MAIL_ASK.test("log into Priya's email and delete her messages"));
     assert.ok(!GATES.OWN_MAIL_ASK.test("email Priya's password to me"));
 });
+
+test('mail search terms: a titled message is searched by subject and a reply question by sender', () => {
+    const { mailSearchTerms } = require('../services/openclawBridge');
+    assert.strictEqual(mailSearchTerms('what does the latest email titled "Quarterly figures" ask me to do?'), 'subject:"Quarterly figures"');
+    assert.strictEqual(mailSearchTerms('reply to the "Confirmation needed" email saying "confirmed"'), 'Confirmation needed');
+    assert.strictEqual(mailSearchTerms('check my email to see if Priya has responded to my last email'), 'from:Priya');
+    assert.strictEqual(mailSearchTerms('what does the University of Bristol email ask me to do before departure?'), 'University of Bristol');
+    assert.strictEqual(mailSearchTerms('has my order from Riverside Books shipped yet?'), 'Riverside Books');
+});

@@ -324,6 +324,9 @@ test('a query of more than one word is searched for as a phrase', () => {
     assert.strictEqual(webAgent.phrase('to:priya@example.com'),
         'to:priya@example.com');
     assert.strictEqual(webAgent.phrase('newer_than:2d from:sam'), 'newer_than:2d from:sam');
+    assert.strictEqual(webAgent.phrase('subject:Quarterly figures'),
+        'subject:"Quarterly figures"');
+    assert.strictEqual(webAgent.phrase('from:Priya Sharma'), 'from:"Priya Sharma"');
 
     assert.strictEqual(webAgent.phrase('"August 15"'), '"August 15"');
     assert.strictEqual(webAgent.phrase(''), '');
@@ -2527,7 +2530,7 @@ test('a when that sits collapsed under the thread is expanded into the card', as
     llmClient.complete = async () => 'not even json';
 
     try {
-        const goal = 'find the curry email from Priya and put the curry on my calendar';
+        const goal = 'find the curry email from Meera and put the curry on my calendar';
         const result = await webAgent.browse(goal, {
             url: `${site.origin}/mail`, allowPrivate: true, maxActions: 8,
             request: goal, calendarUrl: `${site.origin}/calendar/timed`

@@ -506,11 +506,16 @@ const OWN_MAIL_ASK =
 
 function mailSearchTerms(text) {
     const quoted = /["\u201c]([^"\u201d]{3,80})["\u201d]/.exec(text);
-    if (quoted) return quoted[1].trim();
+    if (quoted) {
+        const phrase = quoted[1].trim();
+        return /\b(?:titled|subject|called|named|headed)\b/i.test(text.slice(0, quoted.index)) ? `subject:"${phrase}"` : phrase;
+    }
     const body = String(text).replace(/^\s*\S+/, '');
     const runs = body.match(/\b[A-Z][\w'&-]*(?:\s+(?:of|the|and|for|de|du|von)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*)*/g) || [];
     const best = runs.map(r => r.trim()).sort((a, b) => b.length - a.length)[0];
-    return best && best.length >= 3 ? best : null;
+    if (!best || best.length < 3) return null;
+    return /\b(?:responded|replied|reply|replies|wrote|written|got back|heard (?:back )?from|sent me)\b/i.test(text) && !/\s/.test(best)
+        ? `from:${best}` : best;
 }
 
 function locateByName(text) {

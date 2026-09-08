@@ -665,7 +665,11 @@ const OPERATOR = /\b\w+:(?=\S)/;
 
 function phrase(query) {
     const text = String(query || '').trim();
-    if (!text || /["“”]/.test(text) || OPERATOR.test(text)) return text;
+    if (!text || /["“”]/.test(text)) return text;
+    if (OPERATOR.test(text)) {
+        return text.replace(/^(\w+:)(\S+(?:\s+\S+)+)$/,
+            (whole, operator, value) => OPERATOR.test(value) ? whole : `${operator}"${value}"`);
+    }
     return /\s/.test(text) ? `"${text}"` : text;
 }
 
@@ -1909,7 +1913,8 @@ async function browse(goal, options = {}) {
         // scope and refiners into everything that follows — a from:-search
         // run inside a Sent-Items scope finds nothing. Leave the search
         // before starting this request's own work.
-        const midSearch = ((observation && observation.elements) || []).find(element =>
+        const askedSearch = Boolean(options.url) && /[#/]search[/?]/i.test(options.url);
+        const midSearch = askedSearch ? null : ((observation && observation.elements) || []).find(element =>
             !holdsText(element) && !element.disabled
             && /^(exit|close|clear)\s+search$/i.test(String(element.name || '').trim()));
         if (midSearch) {

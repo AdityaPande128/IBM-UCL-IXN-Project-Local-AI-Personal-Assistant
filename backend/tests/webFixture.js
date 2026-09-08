@@ -211,7 +211,7 @@ const MAILBOX = [
 
     // A thread whose plan-bearing message sits collapsed behind an
     // "Expand conversation" control, the way a busy conversation renders.
-    { id: 'm7', box: 'inbox', from: 'Priya Sharma', address: 'priya@example.com',
+    { id: 'm7', box: 'inbox', from: 'Meera Iyer', address: 'meera@example.com',
       subject: 'Curry — are you around on Friday evening for a proper catch-up?',
       date: 'July 20',
       body: `Sounds lovely, see you then!`,

@@ -1,4 +1,5 @@
 const test = require('node:test');
+process.env.JARVIS_MEMORY_GB = '24';
 const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
