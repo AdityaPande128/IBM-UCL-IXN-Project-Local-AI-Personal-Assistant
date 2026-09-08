@@ -10,15 +10,7 @@ const FORBIDDEN_IMPORTS = [
     'multiprocessing.connection'
 ];
 
-const SANDBOX_PROFILE = `(version 1)
-(deny default)
-(allow process-exec process-fork)
-(allow file-read*)
-(allow file-write* (subpath "%SCRATCH%"))
-(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))
-(allow sysctl-read)
-(deny network*)
-`;
+const skillSandbox = require('./skillSandbox');
 
 
 const MAX_TRIAL_OUTPUT_BYTES = 4 * 1024 * 1024;
@@ -154,17 +146,26 @@ print(json.dumps(args))
         }
 
         const accepted = new Set();
+        const positional = new Set();
         for (const arg of parsed) {
             for (const flag of arg.flags) {
                 if (flag.startsWith('--')) accepted.add(flag.slice(2));
+                else if (!flag.startsWith('-')) positional.add(flag);
             }
         }
 
-        if (accepted.size === 0) return { valid: true, errors: [] };
+        if (accepted.size === 0 && positional.size === 0) return { valid: true, errors: [] };
 
         const errors = [];
         for (const name of declared) {
             if (accepted.has(name)) continue;
+            if (positional.has(name) || positional.has(name.replace(/_/g, '-'))) {
+                errors.push(
+                    `parameter "${name}" is read as a positional argument (add_argument("${name}")), but the skill is ` +
+                    `invoked with option flags: declare it as add_argument("--${name}").`
+                );
+                continue;
+            }
 
             const hyphenated = name.replace(/_/g, '-');
             if (accepted.has(hyphenated)) {
@@ -199,7 +200,7 @@ async function runSandboxed(argv, scratch, timeoutMs) {
     if (sandboxAvailable()) {
         const profilePath = path.join(scratch, '.sandbox.sb');
         try {
-            await fsp.writeFile(profilePath, SANDBOX_PROFILE.replace('%SCRATCH%', scratch), 'utf8');
+            await fsp.writeFile(profilePath, skillSandbox.buildTrialProfile(scratch), 'utf8');
             command = 'sandbox-exec';
             args = ['-f', profilePath, ...argv];
         } catch (err) {
@@ -243,8 +244,17 @@ async function runTestCase(scriptSource, testCase, parameterOrder, timeoutMs) {
             if (!target.startsWith(scratch + path.sep)) {
                 return { passed: false, reason: `fixture path escapes the scratch directory: ${fixture.path}` };
             }
-            await fsp.mkdir(path.dirname(target), { recursive: true });
-            await fsp.writeFile(target, fixture.content ?? '', 'utf8');
+            try {
+                if (/[\\/]$/.test(String(fixture.path))) {
+                    await fsp.mkdir(target, { recursive: true });
+                    continue;
+                }
+                await fsp.mkdir(path.dirname(target), { recursive: true });
+                await fsp.writeFile(target, fixture.content ?? '', 'utf8');
+            } catch (err) {
+                return { passed: false, reason: `fixture "${fixture.path}" cannot be written (${err.code || err.message}): `
+                    + 'a fixture path is being used both as a file and as a directory; declare files only, folders are created for them' };
+            }
         }
 
         const argv = ['python3', scriptPath];
@@ -289,8 +299,21 @@ async function runTestCase(scriptSource, testCase, parameterOrder, timeoutMs) {
 
         for (const relative of expect.files_exist || []) {
             const target = path.resolve(scratch, relative);
+            if (!target.startsWith(scratch + path.sep)) {
+                return { passed: false, reason: `expected file path escapes the scratch directory: ${relative}`, ...context };
+            }
             if (!fs.existsSync(target)) {
                 return { passed: false, reason: `expected file was not created: ${relative}`, ...context };
+            }
+        }
+
+        for (const relative of expect.files_missing || []) {
+            const target = path.resolve(scratch, relative);
+            if (!target.startsWith(scratch + path.sep)) {
+                return { passed: false, reason: `expected-missing path escapes the scratch directory: ${relative}`, ...context };
+            }
+            if (fs.existsSync(target)) {
+                return { passed: false, reason: `expected path still exists: ${relative}`, ...context };
             }
         }
 
@@ -330,9 +353,33 @@ const GROUNDED_MAX_FILES = 200;
 
 function extractRequestPaths(request) {
     const matches = String(request).match(/(?:~\/|\/(?:Users|tmp|private|var|Volumes)\/)[^\s"',;]+/g) || [];
-    return matches
+    const found = matches
         .map(p => p.replace(/[).:]+$/, ''))
         .map(p => p.startsWith('~') ? path.join(os.homedir(), p.slice(1)) : p);
+    for (const bare of String(request).match(/(?<![\/\w.~-])[\w][\w.-]*\.(?:csv|tsv|txt|json|md|log|xlsx?|pdf|docx?)\b/gi) || []) {
+        try {
+            const hit = require('./fileIndex').search({ text: bare, limit: 5 })
+                .find(row => String(row.name).toLowerCase() === bare.toLowerCase());
+            if (hit && !found.includes(hit.path)) found.push(hit.path);
+        } catch { /* without an index the bare name stays a name */ }
+    }
+    return found;
+}
+
+const DID_NOTHING =
+    /\b(?:does not contain|not found|no such|missing|invalid|unsupported|could not|cannot|unable|no (?:rows|data|records|columns|entries|matches)|nothing)\b/i;
+function emptyResult(stdout) {
+    const text = String(stdout || '');
+    const line = text.split('\n').find(l => l.startsWith('JARVIS_RESULT'));
+    if (!line) {
+        const numbers = text.match(/-?\d+(?:\.\d+)?/g);
+        return Boolean(numbers && numbers.length && numbers.every(n => Number(n) === 0));
+    }
+    try {
+        const values = Object.values(JSON.parse(line.replace(/^JARVIS_RESULT\s*/, '')));
+        return values.length > 0 && values.every(v => v === 0 || v === null || v === ''
+            || (Array.isArray(v) && v.length === 0) || (v && typeof v === 'object' && !Object.keys(v).length));
+    } catch { return false; }
 }
 
 function pickPathParameter(parameters) {
@@ -373,6 +420,9 @@ function measure(target) {
 async function groundedTrial(candidate, request, timeoutMs) {
     const source = extractRequestPaths(request).find(p => fs.existsSync(p));
     if (!source) return { skipped: true, why: 'the request names no existing path' };
+    if (skillSandbox.isSensitivePath(source) || require('../security/classifier').secretCheck(source).secret) {
+        return { skipped: true, why: `${path.basename(source)} is not something a trial may copy` };
+    }
 
     const paramName = pickPathParameter(candidate.parameters);
     if (!paramName) return { skipped: true, why: 'no unambiguous path parameter' };
@@ -403,12 +453,33 @@ async function groundedTrial(candidate, request, timeoutMs) {
         if (result.timedOut) {
             return { passed: false, reason: `grounded trial on ${path.basename(source)} timed out after ${timeoutMs}ms` };
         }
+        const dataHead = () => {
+            try {
+                return fs.statSync(source).isFile()
+                    ? fs.readFileSync(source, 'utf8').split('\n').slice(0, 4).join('\n').slice(0, 400) : '';
+            } catch { return ''; }
+        };
         if (result.code !== 0) {
             const cap = text => String(text || '').slice(0, 1500);
+            const head = dataHead();
             return {
                 passed: false,
                 reason: `the script passed its own tests but failed on the request's own data ` +
-                        `(a copy of ${path.basename(source)}): exit code ${result.code}`,
+                        `(a copy of ${path.basename(source)}): exit code ${result.code}` +
+                        (head ? `; read the data as it actually is, which begins:\n${head}` : ''),
+                argv: `run.py --${paramName} ${path.basename(source)}`,
+                stdout: cap(result.stdout),
+                stderr: cap(result.stderr)
+            };
+        }
+        if (DID_NOTHING.test(result.stdout) || emptyResult(result.stdout)) {
+            const cap = text => String(text || '').slice(0, 1500);
+            const head = dataHead();
+            return {
+                passed: false,
+                reason: `the script passed its own tests but found nothing in the request's own data ` +
+                        `(a copy of ${path.basename(source)}); read the data as it actually is` +
+                        (head ? `, which begins:\n${head}` : ''),
                 argv: `run.py --${paramName} ${path.basename(source)}`,
                 stdout: cap(result.stdout),
                 stderr: cap(result.stderr)

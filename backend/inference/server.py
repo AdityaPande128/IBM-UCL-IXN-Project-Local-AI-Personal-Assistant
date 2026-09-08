@@ -293,14 +293,20 @@ _THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 def _apply_template(tokenizer, messages, thinking: bool):
     """Render the chat template, disabling reasoning mode where supported."""
     try:
-        return tokenizer.apply_chat_template(
+        prompt = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True,
             enable_thinking=bool(thinking)
         )
     except TypeError:
-        return tokenizer.apply_chat_template(
+        prompt = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
+    if not thinking:
+        template = getattr(tokenizer, "chat_template", None) or ""
+        if "<think>" in template and "enable_thinking" not in template \
+                and not prompt.rstrip().endswith("</think>"):
+            prompt += "<think>\n\n</think>\n\n"
+    return prompt
 
 
 def _strip_thinking(text: str) -> str:
@@ -385,6 +391,14 @@ def _generate_with(target_model, target_tokenizer, req, formatted_messages, tool
         print(f"[Inference] prompt {len(prompt)} chars", flush=True)
     
     max_tokens = req.get("max_tokens") or req.get("max_output_tokens") or 512
+
+    seed = req.get("seed")
+    if seed is not None:
+        try:
+            import mlx.core as mx
+            mx.random.seed(int(seed))
+        except Exception as e:
+            print(f"[Inference] seed ignored: {e}", flush=True)
 
     temperature = req.get("temperature")
     top_p = req.get("top_p")

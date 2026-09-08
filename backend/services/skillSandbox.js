@@ -219,6 +219,42 @@ function buildProfile(skill, tempDir, parameters = {}, allowRead = []) {
     return lines.join('\n') + '\n';
 }
 
+function isSensitivePath(target) {
+    let resolved;
+    try { resolved = resolvePath(target); } catch { return false; }
+    return [...SENSITIVE_READ_PATHS, ...JARVIS_PRIVATE_PATHS].some(sensitive => {
+        const base = resolvePath(sensitive);
+        return resolved === base || resolved.startsWith(base + path.sep);
+    });
+}
+
+function buildTrialProfile(scratch) {
+    const lines = [
+        '(version 1)',
+        '(deny default)',
+        '(allow process-exec process-fork)',
+        '(allow file-read*)',
+        '(allow file-read-metadata)',
+        '(allow sysctl-read)',
+        '(allow file-ioctl)',
+        '(allow mach-lookup)',
+        `(deny file-read* (subpath ${sbplString(HOME)}))`,
+        `(allow file-read* (subpath ${sbplString(scratch)}))`,
+        `(allow file-write* (subpath ${sbplString(scratch)}))`,
+        '(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))'
+    ];
+    for (const prefix of interpreterPrefixes({ exec: { argv: ['python3'] } })) {
+        lines.push(`(allow file-read* (subpath ${sbplString(prefix)}))`);
+    }
+    for (const sensitive of [...SENSITIVE_READ_PATHS, ...JARVIS_PRIVATE_PATHS]) {
+        const resolved = resolvePath(sensitive);
+        lines.push(`(deny file-read* (subpath ${sbplString(resolved)}))`);
+        lines.push(`(deny file-write* (subpath ${sbplString(resolved)}))`);
+    }
+    lines.push('(deny network*)');
+    return lines.join('\n') + '\n';
+}
+
 function wrap(skill, argv, tempDir, mode = 'generated', parameters = {}, allowRead = []) {
     if (!shouldEnforce(skill, mode)) {
         return { argv, profilePath: null, enforced: false };
@@ -229,7 +265,7 @@ function wrap(skill, argv, tempDir, mode = 'generated', parameters = {}, allowRe
         return { argv, profilePath: null, enforced: false };
     }
 
-    const profile = buildProfile(skill, tempDir, parameters);
+    const profile = buildProfile(skill, tempDir, parameters, allowRead);
     const profilePath = path.join(tempDir, '.skill-sandbox.sb');
     fs.writeFileSync(profilePath, profile, 'utf8');
 
@@ -243,6 +279,8 @@ function wrap(skill, argv, tempDir, mode = 'generated', parameters = {}, allowRe
 module.exports = {
     wrap,
     buildProfile,
+    buildTrialProfile,
+    isSensitivePath,
     deriveScopesFromParameters,
     isUnscoped,
     shouldEnforce,

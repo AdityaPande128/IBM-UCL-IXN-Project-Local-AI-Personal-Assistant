@@ -70,6 +70,7 @@ function open(target = DEFAULT_PATH) {
 
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = NORMAL');
+    db.exec('PRAGMA busy_timeout = 2000');
     db.exec(SCHEMA);
     return db;
 }
@@ -123,6 +124,7 @@ function crawl({ roots, maxDepth = 12, onProgress = () => {} } = {}) {
         let sinceCommit = 0;
 
         const stack = [[root, 0]];
+        try {
         while (stack.length) {
             const [dir, depth] = stack.pop();
             if (depth > maxDepth) continue;
@@ -179,6 +181,10 @@ function crawl({ roots, maxDepth = 12, onProgress = () => {} } = {}) {
                 }
             }
         }
+        } catch (err) {
+            try { database.exec('ROLLBACK'); } catch { }
+            throw err;
+        }
 
         database.exec('COMMIT');
     }
@@ -211,12 +217,17 @@ function crawl({ roots, maxDepth = 12, onProgress = () => {} } = {}) {
 function rebuildSearchIndex() {
     const database = handle();
     database.exec('BEGIN');
-    database.exec('DELETE FROM files_fts');
-    database.exec(`
-        INSERT INTO files_fts (path, name, dir)
-        SELECT path, name, dir FROM files
-    `);
-    database.exec('COMMIT');
+    try {
+        database.exec('DELETE FROM files_fts');
+        database.exec(`
+            INSERT INTO files_fts (path, name, dir)
+            SELECT path, name, dir FROM files
+        `);
+        database.exec('COMMIT');
+    } catch (err) {
+        try { database.exec('ROLLBACK'); } catch { }
+        throw err;
+    }
 }
 
 
@@ -302,10 +313,15 @@ function markContentIndexed(paths, indexed = true) {
     const statement = database.prepare('UPDATE files SET content_indexed = ? WHERE path = ?');
     database.exec('BEGIN');
     let changed = 0;
-    for (const target of paths) {
-        changed += Number(statement.run(indexed ? 1 : 0, path.resolve(target)).changes);
+    try {
+        for (const target of paths) {
+            changed += Number(statement.run(indexed ? 1 : 0, path.resolve(target)).changes);
+        }
+        database.exec('COMMIT');
+    } catch (err) {
+        try { database.exec('ROLLBACK'); } catch { }
+        throw err;
     }
-    database.exec('COMMIT');
     return changed;
 }
 

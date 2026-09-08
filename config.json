@@ -8,7 +8,7 @@
     "openclaw": 18789
   },
   "models": {
-    "budget_gb": 14,
+    "budget_gb": 12,
     "budget_by_class": {
       "8": 4.5,
       "16": 9,
@@ -17,15 +17,15 @@
     "voice_reserve_gb": 1.83,
     "tiers": {
       "guard": {
-        "model": "mlx-community/granite-4.1-8b-4bit",
+        "model": "mlx-community/gemma-4-E4B-it-qat-4bit",
         "policy": "resident"
       },
       "engine": {
-        "model": "mlx-community/granite-4.1-8b-4bit",
+        "model": "mlx-community/gemma-4-E4B-it-qat-4bit",
         "policy": "resident"
       },
       "smith": {
-        "model": "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",
+        "model": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
         "policy": "transient"
       }
     },
@@ -214,5 +214,11 @@
       ],
       "cwd": "backend/inference"
     }
+  },
+  "mail": {
+    "provider": "gmail"
+  },
+  "remote": {
+    "lan_bind": true
   }
 }
