@@ -55,9 +55,19 @@ stop_app() {
   sleep 4
   pkill -f "user-data-dir=$ROOT/backend/data/browser-profile" >/dev/null 2>&1; sleep 2
 }
+# The inference server may be started by the operator when the app's own
+# cannot be (EVAL_INFERENCE_CMD); the app is then given twenty seconds to
+# bring up its daemon before the server is started beside it.
 restart_app() {
   stop_app; open "$APP"
-  for i in $(seq 1 75); do up && { say "app up: $(tiers)"; return 0; }; sleep 4; done
+  for i in $(seq 1 75); do
+    up && { say "app up: $(tiers)"; return 0; }
+    if [ "$i" -eq 5 ] && [ -n "${EVAL_INFERENCE_CMD:-}" ] && ! curl -s -m 2 http://127.0.0.1:8787/health >/dev/null 2>&1; then
+      (cd "$ROOT/backend/inference" && nohup zsh -c "$EVAL_INFERENCE_CMD" >> "$E/inference-external.log" 2>&1 &)
+      say "inference started by the operator"
+    fi
+    sleep 4
+  done
   say "app did not come back"; return 1
 }
 ensure_app() { up && return 0; say "app not answering; relaunching"; restart_app; }

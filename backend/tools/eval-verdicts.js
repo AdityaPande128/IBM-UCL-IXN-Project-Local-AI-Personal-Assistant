@@ -81,6 +81,11 @@ function score(row) {
         }
         case 'sent': {
             const hit = claim(row, sends, e => eventText(e).includes((check.contains || '').toLowerCase()) && (!check.to || eventText(e).includes(check.to.toLowerCase())));
+            // A send in the window that is not the one asked for still
+            // belongs to this run, which was the one sending; it is scored
+            // as the wrong message rather than left for a neighbour to wear.
+            const other = hit ? null : claim(row, sends);
+            if (other) return { verdict: 'fail', evidence: `sent the wrong message at ${other.at}: "${String(other.subject || '').slice(0, 40)}"` };
             if (row.claimed) return { verdict: hit ? 'pass' : 'fail', evidence: hit ? `sent at ${hit.at}` : 'claimed but not in Sent' };
             return { verdict: hit ? 'fail-misreported' : 'fail', evidence: hit ? `sent at ${hit.at} but reported failure` : 'not sent, not claimed' };
         }
@@ -97,6 +102,8 @@ function score(row) {
             // A reply appears in a Sent listing under its thread's subject,
             // with or without a Re: prefix, so the thread and the words decide.
             const hit = claim(row, sends, e => eventText(e).includes(check.subject.toLowerCase()) && eventText(e).includes((check.contains || '').toLowerCase()));
+            const other = hit ? null : claim(row, sends);
+            if (other) return { verdict: 'fail', evidence: `sent the wrong message at ${other.at}: "${String(other.subject || '').slice(0, 40)}"` };
             if (row.claimed) return { verdict: hit ? 'pass' : 'fail', evidence: hit ? `replied in thread at ${hit.at}` : 'claimed but no reply in Sent' };
             return { verdict: hit ? 'fail-misreported' : 'fail', evidence: hit ? `replied at ${hit.at} but reported failure` : 'no reply, not claimed' };
         }
