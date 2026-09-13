@@ -375,6 +375,9 @@ function validatePlan(parsed, { graph = capabilityGraph, maxSteps = MAX_STEPS, q
             ? step.inputs
             : {};
         step.inputs = inputs;
+        // A model spells a site name into a host with a space in it; the host
+        // it meant has none.
+        if (typeof inputs.url === 'string' && /^\s*https?:\/\//i.test(inputs.url)) inputs.url = inputs.url.replace(/\s+/g, '');
 
         for (const reference of referencesIn(inputs)) {
             consumed.add(reference.step);

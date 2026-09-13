@@ -153,6 +153,9 @@ async function read(goal, options = {}) {
         const better = await recompose(words, raw).catch(() => null);
         if (better && !copied(words, better)) write = better;
     }
+    // Words the user dictated are typed whether or not the model listed them:
+    // a message composed with nothing in it is not the message asked for.
+    if (!write.length && (act === 'compose' || act === 'send')) write = dictated(words);
 
     const file = text(parsed.file);
     const mandate = webPolicy.mandateFromIntent(act, options.label);
@@ -200,12 +203,34 @@ async function recompose(goal, previous) {
     return parsed && typeof parsed === 'object' ? list(parsed.write) : null;
 }
 
+// Double quotes always quote; a single quote quotes only when it opens
+// after a space and closes before one, so an apostrophe inside a word
+// ("I've", "o'clock") never starts a phrase.
+function quotedIn(words) {
+    const found = [];
+    for (const m of String(words).matchAll(/["“”]([^"“”]{2,200})["“”]|(?:^|\s)['‘]([^'’]{2,200})['’](?=\s|$|[.,!?;:])/g)) {
+        const phrase = (m[1] || m[2] || '').trim();
+        if (phrase) found.push(phrase);
+    }
+    return found;
+}
+
+// The text a request dictates: what it quotes, else what follows "saying",
+// "that says" or "with the message".
+function dictated(goal) {
+    const words = String(goal || '');
+    const quoted = quotedIn(words);
+    if (quoted.length) return quoted;
+    const clause = /\b(?:saying|that says|which says|with the (?:text|words|message|body))\s+(.+?)\s*[.!]?\s*$/i.exec(words);
+    if (!clause) return [];
+    const said = clause[1].trim();
+    return said.length >= 2 ? [said.charAt(0).toUpperCase() + said.slice(1)] : [];
+}
+
 function fallback(goal, label, why) {
     const words = String(goal || '');
     const address = (words.toLowerCase().match(/[\w.+-]+@[\w.-]+\.\w{2,}/) || [])[0];
-    const quoted = (words.match(/["“”'‘’]([^"“”'‘’]{2,200})["“”'‘’]/g) || [])
-        .map(phrase => phrase.slice(1, -1).trim())
-        .filter(Boolean);
+    const quoted = quotedIn(words);
     const written = (words.match(/(?:~\/|\/)[\w.\-/ ]*\.[A-Za-z0-9]{1,8}/) || [])[0];
 
     return {
@@ -230,4 +255,4 @@ function list(value) {
     return values.map(entry => String(entry ?? '').trim()).filter(Boolean);
 }
 
-module.exports = { read, fallback, ACTS, SYSTEM_PROMPT };
+module.exports = { read, fallback, dictated, ACTS, SYSTEM_PROMPT };
