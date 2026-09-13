@@ -130,7 +130,7 @@ function coerceParameters(skill, supplied = {}) {
 }
 
 
-const TOKEN = /\{\{\s*([a-zA-Z0-9_]+)(?:\|([a-zA-Z]+))?\s*\}\}/g;
+const TOKEN = /\{\{\s*([a-zA-Z0-9_]+)(?:\|([a-zA-Z_]+))?\s*\}\}/g;
 
 const FILTERS = {
     percent:        v => `${Math.round(Number(v) * 100)}%`,
@@ -324,6 +324,18 @@ async function execute(skill, supplied = {}, options = {}) {
     }
 
     const argv = buildArgv(skill, coercion.parameters);
+    // A token the request never filled must not run as literal text: the
+    // skill would act on a placeholder, so the missing value is asked for.
+    const unfilled = argv.map(part => String(part).match(/\{\{\s*([a-zA-Z0-9_]+)(?:\|[a-zA-Z_]+)?\s*\}\}/)).find(Boolean);
+    if (unfilled && unfilled[1] !== '__dir__') {
+        return {
+            status: 'needs_clarification',
+            response: `I need the ${unfilled[1].replace(/_/g, ' ')} for that. What should it be?`,
+            skill: skill.name,
+            version: skill.version,
+            durationMs: Date.now() - startedAt
+        };
+    }
 
     const tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-run-')));
 

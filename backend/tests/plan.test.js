@@ -1184,3 +1184,9 @@ test('a what-does-it-say question cannot end at filenames', () => {
     }, { question: 'where is my hemoglobin report' });
     assert.ok(located.valid, located.errors.join('; '));
 });
+
+test('a planned address with a space in its host is read as the host it meant', () => {
+    const steps = [{ id: 's1', capability: 'web.read', inputs: { url: 'https://www.science museum.org.uk' } }];
+    planner.validatePlan({ steps }, { question: 'what time does the Science Museum close today?' });
+    assert.strictEqual(steps[0].inputs.url, 'https://www.sciencemuseum.org.uk');
+});
