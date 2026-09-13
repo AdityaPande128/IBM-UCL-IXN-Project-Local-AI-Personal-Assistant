@@ -2673,3 +2673,14 @@ test('a question that names an email as a noun grants no send, and a reply manda
         mandate: replying, home: 'https://mail.google.com/', destination: 'https://mail.google.com/' });
     assert.strictEqual(replied.allowed, true);
 });
+
+test('the user\'s own pronoun is not a person the request names', () => {
+    assert.deepStrictEqual(webAgent.named("reply to the email about the flat viewing saying I'll be there at eleven"), []);
+    assert.deepStrictEqual(webAgent.named('tell Priya I am running late'), ['Priya']);
+});
+
+test('dictated words are typed whether quoted or said', () => {
+    assert.deepStrictEqual(webIntent.dictated("draft an email to sam@example.com saying I've booked a table for one o'clock"), ["I've booked a table for one o'clock"]);
+    assert.deepStrictEqual(webIntent.dictated('email sam@example.com saying "Sounds good to me"'), ['Sounds good to me']);
+    assert.deepStrictEqual(webIntent.dictated('check whether Sam replied'), []);
+});

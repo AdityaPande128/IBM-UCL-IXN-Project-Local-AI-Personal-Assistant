@@ -623,6 +623,8 @@ function searchBox(observation) {
     return submits ? elements.find(empty) : undefined;
 }
 
+const SELF_WORD = /^(?:I|I'll|I’ll|I'm|I’m|I've|I’ve|I'd|I’d|Me|My|Mine|We|We'll|We’ll|We're|We’re|Our|Ours|You|Your)$/;
+
 function named(goal) {
     const withoutQuotes = String(goal || '').replace(/["“”'][^"“”']*["“”']/g, ' ');
     const words = withoutQuotes.split(/\s+/).filter(Boolean);
@@ -637,6 +639,10 @@ function named(goal) {
         if (bare.length < 3) return;
         if (index === 0) return;
         if (!/^\p{Lu}/u.test(bare)) return;
+        // The user's own pronoun is not a person the request names, nor is a
+        // word that only carries a capital because a sentence starts there.
+        if (SELF_WORD.test(bare)) return;
+        if (/[.!?:;]$/.test(words[index - 1] || '')) return;
 
         const next = (words[index + 1] || '').replace(/[^\p{L}\p{N}]/gu, '');
         found.push(/^\d{1,4}(st|nd|rd|th)?$/i.test(next) ? `${bare} ${next}` : bare);

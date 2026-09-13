@@ -498,11 +498,50 @@ const ORDER_STATUS =
     /\b(?:order|parcel|package|delivery|shipment|refund)\b[^.]{0,60}\b(?:shipped|dispatched|arrived|delivered|on its way|status|refunded|been sent)\b|\bhas my (?:order|parcel|package|delivery)\b/i;
 const MAIL_MUTATION =
     /^(?:please\s+)?(?:send|email|e-mail|mail|tell|message|text|reply|respond|draft|compose|write|forward|delete|archive|mark|unsubscribe)\b|\b(?:reply|respond|forward|draft|compose|send)\s+(?:to|a|an|the|it|him|her|them)\b/i;
+// A question about the present state of the machine, the calendar or the
+// mailbox has a fresh answer every time it is asked; an earlier chat can
+// never answer it, however similar the words.
+const LIVE_STATE = /\b(calendar|agenda|schedule|diary|appointment|meeting|today|tomorrow|tonight|this (?:week|weekend|morning|afternoon|evening)|next week|right now|currently|at the moment|free (?:disk|space|memory)|disk space|memory|ram|battery|volume|brightness|wifi|bluetooth|running|open apps?|how many (?:files|folders|photos|documents|items)|biggest|largest|newest|latest file|weather|time is it|inbox|unread|new (?:mail|email|messages?))\b/i;
+// A calendar question that names a day is read from that day's page, with
+// the day resolved here rather than by a model: a bare weekday is the next
+// one from today, today included; "this weekend" is the coming Saturday.
+const CALENDAR_ASK = /\b(calendar|agenda|schedule|diary|appointments?|meetings?)\b|\bwhere do i (?:need|have) to be\b|\bwhat (?:have i got|do i have|is|'s) on\b/i;
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+function calendarDayAsked(text) {
+    const plain = String(text).toLowerCase();
+    if (!CALENDAR_ASK.test(plain)) return null;
+    const day = new Date(); day.setHours(12, 0, 0, 0);
+    const numeric = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.exec(plain)
+        || /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i.exec(plain);
+    if (numeric) {
+        const [a, b] = /^\d/.test(numeric[1]) ? [numeric[1], numeric[2]] : [numeric[2], numeric[1]];
+        const month = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'].indexOf(String(b).toLowerCase());
+        const dated = new Date(day.getFullYear(), month, Number(a), 12);
+        if (dated < day && day - dated > 30 * 86400000) dated.setFullYear(dated.getFullYear() + 1);
+        return dated;
+    }
+    if (/\btoday\b/.test(plain)) return day;
+    if (/\btomorrow\b/.test(plain)) { day.setDate(day.getDate() + 1); return day; }
+    if (/\b(?:this|the|coming) weekend\b/.test(plain)) { while (day.getDay() !== 6 && day.getDay() !== 0) day.setDate(day.getDate() + 1); return day; }
+    const weekday = DAY_NAMES.find(name => new RegExp(`\\b${name}\\b`).test(plain));
+    if (!weekday) return null;
+    const want = DAY_NAMES.indexOf(weekday);
+    const ahead = /\bnext\s+/.test(plain.slice(0, plain.indexOf(weekday))) ? 7 : 0;
+    while (day.getDay() !== want) day.setDate(day.getDate() + 1);
+    day.setDate(day.getDate() + ahead);
+    return day;
+}
+function calendarDayUrl(calendar, day) {
+    const y = day.getFullYear(), m = day.getMonth() + 1, d = day.getDate();
+    return /google/.test(calendar)
+        ? `https://calendar.google.com/calendar/u/0/r/day/${y}/${m}/${d}`
+        : `${calendar.replace(/\/view\/.*$/, '')}/view/day/${y}/${m}/${d}`;
+}
 const CALENDAR_WEEK =
     /\b(?:calendar|agenda|schedule|diary)\b[^.]*\b(?:this|next|the|coming) week\b|\b(?:this|next|the|coming) week\b[^.]*\b(?:calendar|agenda|diary)\b/i;
 const CALENDAR_WRITE_SHAPE = /\b(?:create|book|schedule|add|put|set\s+up|delete|remove|cancel|move|clear)\b/i;
 const OWN_MAIL_ASK =
-    /^(?:please\s+)?(?:tell|email|e-mail|mail|message|write to|reply to|respond to|draft)\b(?![^.]*\b(?:his|her|their|someone else'?s?|\w+'s)\s+(?:e-?mail|account|inbox|mailbox|machine|computer|phone|password|credentials))/i;
+    /^(?:please\s+)?(?:tell|email|e-mail|mail|message|write to|reply to|respond to|draft|forward|send)\b(?![^.]*\b(?:his|her|their|someone else'?s?|\w+'s)\s+(?:e-?mail|account|inbox|mailbox|machine|computer|phone|password|credentials))/i;
 
 function mailSearchTerms(text) {
     const quoted = /["\u201c]([^"\u201d]{3,80})["\u201d]/.exec(text);
@@ -511,11 +550,43 @@ function mailSearchTerms(text) {
         return /\b(?:titled|subject|called|named|headed)\b/i.test(text.slice(0, quoted.index)) ? `subject:"${phrase}"` : phrase;
     }
     const body = String(text).replace(/^\s*\S+/, '');
-    const runs = body.match(/\b[A-Z][\w'&-]*(?:\s+(?:of|the|and|for|de|du|von)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*)*/g) || [];
+    const runs = (body.match(/\b[A-Z][\w'&-]*(?:\s+(?:of|the|and|for|de|du|von)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*)*/g) || [])
+        .filter(run => !CALENDAR_WORD.test(run));
     const best = runs.map(r => r.trim()).sort((a, b) => b.length - a.length)[0];
-    if (!best || best.length < 3) return null;
-    return /\b(?:responded|replied|reply|replies|wrote|written|got back|heard (?:back )?from|sent me)\b/i.test(text) && !/\s/.test(best)
-        ? `from:${best}` : best;
+    if (best && best.length >= 3) {
+        return /\b(?:responded|replied|reply|replies|wrote|written|got back|heard (?:back )?from|sent me)\b/i.test(text) && !/\s/.test(best)
+            ? `from:${best}` : best;
+    }
+    return mailTopic(text);
+}
+
+// A request that names no sender and no title still names its subject:
+// "the flat viewing", "the dentist reminder", "my message about lunch".
+// The noun phrase in front of the mail word, or after "about", is what the
+// mailbox is searched for, as a quoted phrase.
+const CALENDAR_WORD = /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December|Today|Tomorrow|Yesterday)$/i;
+const MAIL_NOUN = '(?:e-?mail|mail|message|reminder|thread|note|invoice|receipt|order|booking|confirmation)s?';
+function mailTopic(text) {
+    const plain = String(text).replace(/[?.!,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const patterns = [
+        new RegExp(`\\b(?:the|my|that|this) ((?:[a-z][\\w'-]* ){1,3}?)${MAIL_NOUN}\\b`, 'i'),
+        new RegExp(`\\b(?:about|regarding|re) (?:the |my |our )?((?:[a-z][\\w'-]*)(?: [a-z][\\w'-]*){0,2})`, 'i'),
+        /\b(?:when|where|what time) (?:is|was|are) (?:the|my) ((?:[a-z][\w'-]*)(?: [a-z][\w'-]*){0,2})/i
+    ];
+    const stop = new Set(['email', 'e-mail', 'mail', 'inbox', 'latest', 'last', 'new', 'recent', 'first', 'next', 'other', 'same',
+        'reply', 'replies', 'response', 'whether', 'anyone', 'someone', 'it', 'me', 'my', 'a', 'an', 'the']);
+    const cut = new Set(['and', 'or', 'but', 'then', 'so', 'what', 'which', 'who', 'how', 'do', 'does', 'did', 'is', 'are', 'was', 'that', 'to', 'if']);
+    for (const pattern of patterns) {
+        const found = pattern.exec(plain);
+        if (!found) continue;
+        const raw = found[1].trim().split(/\s+/);
+        const end = raw.findIndex(w => cut.has(w.toLowerCase()));
+        const words = (end >= 0 ? raw.slice(0, end) : raw).filter(w => !stop.has(w.toLowerCase()));
+        if (!words.length) continue;
+        const phrase = words.join(' ');
+        return phrase.length >= 3 ? `"${phrase}"` : null;
+    }
+    return null;
 }
 
 function locateByName(text) {
@@ -831,6 +902,7 @@ async function executeIntentRecorded(intentText, options = {}) {
     }
     if (!inHand.length && CONTENT_QUESTION.test(plainAsk) && /\?\s*$/.test(plainAsk.trim())
         && !MUTATES_FILE.test(plainAsk) && !MAIL_QUESTION.test(plainAsk)
+        && !LIVE_STATE.test(plainAsk)
         && !conversationStore.RECALL_SHAPE.test(plainAsk)) {
         let remembered = [];
         try { remembered = await conversationStore.answerSource.retrieve(plainAsk); } catch { remembered = []; }
@@ -894,14 +966,17 @@ async function executeIntentRecorded(intentText, options = {}) {
         && !conversationStore.RECALL_SHAPE.test(plainAsk);
     const calendarWeek = !inHand.length && CALENDAR_WEEK.test(plainAsk)
         && !MAIL_MUTATION.test(plainAsk) && !CALENDAR_WRITE_SHAPE.test(plainAsk);
-    if (mailQuestion || calendarWeek) {
+    const calendarDay = !inHand.length && !calendarWeek && !MAIL_MUTATION.test(plainAsk)
+        && !CALENDAR_WRITE_SHAPE.test(plainAsk) && calendarDayAsked(plainAsk);
+    if (mailQuestion || calendarWeek || calendarDay) {
         const mailProvider = require('./mailProvider');
         const account = mailProvider.forRequest(plainAsk, require('../utils/configReader').readConfig());
-        const terms = calendarWeek ? null : mailSearchTerms(plainAsk);
+        const terms = (calendarWeek || calendarDay) ? null : mailSearchTerms(plainAsk);
         const url = calendarWeek
             ? (/google/.test(account.calendar) ? 'https://calendar.google.com/calendar/u/0/r/week' : account.calendar)
+            : calendarDay ? calendarDayUrl(account.calendar, calendarDay)
             : ((terms && mailProvider.searchUrl(account.url, terms)) || account.url);
-        console.log(`[Bridge] ${calendarWeek ? 'Calendar week' : `Mail question (${terms || 'inbox'})`}; reading the signed-in site.`);
+        console.log(`[Bridge] ${calendarWeek ? 'Calendar week' : calendarDay ? `Calendar day (${calendarDay.toDateString()})` : `Mail question (${terms || 'inbox'})`}; reading the signed-in site.`);
         const webAgent = require('./webAgent');
         const browsed = await webAgent.browse(plainAsk,
             { url, request: plainAsk, readOnly: true, ...(options.signal ? { signal: options.signal } : {}) });
@@ -1202,6 +1277,6 @@ module.exports = {
     answerProposal,
     composeThenGenerate, isRealComposition, maybeProposeGeneration, maybeDelegate,
     calendarTemplate,
-    mailSearchTerms,
-    GATES: { NOTE_ASK, WHERE_IS, CREDENTIAL_ASK, MAIL_QUESTION, MAIL_CHECK, ORDER_STATUS, MAIL_MUTATION, CALENDAR_WEEK, OWN_MAIL_ASK }
+    mailSearchTerms, calendarDayAsked,
+    GATES: { NOTE_ASK, WHERE_IS, CREDENTIAL_ASK, MAIL_QUESTION, MAIL_CHECK, ORDER_STATUS, MAIL_MUTATION, CALENDAR_WEEK, OWN_MAIL_ASK, LIVE_STATE }
 };
