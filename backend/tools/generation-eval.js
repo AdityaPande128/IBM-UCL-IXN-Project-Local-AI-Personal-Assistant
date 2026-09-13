@@ -1,4 +1,29 @@
 #!/usr/bin/env node
+// Skill-generation evaluation over the G01-G20 tasks, one configuration at a
+// time. As a study harness it takes the builder model, prompt variant and seed
+// on the command line and works in a throwaway copy of the builtin catalogue,
+// so no run can see another run's skills and the live catalogue stays as it is.
+//
+//   node tools/generation-eval.js [G01 ...] [--model <id>] [--prompt v0|v1|v2]
+//        [--seed n] [--jsonl <path>] [--tag t] [--baseline] [--live] [--keep]
+//
+// --live runs against the real skills directory (the pre-study behaviour);
+// the default is a scratch copy of the builtin skills, cleaned after each task.
+
+const argv = process.argv.slice(2);
+const isMain = require.main === module;
+
+function arg(name, fallback = null) {
+    const at = argv.indexOf(`--${name}`);
+    return at >= 0 ? argv[at + 1] : fallback;
+}
+
+const { makeScratchSkills } = require('./study-scratch');
+if (isMain && !argv.includes('--live') && !process.env.JARVIS_SKILLS_DIR) {
+    process.env.JARVIS_SKILLS_DIR = makeScratchSkills({ label: 'geneval', builtinOnly: true });
+    const scratch = process.env.JARVIS_SKILLS_DIR;
+    process.on('exit', () => { try { require('fs').rmSync(scratch, { recursive: true, force: true }); } catch {} });
+}
 
 const fs = require('fs');
 const os = require('os');
@@ -6,14 +31,20 @@ const path = require('path');
 const { execFile } = require('child_process');
 
 const { TASKS } = require('./generation-tasks');
+const smithPrompts = require('../services/prompts/smith');
 const generator = require('../services/skillGenerator');
 const registry = require('../services/skillRegistry');
+const skillPins = require('../services/skillPins');
 const executor = require('../services/skillExecutor');
 const router = require('../services/router');
 const configReader = require('../utils/configReader');
 
 const config = configReader.readConfig();
 const RESULTS_DIR = path.resolve(__dirname, '..', '..', 'ClawBenchmark');
+
+if (process.env.JARVIS_SKILLS_DIR) {
+    skillPins.open(path.join(process.env.JARVIS_SKILLS_DIR, '.pins.json'));
+}
 
 
 function makeWorkdir(task) {
@@ -74,16 +105,37 @@ function runOpenClaw(prompt, timeoutMs = 180000) {
     });
 }
 
+function removeSkill(name) {
+    const dir = path.join(registry.SKILLS_DIR, name);
+    if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+    try { skillPins.remove(name); } catch {}
+    registry.reload();
+}
 
-async function evaluateTask(task, options) {
-    const record = { id: task.id, category: task.category };
+function generatorOptions(options) {
+    const out = {};
+    if (options.model) out.model = options.model;
+    if (options.seed !== null && options.seed !== undefined) out.seed = Number(options.seed);
+    if (options.prompt && options.prompt !== 'v0') {
+        out.promptBuilder = smithPrompts.load(options.prompt, options.model || config.generation?.model).build;
+    }
+    return out;
+}
+
+
+async function evaluateTask(task, options = {}) {
+    const record = {
+        id: task.id, category: task.category,
+        model: options.model || config.generation?.model || config.model_id,
+        prompt: options.prompt || 'v0', seed: options.seed ?? null, tag: options.tag || null
+    };
 
     const workdir = makeWorkdir(task);
     const prompt = task.prompt.replace(/\{\{dir\}\}/g, workdir);
-    record.prompt = prompt;
+    record.prompt_text = prompt;
 
     const genStart = Date.now();
-    const generation = await generator.generate(prompt);
+    const generation = await generator.generate(prompt, generatorOptions(options));
     record.generateMs = Date.now() - genStart;
     record.generationStatus = generation.status;
     record.attempts = generation.attempts ?? null;
@@ -130,6 +182,9 @@ async function evaluateTask(task, options) {
 
     fs.rmSync(workdir, { recursive: true, force: true });
     fs.rmSync(warmDir, { recursive: true, force: true });
+    if (options.cleanup !== false && generation.status === 'registered' && generation.skill) {
+        removeSkill(generation.skill);
+    }
     return record;
 }
 
@@ -146,7 +201,7 @@ function report(records, options) {
 
     console.log('\n' + '='.repeat(72));
     console.log('  SKILL GENERATION EVALUATION');
-    console.log(`  model: ${config.generation?.model || config.model_id}`);
+    console.log(`  model: ${records[0]?.model}  prompt: ${records[0]?.prompt}  seed: ${records[0]?.seed ?? '-'}`);
     console.log(`  tasks: ${n}`);
     console.log('='.repeat(72));
     console.log(`  Registered              ${registered.length}/${n}  (${pct(registered.length, n)})`);
@@ -201,21 +256,31 @@ function report(records, options) {
 }
 
 async function main() {
-    const args = process.argv.slice(2);
-    const options = { baseline: args.includes('--baseline') };
-    const selected = args.filter(a => !a.startsWith('--'));
+    const options = {
+        baseline: argv.includes('--baseline'),
+        model: arg('model'),
+        prompt: arg('prompt', 'v0'),
+        seed: arg('seed'),
+        tag: arg('tag'),
+        cleanup: !argv.includes('--keep')
+    };
+    const jsonl = arg('jsonl');
+    const VALUE_FLAGS = new Set(['--model', '--prompt', '--seed', '--tag', '--jsonl']);
+    const selected = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && VALUE_FLAGS.has(argv[i - 1])));
     const tasks = selected.length ? TASKS.filter(t => selected.includes(t.id)) : TASKS;
 
     if (!tasks.length) {
         console.error('No matching tasks.');
         process.exit(1);
     }
+    console.log(`skills dir: ${registry.SKILLS_DIR} (${registry.list().length} skills)`);
 
     const records = [];
     for (const [index, task] of tasks.entries()) {
         process.stdout.write(`[${index + 1}/${tasks.length}] ${task.id} (${task.category}) ... `);
         const record = await evaluateTask(task, options);
         records.push(record);
+        if (jsonl) fs.appendFileSync(jsonl, JSON.stringify({ ts: new Date().toISOString(), ...record }) + '\n');
 
         const tag = record.outcome === 'correct' ? 'CORRECT'
             : record.outcome === 'registered_but_wrong' ? 'WRONG'
@@ -223,12 +288,16 @@ async function main() {
         console.log(`${tag}  (${record.attempts ?? '-'} attempt(s), ${Math.round(record.generateMs / 1000)}s)`);
     }
 
-    const model = (config.generation?.model || config.model_id).split('/').pop();
-    const outFile = path.join(RESULTS_DIR, `generation_eval_${model}.json`);
-    fs.writeFileSync(outFile, JSON.stringify({ model, timestamp: new Date().toISOString(), records }, null, 2));
+    const model = String(records[0].model).split('/').pop();
+    const suffix = [model, options.prompt, options.seed !== null ? `s${options.seed}` : null, options.tag].filter(Boolean).join('_');
+    const outFile = path.join(RESULTS_DIR, `generation_eval_${suffix}.json`);
+    fs.writeFileSync(outFile, JSON.stringify({ model: records[0].model, prompt: options.prompt, seed: options.seed,
+        timestamp: new Date().toISOString(), records }, null, 2));
 
     report(records, options);
     console.log(`  Written to ${outFile}\n`);
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+module.exports = { evaluateTask, TASKS, removeSkill, makeWorkdir, runIndependentCheck, invokeSkill };
+
+if (isMain) main().catch(err => { console.error(err); process.exit(1); });
