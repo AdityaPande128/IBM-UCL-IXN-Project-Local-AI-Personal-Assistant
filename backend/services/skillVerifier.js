@@ -69,7 +69,24 @@ for node in ast.walk(tree):
         if node.module:
             imports.add(node.module.split('.')[0])
             imports.add(node.module)
-print(json.dumps({"imports": sorted(imports)}))
+import importlib.util, sysconfig
+stdlib_dir = sysconfig.get_paths()["stdlib"]
+third_party = []
+for name in sorted(n for n in imports if "." not in n):
+    try:
+        spec = importlib.util.find_spec(name)
+    except (ImportError, ValueError):
+        spec = None
+    if spec is None:
+        third_party.append(name)
+        continue
+    origin = spec.origin or ""
+    if origin in ("built-in", "frozen"):
+        continue
+    if origin.startswith(stdlib_dir) and "site-packages" not in origin:
+        continue
+    third_party.append(name)
+print(json.dumps({"imports": sorted(imports), "third_party": third_party}))
 `;
         const analyserPath = path.join(scratch, 'analyse.py');
         await fsp.writeFile(analyserPath, analyser, 'utf8');
@@ -91,10 +108,19 @@ print(json.dumps({"imports": sorted(imports)}))
         }
 
         const imports = parsed.imports || [];
+        for (const name of parsed.third_party || []) {
+            errors.push(`"${name}" is not in the standard library — the skill runs on whatever python3 the machine has, so use only standard-library modules (for system figures, read the output of a system command with subprocess)`);
+        }
         for (const imported of imports) {
             if (FORBIDDEN_IMPORTS.includes(imported)) {
                 errors.push(`forbidden import "${imported}" — generated skills may not access the network or load native code`);
             }
+        }
+        // readlines() keeps each line's newline and leaves the last line
+        // without one, so a script that reorders or joins lines corrupts a
+        // file that does not end in a newline; splitlines() does not.
+        if (/\.readlines\(\)/.test(scriptSource)) {
+            errors.push('readlines() keeps the newline on every line but the last, so reordered or joined lines run together — read the file with f.read().splitlines() (a string method, not a file method) and join the lines with "\\n"');
         }
 
         return { valid: errors.length === 0, errors, imports };
@@ -284,7 +310,8 @@ async function runTestCase(scriptSource, testCase, parameterOrder, timeoutMs) {
         if (result.code !== expectedCode) {
             return {
                 passed: false,
-                reason: `exit code ${result.code}, expected ${expectedCode}`,
+                reason: `exit code ${result.code}, expected ${expectedCode}`
+                    + (result.stderr ? ` — ${String(result.stderr).trim().split('\n').pop()}` : ''),
                 ...context
             };
         }
@@ -335,6 +362,11 @@ async function verify(scriptSource, tests, parameterOrder, timeoutMs = 30000) {
         results.push({ name, ...outcome });
         console.log(`[SkillVerifier]   ${outcome.passed ? 'PASS' : 'FAIL'} — ${name}` +
                     (outcome.passed ? '' : `: ${outcome.reason}`));
+        if (!outcome.passed) {
+            const tail = text => String(text || '').trim().split('\n').slice(-3).join(' | ').slice(0, 300);
+            if (outcome.stdout) console.log(`[SkillVerifier]     stdout: ${tail(outcome.stdout)}`);
+            if (outcome.stderr) console.log(`[SkillVerifier]     stderr: ${tail(outcome.stderr)}`);
+        }
     }
 
     const failed = results.filter(r => !r.passed);

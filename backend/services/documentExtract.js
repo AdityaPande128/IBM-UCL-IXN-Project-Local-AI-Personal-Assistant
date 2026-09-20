@@ -20,8 +20,35 @@ for page in reader.pages:
         print(text)
 `;
 
+// The daemon's own PATH is the shell's, and its first python3 may be a
+// bare framework build; the interpreter that has pypdf is found once from
+// the usual homes and remembered.
+const PYTHON_HOMES = [
+    process.env.JARVIS_PYTHON,
+    '/opt/anaconda3/bin/python3',
+    '/opt/homebrew/bin/python3',
+    'python3',
+    '/usr/local/bin/python3',
+    '/usr/bin/python3'
+].filter(Boolean);
+
+let pythonWithPdf;
+
+function pythonForPdf() {
+    if (pythonWithPdf !== undefined) return pythonWithPdf;
+    pythonWithPdf = null;
+    for (const candidate of PYTHON_HOMES) {
+        try {
+            execFileSync(candidate, ['-c', 'import pypdf'], { timeout: 10000, stdio: 'ignore' });
+            pythonWithPdf = candidate;
+            break;
+        } catch { /* not this one */ }
+    }
+    return pythonWithPdf;
+}
+
 function extractPdf(file) {
-    return execFileSync('python3', ['-c', PDF_SCRIPT, file], {
+    return execFileSync(pythonForPdf(), ['-c', PDF_SCRIPT, file], {
         encoding: 'utf8', timeout: TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024
     });
 }
@@ -45,8 +72,7 @@ function available(extension) {
     let ok = false;
     try {
         if (extension === '.pdf') {
-            execFileSync('python3', ['-c', 'import pypdf'], { timeout: 10000 });
-            ok = true;
+            ok = Boolean(pythonForPdf());
         } else if (extension === '.docx') {
             ok = process.platform === 'darwin' && fs.existsSync('/usr/bin/textutil');
         }

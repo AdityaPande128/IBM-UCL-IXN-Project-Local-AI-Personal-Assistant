@@ -178,3 +178,11 @@ test('a malformed envelope is dropped without breaking the run', async () => {
     assert.ok(!result.response.includes('JARVIS_RESULT'));
     assert.strictEqual(result.artifacts, undefined);
 });
+
+test('a parameter the request never filled is asked for, not run as a placeholder', async () => {
+    const skill = makeSkill(['echo', 'volume {{level|percent_number}}']);
+    skill.parameters = { level: { type: 'number', required: false } };
+    const result = await skillExecutor.execute(skill, {});
+    assert.strictEqual(result.status, 'needs_clarification');
+    assert.match(result.response, /level/);
+});

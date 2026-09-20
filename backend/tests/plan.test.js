@@ -857,7 +857,7 @@ test('the mail provider maps names to mailbox addresses with a safe default', ()
 });
 
 test('each provider carries its own calendar and the prompt steers bookings there', () => {
-    assert.strictEqual(mailProvider.current({}).calendar, 'https://calendar.google.com');
+    assert.strictEqual(mailProvider.current({}).calendar, 'https://calendar.google.com/calendar/u/0/r/week');
     assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook' } }).calendar,
         'https://outlook.live.com/calendar/view/week');
     assert.strictEqual(mailProvider.current({ mail: { provider: 'outlook-work' } }).calendar,
@@ -870,7 +870,7 @@ test('each provider carries its own calendar and the prompt steers bookings ther
     assert.strictEqual(mailProvider.forRequest('put the review on my work calendar', config).calendar,
         'https://outlook.office.com/calendar/view/week');
     assert.strictEqual(mailProvider.forRequest('add lunch with Sam to my calendar', config).calendar,
-        'https://calendar.google.com');
+        'https://calendar.google.com/calendar/u/0/r/week');
 
     // The prompt names the steered calendar, not a hardcoded one.
     const prompt = planner.buildPlanPrompt([], 'https://outlook.live.com/mail',
@@ -1183,4 +1183,10 @@ test('a what-does-it-say question cannot end at filenames', () => {
         missing: []
     }, { question: 'where is my hemoglobin report' });
     assert.ok(located.valid, located.errors.join('; '));
+});
+
+test('a planned address with a space in its host is read as the host it meant', () => {
+    const steps = [{ id: 's1', capability: 'web.read', inputs: { url: 'https://www.science museum.org.uk' } }];
+    planner.validatePlan({ steps }, { question: 'what time does the Science Museum close today?' });
+    assert.strictEqual(steps[0].inputs.url, 'https://www.sciencemuseum.org.uk');
 });

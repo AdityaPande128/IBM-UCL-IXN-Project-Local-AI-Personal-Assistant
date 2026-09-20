@@ -421,6 +421,13 @@ test('chunkTextDynamically: empty input produces no chunks', () => {
 });
 
 
+test('readAloud: decimals and pounds are spoken as words', () => {
+    assert.equal(aiPipeline.readAloud('RAM usage: 0.87 GB of 24.00 GB'), 'RAM usage: 0 point 87 GB of 24 point 00 GB');
+    assert.equal(aiPipeline.readAloud('Food came to £1,241.65 in total.'), 'Food came to 1,241 pounds 65 pence in total.');
+    assert.equal(aiPipeline.readAloud('Rent is £1450.'), 'Rent is 1450 pounds.');
+    assert.equal(aiPipeline.readAloud('Done. Three files.'), 'Done. Three files.');
+});
+
 test('speakableSummary: leaves a short reply untouched', () => {
     assert.equal(aiPipeline.speakableSummary('Wi-Fi turned off.'), 'Wi-Fi turned off.');
 });
@@ -492,4 +499,48 @@ test('mail search terms: a titled message is searched by subject and a reply que
     assert.strictEqual(mailSearchTerms('check my email to see if Priya has responded to my last email'), 'from:Priya');
     assert.strictEqual(mailSearchTerms('what does the University of Bristol email ask me to do before departure?'), 'University of Bristol');
     assert.strictEqual(mailSearchTerms('has my order from Riverside Books shipped yet?'), 'Riverside Books');
+});
+
+test('mail search terms: a request that names no sender or title is searched by its topic phrase', () => {
+    const { mailSearchTerms } = require('../services/openclawBridge');
+    assert.strictEqual(mailSearchTerms('check my email: when is the flat viewing and what do I need to bring?'), '"flat viewing"');
+    assert.strictEqual(mailSearchTerms('look in my inbox for the dentist reminder: what time is the appointment?'), '"dentist"');
+    assert.strictEqual(mailSearchTerms('check my email for a reply to my message about lunch on Thursday'), '"lunch on Thursday"');
+    assert.strictEqual(mailSearchTerms('what does the travel insurance email want me to do?'), '"travel insurance"');
+    assert.strictEqual(mailSearchTerms('check my email to see whether anyone has replied about the flat viewing'), '"flat viewing"');
+    assert.strictEqual(mailSearchTerms('has my order from Riverside Books shipped yet?'), 'Riverside Books');
+});
+
+test('a weekday or month is never taken for a correspondent', () => {
+    const { mailSearchTerms } = require('../services/openclawBridge');
+    assert.notStrictEqual(mailSearchTerms('check my email for a reply about lunch on Thursday'), 'from:Thursday');
+});
+
+test('a forward or a send to a named address is the user\'s own action', () => {
+    const { GATES } = require('../services/openclawBridge');
+    assert.ok(GATES.OWN_MAIL_ASK.test('forward the travel insurance email to sam@example.com'));
+    assert.ok(GATES.OWN_MAIL_ASK.test('send an email to sam@example.com saying I am late'));
+    assert.ok(!GATES.OWN_MAIL_ASK.test("forward Priya's email account to me"));
+});
+
+test('a question about the present state is never answered from an earlier chat', () => {
+    const { GATES } = require('../services/openclawBridge');
+    for (const ask of ['how much free disk space do I have?', 'what\'s on my calendar this week?', 'how many files are in my Downloads folder?', 'what is the biggest file in Downloads?']) {
+        assert.ok(GATES.LIVE_STATE.test(ask), ask);
+    }
+    assert.ok(!GATES.LIVE_STATE.test('what did the report recommend?'));
+});
+
+test('a calendar question naming a day resolves that day without a model', () => {
+    const { calendarDayAsked } = require('../services/openclawBridge');
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const friday = calendarDayAsked('look at my calendar: where do I need to be on Friday afternoon?');
+    assert.ok(friday instanceof Date && friday.getDay() === 5);
+    assert.ok((friday - today) / 86400000 < 7.5, 'the coming Friday, not next week\'s');
+    const tomorrow = calendarDayAsked('do I have any meetings tomorrow?');
+    assert.strictEqual(Math.round((tomorrow - today) / 86400000), 1);
+    const weekend = calendarDayAsked("what's on my calendar this weekend?");
+    assert.ok(weekend.getDay() === 6 || weekend.getDay() === 0);
+    assert.strictEqual(calendarDayAsked("what's on my calendar this week?"), null);
+    assert.strictEqual(calendarDayAsked('when is the flat viewing?'), null);
 });

@@ -151,12 +151,15 @@ function checkNavigation({ url, label, allowPrivate = ALLOW_PRIVATE_HOSTS, grant
 
     const parsed = new URL(target.url);
 
-    const staying = from && !labels.isSecret(label || labels.UNKNOWN)
-        && sameSite(parsed.hostname, from);
+    // Where the request already is, and the site it began on, have seen
+    // this session; going to either discloses nothing new.
+    const known = [].concat(from || []).filter(Boolean);
+    const staying = !labels.isSecret(label || labels.UNKNOWN)
+        && known.find(host => sameSite(parsed.hostname, host));
     if (staying) {
         return {
             allowed: true,
-            reason: `this stays on ${from}, which is where the request already is`,
+            reason: `this stays on ${staying}, which the request has already been on`,
             refusal: null, approvalId: null, url: parsed.href
         };
     }

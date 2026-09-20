@@ -16,6 +16,13 @@ const MAX_TTS_CHUNKS = 8;
 // pipeline itself knows only its own socket.
 let broadcastFn = null;
 
+// The daemon lends the pipeline its view of a socket's chat, so a spoken
+// request carries the same history and files in hand as a typed one.
+let contextFor = () => ({});
+function setContext(fn) {
+    if (typeof fn === 'function') contextFor = fn;
+}
+
 function setBroadcast(fn) {
     broadcastFn = fn;
 }
@@ -43,6 +50,25 @@ function speakableSummary(text) {
         return `${head} ${remaining} ${remaining === 1 ? 'entry' : 'entries'}. The details are on screen.`;
     }
     return `${full.slice(0, MAX_SPOKEN_CHARS).trim()}… The rest is on screen.`;
+}
+
+// The voice model reads "0.87" as "zero. eighty-seven", and the sentence
+// splitter below would cut at the decimal point anyway; a decimal is spoken
+// as "point", and a currency figure as pounds.
+function readAloud(text) {
+    return String(text || '')
+        // A bracketed aside is spoken as a clause: the voice model stumbles
+        // on the closing bracket, and a dash is a pause, not a word.
+        .replace(/\s*\(([^()]*)\)\s*([.!?]?)/g, (m, inner, end) => `, ${inner.trim().replace(/[.!?]+$/, '')}${end || ','} `)
+        .replace(/\s*[—–]\s*/g, ', ')
+        .replace(/,\s*,/g, ',')
+        .replace(/\s+([.!?,])/g, '$1')
+        .replace(/([.!?])\s*([.!?])/g, '$1')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .replace(/£\s?(\d[\d,]*)\.(\d\d)\b/g, (m, pounds, pence) => `${pounds} pounds ${Number(pence)} pence`)
+        .replace(/£\s?(\d[\d,]*)\b/g, '$1 pounds')
+        .replace(/(\d)\.(\d)/g, '$1 point $2');
 }
 
 function chunkTextDynamically(text) {
@@ -198,7 +224,7 @@ async function speakText(text, ws) {
     console.log(`[TTS] speaking ${String(text || '').length} chars on `
         + `${ws && ws.wakeMode ? 'the Mac (wake surface)' : 'a connected surface'}`);
     const epoch = speechEpoch;
-    const spokenText = speakableSummary(String(text || ''));
+    const spokenText = readAloud(speakableSummary(String(text || '')));
     const textChunks = chunkTextDynamically(spokenText);
     let spoken = 0;
     if (textChunks.length) send(ws, { type: 'speak_start' });
@@ -255,6 +281,9 @@ async function answerAloud(proposalId, approved, ws, kind = null) {
     // Stamp the chat this reply belongs to, so a surface that has since
     // wandered to another conversation shows it in the right one — the same
     // contract the typed-intent path already keeps.
+    // A file needs its handle before any surface sees it: the phone saves
+    // by id, and a spoken request's reply is stamped like a typed one's.
+    if (result && result.artifacts) result.artifacts = conversationStore.stampArtifacts(result.artifacts);
     send(ws, { type: 'intent_result', id: job.id, conversation: ws.conversationId, ...result });
     record(ws, result.status === 'error' ? 'error' : 'assistant',
         responseText, result.artifacts);
@@ -319,6 +348,10 @@ async function handleIncomingAudio(audioBuffer, ws) {
 
 // Everything after transcription: run the intent, then speak the reply.
 // The wake-word path enters here with words the wake service already vetted.
+function safeContext(ws) {
+    try { return contextFor(ws) || {}; } catch { return {}; }
+}
+
 async function respondTo(transcribedText, ws) {
     try {
         console.log(`[Pipeline] Executing intent...`);
@@ -326,7 +359,8 @@ async function respondTo(transcribedText, ws) {
         let llmResult;
         try {
             const job = intentQueue.submit(({ signal }) =>
-                openclawBridge.executeIntent(transcribedText, { interactive: true, signal }));
+                openclawBridge.executeIntent(transcribedText,
+                    { interactive: true, signal, ...safeContext(ws) }));
             send(ws, { type: 'intent_accepted', id: job.id, position: job.position });
             try {
                 llmResult = await job.result;
@@ -342,6 +376,9 @@ async function respondTo(transcribedText, ws) {
             llmResult = { ...llmResult, response: responseText };
 
             console.log(`[Pipeline] Response (${llmResult.status}): ${responseText.length} chars`);
+            if (llmResult && llmResult.artifacts) {
+                llmResult.artifacts = conversationStore.stampArtifacts(llmResult.artifacts);
+            }
             send(ws, { type: 'intent_result', id: job.id,
                 conversation: ws.conversationId, ...llmResult });
             record(ws, llmResult.status === 'error' ? 'error' : 'assistant',
@@ -370,12 +407,14 @@ async function respondTo(transcribedText, ws) {
 }
 
 module.exports = {
+    readAloud,
     handleIncomingAudio,
     respondTo,
     speakText,
     silence,
     answerAloud,
     setBroadcast,
+    setContext,
     chunkTextDynamically,
     speakableSummary,
     transcribeAudio,

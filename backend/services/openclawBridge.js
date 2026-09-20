@@ -14,6 +14,7 @@ const activityBus = require('./activityBus');
 const profile = require('./profile');
 const llmClient = require('./llmClient');
 const securityStore = require('../security/store');
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -277,6 +278,19 @@ function attachmentPassages(attached) {
 const DISCLAIMS_THE_WEB =
     /\b(?:unable to|cannot|can't|do(?:es)?\s*n[o']t have|lack)\b[^.]{0,60}\b(?:internet|real[- ]?time|live|browse|browsing|web|current (?:information|data)|system information|your (?:computer|mac|machine|device|files))\b/i;
 
+// The file a request asks for, when it names one: "write ... to ~/x/out.csv",
+// "save it as /y/list.txt". Only a full or home-relative path counts.
+function namedOutputFile(text) {
+    const plain = String(text);
+    const starts = [...plain.matchAll(/\b(?:to|as|into|in)\s+(?=~|\/)/g)];
+    if (!starts.length) return null;
+    const from = starts[starts.length - 1].index + starts[starts.length - 1][0].length;
+    const found = /^((?:~|\/).*?\.[A-Za-z0-9]{1,5})(?=[.,;:!?]?\s*(?:$|and\b|then\b|so\b))/.exec(plain.slice(from));
+    if (!found) return null;
+    const last = found[1].trim();
+    return last.startsWith('~') ? path.join(os.homedir(), last.slice(1)) : last;
+}
+
 async function executeSkill(decision, originalText, options = {}) {
     const { target_skill, parameters } = decision;
 
@@ -293,6 +307,8 @@ async function executeSkill(decision, originalText, options = {}) {
         console.log(`[Bridge] ${skill.name} does not speak of what "${originalText.slice(0, 60)}" asks to change; not running it.`);
         return composeThenGenerate(originalText, options);
     }
+    const promised = namedOutputFile(originalText);
+    const promisedBefore = promised ? fs.existsSync(promised) : false;
     const result = await skillCare.run(skill, parameters,
         { request: originalText, signal: options.signal });
 
@@ -300,6 +316,14 @@ async function executeSkill(decision, originalText, options = {}) {
         console.log(`[Bridge] ${skill.name} does not fit this request (${result.reason}); offering to build.`);
         return maybeProposeGeneration(originalText,
             [`${skill.name} could not do that: ${result.reason}`], options);
+    }
+    // A request that names the file it wants is done when that file exists.
+    // A skill that ran without producing it did something else, however
+    // close its name looked, and the request still needs its own program.
+    if (result.status === 'success' && promised && !promisedBefore && !fs.existsSync(promised)) {
+        console.log(`[Bridge] ${skill.name} ran but ${path.basename(promised)} was not written; offering to build.`);
+        return maybeProposeGeneration(originalText,
+            [`${skill.name} ran but did not write ${path.basename(promised)}, which the request asks for`], options);
     }
 
     return {
@@ -421,6 +445,13 @@ async function composeThenGenerate(intentText, options = {}) {
             const offered = wellKnownFolder(intentText);
             if (offered) return proposeFolderAccess(intentText, offered, gate[1], options);
         }
+        // A composition whose producing step came back empty has not done
+        // the request; the installed skills did not fit it. That is the
+        // capability gap the factory exists for, not a finding to report.
+        if (execution.status === 'empty') {
+            console.log('[Bridge] The composition produced nothing; generating a skill instead.');
+            return maybeProposeGeneration(intentText, [], options);
+        }
         return {
             status: execution.status === 'success' ? 'success' : execution.status,
             response: execution.text,
@@ -484,7 +515,9 @@ async function composeThenGenerate(intentText, options = {}) {
 }
 
 const DELIVERY_NOISE = new Set(['send', 'share', 'give', 'deliver', 'forward', 'attach', 'me', 'my', 'the',
-    'to', 'phone', 'file', 'files', 'please', 'both', 'all', 'two', 'and', 'of', 'over', 'this', 'that', 'a', 'an', 'onto', 'device', 'mobile']);
+    'to', 'phone', 'file', 'files', 'please', 'both', 'all', 'two', 'and', 'of', 'over', 'this', 'that', 'a', 'an', 'onto', 'device', 'mobile',
+    'latest', 'newest', 'most', 'recent', 'last', 'report', 'document', 'pdf', 'copy', 'version', 'jarvis', 'hey']);
+const WANTS_NEWEST = /\b(latest|newest|most recent|last)\b/i;
 const NEEDS_THE_BROWSER =
     /\b(e-?mails?|my (?:mailbox|inbox)|gmail|outlook|my calendar|attachments? from|website|web ?page|browser|online)\b/i;
 const NOTE_ASK = /^(?:please\s+)?(?:note that|note:|remember that|remember,? we|remember,? i|remember:|for the record|keep in mind|just so you know|fyi)\b/i;
@@ -498,11 +531,50 @@ const ORDER_STATUS =
     /\b(?:order|parcel|package|delivery|shipment|refund)\b[^.]{0,60}\b(?:shipped|dispatched|arrived|delivered|on its way|status|refunded|been sent)\b|\bhas my (?:order|parcel|package|delivery)\b/i;
 const MAIL_MUTATION =
     /^(?:please\s+)?(?:send|email|e-mail|mail|tell|message|text|reply|respond|draft|compose|write|forward|delete|archive|mark|unsubscribe)\b|\b(?:reply|respond|forward|draft|compose|send)\s+(?:to|a|an|the|it|him|her|them)\b/i;
+// A question about the present state of the machine, the calendar or the
+// mailbox has a fresh answer every time it is asked; an earlier chat can
+// never answer it, however similar the words.
+const LIVE_STATE = /\b(calendar|agenda|schedule|diary|appointment|meeting|today|tomorrow|tonight|this (?:week|weekend|morning|afternoon|evening)|next week|right now|currently|at the moment|free (?:disk|space|memory)|disk space|memory|ram|battery|volume|brightness|wifi|bluetooth|running|open apps?|how many (?:files|folders|photos|documents|items)|biggest|largest|newest|latest file|weather|time is it|inbox|unread|new (?:mail|email|messages?))\b/i;
+// A calendar question that names a day is read from that day's page, with
+// the day resolved here rather than by a model: a bare weekday is the next
+// one from today, today included; "this weekend" is the coming Saturday.
+const CALENDAR_ASK = /\b(calendar|agenda|schedule|diary|appointments?|meetings?)\b|\bwhere do i (?:need|have) to be\b|\bwhat (?:have i got|do i have|is|'s) on\b/i;
+const DAY_NAMES = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+function calendarDayAsked(text) {
+    const plain = String(text).toLowerCase();
+    if (!CALENDAR_ASK.test(plain)) return null;
+    const day = new Date(); day.setHours(12, 0, 0, 0);
+    const numeric = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(january|february|march|april|may|june|july|august|september|october|november|december)\b/i.exec(plain)
+        || /\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i.exec(plain);
+    if (numeric) {
+        const [a, b] = /^\d/.test(numeric[1]) ? [numeric[1], numeric[2]] : [numeric[2], numeric[1]];
+        const month = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'].indexOf(String(b).toLowerCase());
+        const dated = new Date(day.getFullYear(), month, Number(a), 12);
+        if (dated < day && day - dated > 30 * 86400000) dated.setFullYear(dated.getFullYear() + 1);
+        return dated;
+    }
+    if (/\btoday\b/.test(plain)) return day;
+    if (/\btomorrow\b/.test(plain)) { day.setDate(day.getDate() + 1); return day; }
+    if (/\b(?:this|the|coming) weekend\b/.test(plain)) { while (day.getDay() !== 6 && day.getDay() !== 0) day.setDate(day.getDate() + 1); return day; }
+    const weekday = DAY_NAMES.find(name => new RegExp(`\\b${name}\\b`).test(plain));
+    if (!weekday) return null;
+    const want = DAY_NAMES.indexOf(weekday);
+    const ahead = /\bnext\s+/.test(plain.slice(0, plain.indexOf(weekday))) ? 7 : 0;
+    while (day.getDay() !== want) day.setDate(day.getDate() + 1);
+    day.setDate(day.getDate() + ahead);
+    return day;
+}
+function calendarDayUrl(calendar, day) {
+    const y = day.getFullYear(), m = day.getMonth() + 1, d = day.getDate();
+    return /google/.test(calendar)
+        ? `https://calendar.google.com/calendar/u/0/r/day/${y}/${m}/${d}`
+        : `${calendar.replace(/\/view\/.*$/, '')}/view/day/${y}/${m}/${d}`;
+}
 const CALENDAR_WEEK =
     /\b(?:calendar|agenda|schedule|diary)\b[^.]*\b(?:this|next|the|coming) week\b|\b(?:this|next|the|coming) week\b[^.]*\b(?:calendar|agenda|diary)\b/i;
 const CALENDAR_WRITE_SHAPE = /\b(?:create|book|schedule|add|put|set\s+up|delete|remove|cancel|move|clear)\b/i;
 const OWN_MAIL_ASK =
-    /^(?:please\s+)?(?:tell|email|e-mail|mail|message|write to|reply to|respond to|draft)\b(?![^.]*\b(?:his|her|their|someone else'?s?|\w+'s)\s+(?:e-?mail|account|inbox|mailbox|machine|computer|phone|password|credentials))/i;
+    /^(?:please\s+)?(?:tell|email|e-mail|mail|message|write to|reply to|respond to|draft|forward|send)\b(?![^.]*\b(?:his|her|their|someone else'?s?|\w+'s)\s+(?:e-?mail|account|inbox|mailbox|machine|computer|phone|password|credentials))/i;
 
 function mailSearchTerms(text) {
     const quoted = /["\u201c]([^"\u201d]{3,80})["\u201d]/.exec(text);
@@ -511,11 +583,43 @@ function mailSearchTerms(text) {
         return /\b(?:titled|subject|called|named|headed)\b/i.test(text.slice(0, quoted.index)) ? `subject:"${phrase}"` : phrase;
     }
     const body = String(text).replace(/^\s*\S+/, '');
-    const runs = body.match(/\b[A-Z][\w'&-]*(?:\s+(?:of|the|and|for|de|du|von)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*)*/g) || [];
+    const runs = (body.match(/\b[A-Z][\w'&-]*(?:\s+(?:of|the|and|for|de|du|von)\s+[A-Z][\w'&-]*|\s+[A-Z][\w'&-]*)*/g) || [])
+        .filter(run => !CALENDAR_WORD.test(run));
     const best = runs.map(r => r.trim()).sort((a, b) => b.length - a.length)[0];
-    if (!best || best.length < 3) return null;
-    return /\b(?:responded|replied|reply|replies|wrote|written|got back|heard (?:back )?from|sent me)\b/i.test(text) && !/\s/.test(best)
-        ? `from:${best}` : best;
+    if (best && best.length >= 3) {
+        return /\b(?:responded|replied|reply|replies|wrote|written|got back|heard (?:back )?from|sent me)\b/i.test(text) && !/\s/.test(best)
+            ? `from:${best}` : best;
+    }
+    return mailTopic(text);
+}
+
+// A request that names no sender and no title still names its subject:
+// "the flat viewing", "the dentist reminder", "my message about lunch".
+// The noun phrase in front of the mail word, or after "about", is what the
+// mailbox is searched for, as a quoted phrase.
+const CALENDAR_WORD = /^(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|January|February|March|April|May|June|July|August|September|October|November|December|Today|Tomorrow|Yesterday)$/i;
+const MAIL_NOUN = '(?:e-?mail|mail|message|reminder|thread|note|invoice|receipt|order|booking|confirmation)s?';
+function mailTopic(text) {
+    const plain = String(text).replace(/[?.!,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const patterns = [
+        new RegExp(`\\b(?:the|my|that|this) ((?:[a-z][\\w'-]* ){1,3}?)${MAIL_NOUN}\\b`, 'i'),
+        new RegExp(`\\b(?:about|regarding|re) (?:the |my |our )?((?:[a-z][\\w'-]*)(?: [a-z][\\w'-]*){0,2})`, 'i'),
+        /\b(?:when|where|what time) (?:is|was|are) (?:the|my) ((?:[a-z][\w'-]*)(?: [a-z][\w'-]*){0,2})/i
+    ];
+    const stop = new Set(['email', 'e-mail', 'mail', 'inbox', 'latest', 'last', 'new', 'recent', 'first', 'next', 'other', 'same',
+        'reply', 'replies', 'response', 'whether', 'anyone', 'someone', 'it', 'me', 'my', 'a', 'an', 'the']);
+    const cut = new Set(['and', 'or', 'but', 'then', 'so', 'what', 'which', 'who', 'how', 'do', 'does', 'did', 'is', 'are', 'was', 'that', 'to', 'if']);
+    for (const pattern of patterns) {
+        const found = pattern.exec(plain);
+        if (!found) continue;
+        const raw = found[1].trim().split(/\s+/);
+        const end = raw.findIndex(w => cut.has(w.toLowerCase()));
+        const words = (end >= 0 ? raw.slice(0, end) : raw).filter(w => !stop.has(w.toLowerCase()));
+        if (!words.length) continue;
+        const phrase = words.join(' ');
+        return phrase.length >= 3 ? `"${phrase}"` : null;
+    }
+    return null;
 }
 
 function locateByName(text) {
@@ -558,7 +662,9 @@ function deliverByName(intentText) {
     }
     if (!hits.length) return ask();
     const plural = /\b(both|all|every|two|these|those|each)\b/i.test(intentText) || /\b\w+s\b/.test(words.join(' ')) && hits.length === 2;
-    const chosen = plural ? hits.slice(0, 3) : (hits.length === 1 ? hits : []);
+    const newest = WANTS_NEWEST.test(intentText) && hits.length > 1
+        ? [hits.slice().sort((a, b) => Number(b.mtime || 0) - Number(a.mtime || 0))[0]] : null;
+    const chosen = plural ? hits.slice(0, 3) : (hits.length === 1 ? hits : (newest || []));
     if (!chosen.length) {
         const names = hits.slice(0, 5).map(f => f.name).join(', ');
         return { status: 'needs_clarification', action: 'clarify',
@@ -569,8 +675,13 @@ function deliverByName(intentText) {
     return { status: 'success', action: 'delivered', response: `Attached ${files.map(f => f.name).join(', ')}.`, artifacts: { files } };
 }
 
+// "Give me the invoice" hands over a file that exists; "give me a word
+// count, saved to ..." asks for one to be produced. A request that names a
+// path or a result to be made is work, not a delivery.
+const ASKS_FOR_A_RESULT = /\b(?:saved?|write|written|count|convert|create|make|generate|list)\b/i;
 function maybeProposeGeneration(intentText, gaps, options = {}) {
-    if (DELIVERY_ASK.test(intentText.trim()) && !NAMES_A_RECIPIENT.test(intentText)) {
+    if (DELIVERY_ASK.test(intentText.trim()) && !NAMES_A_RECIPIENT.test(intentText)
+        && withoutPaths(intentText) === String(intentText) && !ASKS_FOR_A_RESULT.test(intentText)) {
         return deliverByName(intentText);
     }
     if (NEEDS_THE_BROWSER.test(withoutPaths(intentText))) {
@@ -656,7 +767,7 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
 
     return {
         status: execution.status === 'success' ? 'success' : execution.status,
-        response: `I didn't have a skill for that, so I built one (${result.skill}) and verified it against ${result.testsPassed} test case(s).\n\n${execution.response}`,
+        response: `I didn't have a skill for that, so I built one (${result.skill}) and verified it against ${result.testsPassed} test ${result.testsPassed === 1 ? 'case' : 'cases'}.\n\n${execution.response}`,
         action: 'generated_and_executed',
         skill: result.skill,
         ...(execution.artifacts ? { artifacts: execution.artifacts } : {}),
@@ -674,8 +785,50 @@ function executeIntent(intentText, options = {}) {
     return require('./incognito').privately(() => executeIntentRecorded(intentText, options));
 }
 
+// "Send that to me" with a file already in the room: the file goes over
+// as it is, decided from the words as spoken. No model rewrites the ask
+// first, so the same words give the same answer every time.
+function deliverInHand(plainAsk, recent, startedAt) {
+    const pronounOnly = /\b(that|it|this)\b/i.test(plainAsk)
+        && plainAsk.trim().split(/\s+/).length <= 5;
+    if (!(DELIVERY_ASK.test(plainAsk) && !NAMES_A_RECIPIENT.test(plainAsk) && recent.length
+        && (REFERENCES_FILES.test(plainAsk) || pronounOnly))) return null;
+    const generic = new Set(['report', 'pdf', 'file', 'document', 'the', 'latest', 'newest', 'recent']);
+    const askTokens = plainAsk.toLowerCase().split(/[^a-z0-9]+/)
+        .filter(t => t.length >= 3 && !generic.has(t));
+    const named = recent.filter(f => askTokens.some(t =>
+        String(f.name || '').toLowerCase().includes(t)));
+    const pronouny = /\b(that|it|this)\b/i.test(plainAsk);
+    const targets = named.length ? named.slice(-2)
+        : (pronouny ? [recent[recent.length - 1]] : []);
+    const fsNode = require('fs');
+    const deliverable = targets.filter(f => {
+        try {
+            return f && f.path
+                && securityStore.isWithinGrantedRoot(f.path, 'documents')
+                && fsNode.statSync(f.path).isFile();
+        } catch { return false; }
+    });
+    if (!deliverable.length) return null;
+    console.log('[Bridge] Delivering the file in hand directly.');
+    const files = deliverable.map(f =>
+        ({ name: f.name || path.basename(f.path), path: f.path }));
+    return {
+        status: 'success',
+        response: `Attached ${files.map(f => f.name).join(', ')}.`,
+        action: 'delivered',
+        artifacts: { files },
+        durationMs: Date.now() - startedAt
+    };
+}
+
+const WAKE_PREFIX = /^\s*[“"']?\s*(?:hey|hi|ok|okay|yo)[,\s]+jarvis[,.!:\s]*/i;
+
 async function executeIntentRecorded(intentText, options = {}) {
     const startedAt = Date.now();
+    // A phone's voice note keeps the summons in its words; the gates below
+    // match on the request itself.
+    intentText = String(intentText || '').replace(WAKE_PREFIX, '');
     console.log(`[Bridge] Processing intent (${intentText.length} chars)`);
 
     if (options.signal && options.signal.aborted) {
@@ -688,6 +841,9 @@ async function executeIntentRecorded(intentText, options = {}) {
         return { ...delegated, decision: { action: 'openclaw' }, durationMs: Date.now() - startedAt };
     }
 
+    const inRoom = Array.isArray(options.recentFiles) ? options.recentFiles : [];
+    const early = deliverInHand(intentText, inRoom, startedAt);
+    if (early) return early;
     let asked = await resolveFollowUp(intentText, options.history);
     if (Array.isArray(options.history) && options.history.length
         && asked === intentText && DEPENDENT_FRAGMENT.test(intentText.trim())) {
@@ -731,37 +887,8 @@ async function executeIntentRecorded(intentText, options = {}) {
     const inHand = attached.length ? attached : (wantsFiles ? recent : []);
     const pronounOnly = /\b(that|it|this)\b/i.test(plainAsk)
         && plainAsk.trim().split(/\s+/).length <= 5;
-    if (DELIVERY_ASK.test(plainAsk) && !NAMES_A_RECIPIENT.test(plainAsk) && recent.length
-        && (REFERENCES_FILES.test(plainAsk) || pronounOnly)) {
-        const generic = new Set(['report', 'pdf', 'file', 'document', 'the']);
-        const askTokens = plainAsk.toLowerCase().split(/[^a-z0-9]+/)
-            .filter(t => t.length >= 3 && !generic.has(t));
-        const named = recent.filter(f => askTokens.some(t =>
-            String(f.name || '').toLowerCase().includes(t)));
-        const pronouny = /\b(that|it|this)\b/i.test(plainAsk);
-        const targets = named.length ? named.slice(-2)
-            : (pronouny ? [recent[recent.length - 1]] : []);
-        const fsNode = require('fs');
-        const deliverable = targets.filter(f => {
-            try {
-                return f && f.path
-                    && securityStore.isWithinGrantedRoot(f.path, 'documents')
-                    && fsNode.statSync(f.path).isFile();
-            } catch { return false; }
-        });
-        if (deliverable.length) {
-            console.log('[Bridge] Delivering the file in hand directly.');
-            const files = deliverable.map(f =>
-                ({ name: f.name || path.basename(f.path), path: f.path }));
-            return {
-                status: 'success',
-                response: `Attached ${files.map(f => f.name).join(', ')}.`,
-                action: 'delivered',
-                artifacts: { files },
-                durationMs: Date.now() - startedAt
-            };
-        }
-    }
+    const handed = deliverInHand(plainAsk, recent, startedAt);
+    if (handed) return handed;
     if (inHand.length && CONTENT_QUESTION.test(plainAsk)
         && !MUTATES_FILE.test(plainAsk)) {
         const pinned = attachmentPassages(inHand);
@@ -831,6 +958,7 @@ async function executeIntentRecorded(intentText, options = {}) {
     }
     if (!inHand.length && CONTENT_QUESTION.test(plainAsk) && /\?\s*$/.test(plainAsk.trim())
         && !MUTATES_FILE.test(plainAsk) && !MAIL_QUESTION.test(plainAsk)
+        && !LIVE_STATE.test(plainAsk)
         && !conversationStore.RECALL_SHAPE.test(plainAsk)) {
         let remembered = [];
         try { remembered = await conversationStore.answerSource.retrieve(plainAsk); } catch { remembered = []; }
@@ -891,22 +1019,32 @@ async function executeIntentRecorded(intentText, options = {}) {
         && ((CONTENT_QUESTION.test(plainAsk) && MAIL_QUESTION.test(plainAsk))
             || MAIL_CHECK.test(plainAsk) || ORDER_STATUS.test(plainAsk))
         && !MAIL_MUTATION.test(plainAsk)
+        && !(CALENDAR_WRITE_SHAPE.test(plainAsk) && /\bcalendar\b/i.test(plainAsk))
         && !conversationStore.RECALL_SHAPE.test(plainAsk);
     const calendarWeek = !inHand.length && CALENDAR_WEEK.test(plainAsk)
         && !MAIL_MUTATION.test(plainAsk) && !CALENDAR_WRITE_SHAPE.test(plainAsk);
-    if (mailQuestion || calendarWeek) {
+    const calendarDay = !inHand.length && !calendarWeek && !MAIL_MUTATION.test(plainAsk)
+        && !CALENDAR_WRITE_SHAPE.test(plainAsk) && calendarDayAsked(plainAsk);
+    if (mailQuestion || calendarWeek || calendarDay) {
         const mailProvider = require('./mailProvider');
         const account = mailProvider.forRequest(plainAsk, require('../utils/configReader').readConfig());
-        const terms = calendarWeek ? null : mailSearchTerms(plainAsk);
+        const terms = (calendarWeek || calendarDay) ? null : mailSearchTerms(plainAsk);
         const url = calendarWeek
             ? (/google/.test(account.calendar) ? 'https://calendar.google.com/calendar/u/0/r/week' : account.calendar)
+            : calendarDay ? calendarDayUrl(account.calendar, calendarDay)
             : ((terms && mailProvider.searchUrl(account.url, terms)) || account.url);
-        console.log(`[Bridge] ${calendarWeek ? 'Calendar week' : `Mail question (${terms || 'inbox'})`}; reading the signed-in site.`);
+        console.log(`[Bridge] ${calendarWeek ? 'Calendar week' : calendarDay ? `Calendar day (${calendarDay.toDateString()})` : `Mail question (${terms || 'inbox'})`}; reading the signed-in site.`);
         const webAgent = require('./webAgent');
         const browsed = await webAgent.browse(plainAsk,
             { url, request: plainAsk, readOnly: true, ...(options.signal ? { signal: options.signal } : {}) });
         const unanswered = /\b(?:found nothing|does not (?:display|show|contain)|no (?:e-?mail|message|event)s?\b[^.]{0,30}\b(?:content|found|visible|shown))\b/i;
-        if (browsed.status === 'success' && browsed.answer && !unanswered.test(browsed.answer)) {
+        // A no-results notice is only the answer when it is all there is; an
+        // answer that also reports what was found stands.
+        const noticeOnly = answer => {
+            const at = String(answer).search(unanswered);
+            return at >= 0 && (at < 20 || String(answer).length < 160);
+        };
+        if (browsed.status === 'success' && browsed.answer && !noticeOnly(browsed.answer)) {
             return {
                 status: 'success',
                 response: browsed.answer,
@@ -914,6 +1052,7 @@ async function executeIntentRecorded(intentText, options = {}) {
                 durationMs: Date.now() - startedAt
             };
         }
+        console.log(`[Bridge] site read gave no usable answer (${browsed.status}${browsed.reason ? `: ${browsed.reason}` : ''}): ${String(browsed.answer || '').slice(0, 200)}`);
         return {
             status: 'error',
             response: `I could not read that from ${calendarWeek ? 'the calendar' : 'your mail'}`
@@ -948,6 +1087,62 @@ async function executeIntentRecorded(intentText, options = {}) {
         && !/\b(delete|remove|cancel|clear)\b/i.test(calendarAsk)) {
         console.log('[Bridge] Calendar write; sending the browse lane.');
         const webAgent = require('./webAgent');
+        // The details of a booking that points at an email live in that
+        // email: it is read first, and what it says comes back as a card.
+        // Nothing read off the page is booked without the user's word.
+        if (/\b(e-?mail\w*|inbox|mailbox|message\w*)\b/i.test(calendarAsk)
+            && !/[\w.+-]+@[\w.-]+\.\w{2,}/.test(calendarAsk)) {
+            const mailProvider = require('./mailProvider');
+            const account = mailProvider.forRequest(calendarAsk,
+                require('../utils/configReader').readConfig());
+            const terms = mailSearchTerms(calendarAsk.replace(
+                /\b(?:and|then)\s+(?:book|add|put|schedule)\b[^.]*$/i, ''));
+            const read = await webAgent.browse(
+                `find the email about ${terms || 'this'} and tell me exactly when and where it says the appointment is`,
+                { url: (terms && mailProvider.searchUrl(account.url, terms)) || account.url,
+                  request: calendarAsk, readOnly: true,
+                  ...(options.signal ? { signal: options.signal } : {}) });
+            const said = String((read && read.answer) || '').replace(/\s+/g, ' ').trim();
+            const when = read && read.status === 'success' ? webAgent.whenFrom(said) : null;
+            if (!when || !when.date) {
+                console.log(`[Bridge] booking from mail: no date read (${read && read.status})`);
+                return {
+                    status: 'error',
+                    response: said
+                        ? `I read the email but could not find a date in it to book: "${said.slice(0, 200)}"`
+                        : 'I could not find that email to book from.',
+                    action: 'web',
+                    durationMs: Date.now() - startedAt
+                };
+            }
+            const title = String(terms || 'Appointment').replace(/^subject:/i, '').replace(/"/g, '')
+                .replace(/\b(reminder|confirmation|notice)\b/gi, '').replace(/\s+/g, ' ').trim();
+            const named = title.charAt(0).toUpperCase() + title.slice(1);
+            const day = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][when.date.getDay()];
+            const dated = `${when.date.getDate()} ${['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                'August', 'September', 'October', 'November', 'December'][when.date.getMonth()]}`;
+            let clock = '';
+            if (when.time) {
+                const hours = when.time.hours % 12 || 12;
+                clock = ` at ${hours}:${String(when.time.minutes).padStart(2, '0')} ${when.time.hours < 12 ? 'am' : 'pm'}`;
+            }
+            const plainGoal = `add "${named}" to my calendar on ${day} ${dated}${clock}`;
+            const offer = proposals.create('book_from_mail', {
+                request: calendarAsk,
+                found: said.slice(0, 200),
+                will: `book "${named}" for ${day} ${dated}${clock}, as the email says`
+            }, (context = {}) => webAgent.bookAsApproved(plainGoal,
+                { calendarUrl: account.calendar, ...(context.signal ? { signal: context.signal } : {}) }));
+            activityBus.publish('bridge', 'proposal', { kind: 'book_from_mail', id: offer.id });
+            return {
+                status: 'needs_approval',
+                action: 'proposed_booking',
+                proposal: offer,
+                response: `The email says: "${said.slice(0, 200)}". I can book "${named}" for `
+                    + `${day} ${dated}${clock}. Approve and I will put it on the calendar.`,
+                durationMs: Date.now() - startedAt
+            };
+        }
         const plan = calendarTemplate(calendarAsk);
         console.log(`[Bridge] calendar ask: "${calendarAsk}" -> `
             + (plan ? plan.url : 'no template'));
@@ -957,7 +1152,9 @@ async function executeIntentRecorded(intentText, options = {}) {
                     + `${plan.when}. The form is already filled in; save it.`
                 : asked,
             {
-                url: plan ? plan.url : 'https://calendar.google.com/calendar/u/0/r',
+                url: plan ? plan.url : require('./mailProvider').forRequest(calendarAsk,
+                    require('../utils/configReader').readConfig()).calendar,
+                request: calendarAsk,
                 ...(options.signal ? { signal: options.signal } : {})
             });
         if (plan) {
@@ -1202,6 +1399,6 @@ module.exports = {
     answerProposal,
     composeThenGenerate, isRealComposition, maybeProposeGeneration, maybeDelegate,
     calendarTemplate,
-    mailSearchTerms,
-    GATES: { NOTE_ASK, WHERE_IS, CREDENTIAL_ASK, MAIL_QUESTION, MAIL_CHECK, ORDER_STATUS, MAIL_MUTATION, CALENDAR_WEEK, OWN_MAIL_ASK }
+    mailSearchTerms, calendarDayAsked,
+    GATES: { NOTE_ASK, WHERE_IS, CREDENTIAL_ASK, MAIL_QUESTION, MAIL_CHECK, ORDER_STATUS, MAIL_MUTATION, CALENDAR_WEEK, OWN_MAIL_ASK, LIVE_STATE }
 };

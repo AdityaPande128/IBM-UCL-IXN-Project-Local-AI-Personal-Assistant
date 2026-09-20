@@ -10,17 +10,20 @@ import type {
   ProfileUpdate,
   SettingsResult,
   SettingsUpdate,
+  DirectPairing,
 } from "../hooks/useWebSocket";
 import { applyTheme, type Theme } from "../theme";
 import { VOICE_CHOICES } from "../voices";
 import { ArmButton } from "./Confirm";
-import { BotSteps } from "./BotSteps";
+import { PhoneLink, type PhoneChoice } from "./PhoneLink";
 import { Pending } from "./Pending";
 
 interface SettingsViewProps {
   connected: boolean;
   abilities: AbilitiesData | null;
   channel: ChannelStatus | null;
+  directPairing: DirectPairing | null;
+  onRequestDirectPairing: () => void;
   onRequestChannel: () => void;
   onSetChannelToken: (token: string) => void;
   onClearChannel: () => void;
@@ -87,7 +90,7 @@ function readAvatar(file: File): Promise<string> {
 export function SettingsView({
   connected, abilities, channel, diagnostics, settingsResult, profile, profileError,
   wakeWanted, onSetWake,
-  downloads, onRefresh, onRequestChannel, onSetChannelToken,
+  downloads, onRefresh, directPairing, onRequestDirectPairing, onRequestChannel, onSetChannelToken,
   onClearChannel, onSaveDiagnostics, onUpdateSettings, onUpdateProfile,
   onDownloadAction, onClose,
 }: SettingsViewProps) {
@@ -100,7 +103,7 @@ export function SettingsView({
   const [mailEdit, setMailEdit] = useState<string | null>(null);
   const [doorOpen, setDoorOpen] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
-  const [tokenDraft, setTokenDraft] = useState("");
+  const [phoneChoice, setPhoneChoice] = useState<PhoneChoice>(null);
   const [applyStale, setApplyStale] = useState(false);
   const [closeArmed, setCloseArmed] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -647,62 +650,20 @@ export function SettingsView({
                   {applyRow}
 
                   <div className="settings-field">
-                    <span className="settings-label">Telegram</span>
+                    <span className="settings-label">Phone</span>
                     <span className="diag-note">
-                      Message Jarvis from your phone through a Telegram bot
-                      that belongs only to you.
+                      Reach Jarvis from your phone. Pick the app you use.
                     </span>
-                    {channel?.error && <span className="diag-error">{channel.error}</span>}
-                    {!channel?.has_token ? (
-                      <>
-                      <BotSteps />
-                      <div className="diag-row">
-                        <input
-                          className="settings-input"
-                          type="password"
-                          placeholder="Bot token from @BotFather"
-                          value={tokenDraft}
-                          onChange={(e) => setTokenDraft(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" && !e.nativeEvent.isComposing
-                                && tokenDraft.trim()) {
-                              onSetChannelToken(tokenDraft.trim());
-                              setTokenDraft("");
-                            }
-                          }}
-                        />
-                        <button
-                          className="diag-button"
-                          disabled={!tokenDraft.trim()}
-                          onClick={() => {
-                            onSetChannelToken(tokenDraft.trim());
-                            setTokenDraft("");
-                          }}
-                        >
-                          Connect
-                        </button>
-                      </div>
-                      </>
-                    ) : (
-                      <>
-                        {channel.paired ? (
-                          <span className="diag-path">
-                            Connected and paired — your phone reaches Jarvis.
-                          </span>
-                        ) : channel.running && channel.pairing_code ? (
-                          <>
-                            <span className="diag-note">
-                              Send this code to your bot from the phone that
-                              should be allowed to talk to Jarvis:
-                            </span>
-                            <span className="channel-code">{channel.pairing_code}</span>
-                          </>
-                        ) : (
-                          <span className="diag-note">
-                            A token is saved but the channel isn't running
-                            {channel.enabled ? "" : " — it is disabled in config"}.
-                          </span>
-                        )}
+                    <PhoneLink
+                      compact
+                      channel={channel}
+                      directPairing={directPairing}
+                      choice={phoneChoice}
+                      onChoose={setPhoneChoice}
+                      onRequestDirectPairing={onRequestDirectPairing}
+                      onRequestChannel={onRequestChannel}
+                      onSetChannelToken={onSetChannelToken}
+                      telegramExtra={channel?.has_token ? (
                         <div className="diag-row">
                           <ArmButton
                             label="Disconnect"
@@ -714,8 +675,8 @@ export function SettingsView({
                             Refresh
                           </button>
                         </div>
-                      </>
-                    )}
+                      ) : null}
+                    />
                   </div>
                 </>
               )}

@@ -2258,6 +2258,40 @@ test('a booking is only done when the calendar shows the event', async () => {
     }
 });
 
+test('the bare calendar address opens on the week view', () => {
+    assert.strictEqual(webAgent.calendarHome('https://calendar.google.com'),
+        'https://calendar.google.com/calendar/u/0/r/week');
+    assert.strictEqual(webAgent.calendarHome('https://calendar.google.com/'),
+        'https://calendar.google.com/calendar/u/0/r/week');
+    assert.strictEqual(webAgent.calendarHome('https://calendar.google.com/calendar/u/0/r/day/2026/9/18'),
+        'https://calendar.google.com/calendar/u/0/r/day/2026/9/18', 'a view the request chose stays');
+    assert.strictEqual(webAgent.calendarHome('https://outlook.live.com/calendar/view/week'),
+        'https://outlook.live.com/calendar/view/week');
+});
+
+test('a booking with a day opens the calendar editor already filled in', () => {
+    const now = new Date(2026, 8, 15, 2, 0, 0); // Tuesday 15 September 2026
+    const dentist = webAgent.whenFrom('put a dentist check-up on my calendar for Thursday at 3pm', now);
+    assert.strictEqual(
+        webAgent.eventEditUrl('https://calendar.google.com', 'Dentist check-up', dentist),
+        'https://calendar.google.com/calendar/u/0/r/eventedit'
+        + '?text=Dentist%20check-up&dates=20260917T150000/20260917T160000');
+
+    const priya = webAgent.whenFrom('add a call with Priya to my calendar on Friday at 10am', now);
+    assert.strictEqual(
+        webAgent.eventEditUrl('https://outlook.live.com/calendar/view/week', 'Call with Priya', priya),
+        'https://outlook.live.com/calendar/deeplink/compose?subject=Call%20with%20Priya'
+        + '&startdt=2026-09-18T10:00:00&enddt=2026-09-18T11:00:00&allday=false');
+
+    const allDay = webAgent.whenFrom('add the fair to my calendar on Friday', now);
+    assert.ok(/dates=20260918\/20260919$/.test(
+        webAgent.eventEditUrl('https://calendar.google.com/calendar/u/1', 'Fair', allDay)));
+    assert.strictEqual(webAgent.eventEditUrl('https://calendar.google.com', 'Fair', { date: null, time: { hours: 9, minutes: 0 } }),
+        null, 'no day means no editor to open');
+    assert.strictEqual(webAgent.eventEditUrl('https://example.com/calendar', 'Fair', allDay), null,
+        'only the known calendars have an editor address');
+});
+
 test('the words that place an event parse into a day and a time', () => {
     const now = new Date(2026, 7, 13, 10, 0, 0); // Thursday 13 August 2026
 
@@ -2269,6 +2303,13 @@ test('the words that place an event parse into a day and a time', () => {
     const tomorrow = webAgent.whenFrom('put lunch in for tomorrow at 12:30', now);
     assert.strictEqual(tomorrow.date.getDate(), 14);
     assert.deepStrictEqual(tomorrow.time, { hours: 12, minutes: 30 });
+
+    const dated = webAgent.whenFrom('the appointment is on Tuesday 15 September at 9:40', now);
+    assert.strictEqual(dated.date.getDate(), 15);
+    assert.strictEqual(dated.date.getMonth(), 8);
+    assert.deepStrictEqual(dated.time, { hours: 9, minutes: 40 });
+    const past = webAgent.whenFrom('book it for 2 January at 10am', now);
+    assert.strictEqual(past.date.getFullYear(), 2027, 'a month already gone this year means next year');
 
     const nth = webAgent.whenFrom('add the dentist on the 15th at noon', now);
     assert.strictEqual(nth.date.getDate(), 15);
@@ -2672,4 +2713,15 @@ test('a question that names an email as a noun grants no send, and a reply manda
     const replied = webPolicy.checkClick({ element: { name: 'Send', role: 'button' }, label: USER,
         mandate: replying, home: 'https://mail.google.com/', destination: 'https://mail.google.com/' });
     assert.strictEqual(replied.allowed, true);
+});
+
+test('the user\'s own pronoun is not a person the request names', () => {
+    assert.deepStrictEqual(webAgent.named("reply to the email about the flat viewing saying I'll be there at eleven"), []);
+    assert.deepStrictEqual(webAgent.named('tell Priya I am running late'), ['Priya']);
+});
+
+test('dictated words are typed whether quoted or said', () => {
+    assert.deepStrictEqual(webIntent.dictated("draft an email to sam@example.com saying I've booked a table for one o'clock"), ["I've booked a table for one o'clock"]);
+    assert.deepStrictEqual(webIntent.dictated('email sam@example.com saying "Sounds good to me"'), ['Sounds good to me']);
+    assert.deepStrictEqual(webIntent.dictated('check whether Sam replied'), []);
 });
