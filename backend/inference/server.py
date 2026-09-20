@@ -851,6 +851,31 @@ MIN_SPEECH_PEAK = 0.02
 NO_SPEECH_THRESHOLD = 0.6
 
 
+def _normalize_wav(data, target=0.97):
+    """Scale a 16-bit PCM wav so its loudest sample sits just under full scale.
+    The voice model renders well below full scale, and the shell plays at unit gain."""
+    import io
+    import wave
+    try:
+        with wave.open(io.BytesIO(data), "rb") as w:
+            params = w.getparams()
+            frames = w.readframes(w.getnframes())
+        if params.sampwidth != 2:
+            return data
+        samples = np.frombuffer(frames, dtype=np.int16).astype(np.float32)
+        peak = float(np.abs(samples).max()) if samples.size else 0.0
+        if peak <= 0 or peak >= target * 32767:
+            return data
+        scaled = np.clip(samples * (target * 32767 / peak), -32768, 32767).astype(np.int16)
+        out = io.BytesIO()
+        with wave.open(out, "wb") as w:
+            w.setparams(params)
+            w.writeframes(scaled.tobytes())
+        return out.getvalue()
+    except Exception:
+        return data
+
+
 def _wav_stats(path):
     """Duration and peak amplitude of a 16-bit PCM wav; peak is None if unparseable."""
     import wave
@@ -880,8 +905,11 @@ async def speech_to_text(audio: UploadFile = File(...)):
         tmp_path = tmp.name
 
     def _transcribe():
+        # The wake phrase is a name the model has rarely seen; without a
+        # hint it decodes "Hey Jarvis" as the assistant it has heard of.
         return mlx_whisper.transcribe(
             tmp_path, path_or_hf_repo=STT_MODEL, language="en",
+            initial_prompt="Hey Jarvis.",
             condition_on_previous_text=False)
 
     try:
@@ -956,6 +984,7 @@ async def text_to_speech(text: str = Form(...), voice: str = Form(default="af_he
 
         with open(produced[0], "rb") as fh:
             data = fh.read()
+        data = _normalize_wav(data)
 
         if LOG_CONTENT:
             print(f"[TTS] Synthesized {len(data)} bytes for: {text[:50]!r}")

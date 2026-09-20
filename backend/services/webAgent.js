@@ -257,7 +257,7 @@ async function act(surface, decision, observation, context, options) {
         const verdict = webPolicy.checkNavigation({
             url: decision.url,
             label: contextLabel,
-            from: safeHost(observation.url),
+            from: [safeHost(observation.url), context.home ? safeHost(context.home) : null],
             allowPrivate: options.allowPrivate,
             grantedOnly: options.grantedOnly
         });
@@ -319,7 +319,11 @@ async function act(surface, decision, observation, context, options) {
                 before: found.observation || observation
             };
         }
-        if (addressed && !unaddressed(source) && wrongCorrespondent(source, goal)) {
+        // A recipient this run typed itself from the request's own words is
+        // theirs whatever the mailbox turned it into: a contact chip shows a
+        // name and hides the address the guard would otherwise look for.
+        if (addressed && !context.addressed && !unaddressed(source)
+            && wrongCorrespondent(source, goal)) {
             return {
                 ok: false,
                 refusal: 'wrong-correspondent',
@@ -514,7 +518,7 @@ async function act(surface, decision, observation, context, options) {
                 const verdict = webPolicy.checkNavigation({
                     url: href,
                     label: contextLabel,
-                    from: safeHost(source.url),
+                    from: [safeHost(source.url), context.home ? safeHost(context.home) : null],
                     allowPrivate: options.allowPrivate,
                     grantedOnly: options.grantedOnly
                 });
@@ -683,6 +687,7 @@ function plain(query) {
     return String(query || '').replace(/\b(\d{1,2})(st|nd|rd|th)\b/gi, '$1');
 }
 
+const STALLED_PAGE = /\b(?:having trouble loading|trouble loading|taking longer than usual|is taking too long|try again in a few|still loading)\b/i;
 const FOUND_NOTHING =
     /\bno (?:messages|results|matches|mail|emails|items|conversations)\b|did ?n['’]?t (?:match any|find any(?:thing)?)\b|nothing (?:was )?found|\b0 results\b/i;
 
@@ -916,7 +921,10 @@ function ungrounded(answer, observation, goal) {
             return `${borrowed.map(word => `"${word}"`).join(', ')} appears only below the `
                 + '"wrote:" line on this page, which is the earlier message being quoted back — '
                 + 'those are somebody else\'s words, usually the reader\'s own. What this person '
-                + 'wrote is the part above that line. Answer from that, or say what it says.';
+                + 'wrote is the part above that line. Answer from that, or say what it says. If '
+                + 'the question is about the earlier message itself, open it: in a conversation '
+                + 'it sits above this one, collapsed under its sender\'s name, and its own text '
+                + 'is the ground for the answer.';
         }
     }
 
@@ -953,6 +961,12 @@ function ungrounded(answer, observation, goal) {
 const REPLYING = /\b(reply|replies|replying|respond|responding|answer|answering|get back to)\b/i;
 const OPENS_NEW = /\b(compose|new message|new email|new mail|new event|create event|new appointment)\b/i;
 const OPENS_REPLY = /\breply\b/i;
+const FORWARDING = /\bforward(?:ing)?\b[^.]{0,80}\b(?:e-?mail|message|mail|thread|it|this|that)\b/i;
+const OPENS_FORWARD = /\bforward\b/i;
+
+function forwarding(goal) {
+    return FORWARDING.test(String(goal || ''));
+}
 
 function replying(goal) {
     return REPLYING.test(String(goal || ''));
@@ -1093,8 +1107,8 @@ function unaddressed(observation, fresh = false) {
 
 const ASSISTANT_BOX = /\b(describe|help me write|refine|rewrite|prompt|gemini|copilot|assistant)\b/i;
 
-function editorOpener(observation, wantsReply) {
-    const wanted = wantsReply ? OPENS_REPLY : OPENS_NEW;
+function editorOpener(observation, wantsReply, wantsForward = false) {
+    const wanted = wantsForward ? OPENS_FORWARD : wantsReply ? OPENS_REPLY : OPENS_NEW;
     return ((observation && observation.elements) || []).find(element =>
         !holdsText(element)
         && !element.disabled
@@ -1129,6 +1143,13 @@ function automated(observation) {
 function wrongCorrespondent(observation, goal) {
     const people = named(goal);
     if (!people.length) return false;
+    // A new message to an address the request spells out has no thread to
+    // find: the recipient is typed from the request, and the mailbox shows
+    // it as a contact chip that may carry a name and not the address. Only
+    // a reply or a forward has "their message" for the page to be wrong about.
+    if (people.some(person => person.includes('@')) && !replying(goal) && !forwarding(goal)) {
+        return false;
+    }
 
     const text = String((observation && observation.text) || '');
     const own = ownAddresses(observation);
@@ -1293,13 +1314,15 @@ function latestFromThem(observation, who) {
 const DAY_WORDS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 const A_DAY = /\b(today|tomorrow|sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i;
 const NTH_DAY = /\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b/i;
+const MONTH_WORDS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+const DATED = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b/i;
 const A_CLOCK = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b|\b([01]?\d|2[0-3]):([0-5]\d)\b/i;
 
 function whenFrom(goal, now = new Date()) {
     const text = String(goal || '');
 
     let date = null;
-    const day = text.match(A_DAY);
+    const day = text.match(DATED) ? null : text.match(A_DAY);
     if (day) {
         const word = day[1].toLowerCase();
         date = new Date(now);
@@ -1307,6 +1330,11 @@ function whenFrom(goal, now = new Date()) {
         else if (word !== 'today') {
             date.setDate(date.getDate() + (DAY_WORDS.indexOf(word) - date.getDay() + 7) % 7);
         }
+    } else if (text.match(DATED)) {
+        const dated = text.match(DATED);
+        date = new Date(now.getFullYear(), MONTH_WORDS.indexOf(dated[2].slice(0, 3).toLowerCase()),
+            Number(dated[1]), 0, 0, 0, 0);
+        if (date.getTime() < now.getTime() - 86400000) date.setFullYear(date.getFullYear() + 1);
     } else {
         const nth = text.match(NTH_DAY);
         if (nth) {
@@ -1332,6 +1360,44 @@ function whenFrom(goal, now = new Date()) {
     }
 
     return date || time ? { date, time } : null;
+}
+
+// A planner writes the calendar's bare address from memory as often as the
+// one it was given; the bare address opens on whatever view the profile last
+// used, and a day view hides the rest of the week. The week is the view a
+// question about the calendar starts from.
+function calendarHome(url) {
+    return /^https?:\/\/calendar\.google\.com\/?(?:calendar\/?)?$/i.test(String(url || '').trim())
+        ? 'https://calendar.google.com/calendar/u/0/r/week'
+        : url;
+}
+
+// A calendar home turned into its own event editor, opened on the title, day
+// and time the request gave. The site fills its fields from its own address
+// and the editor arrives ready to save, so the only page work left is the
+// Save press and the read-back that proves the event landed.
+function eventEditUrl(calendarUrl, title, when) {
+    const url = String(calendarUrl || '');
+    if (!title || !when || !when.date) return null;
+    const start = new Date(when.date);
+    start.setHours(when.time ? when.time.hours : 0, when.time ? when.time.minutes : 0, 0, 0);
+    const end = new Date(start.getTime() + (when.time ? 3600000 : 86400000));
+    const pad = n => String(n).padStart(2, '0');
+    const local = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+        + `T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+    const stamp = d => when.time ? local(d).replace(/[-:]/g, '')
+        : local(d).slice(0, 10).replace(/-/g, '');
+    if (/calendar\.google\.com/.test(url)) {
+        const account = (url.match(/\/calendar\/u\/(\d+)/) || [])[1] || '0';
+        return `https://calendar.google.com/calendar/u/${account}/r/eventedit`
+            + `?text=${encodeURIComponent(title)}&dates=${stamp(start)}/${stamp(end)}`;
+    }
+    if (/outlook\.(live|office)\.com/.test(url)) {
+        const base = url.replace(/\/view\/.*$/, '').replace(/\/$/, '');
+        return `${base}/deeplink/compose?subject=${encodeURIComponent(title)}`
+            + `&startdt=${local(start)}&enddt=${local(end)}&allday=${when.time ? 'false' : 'true'}`;
+    }
+    return null;
 }
 
 // A date is typed in the shape the field already shows — the page is never
@@ -1380,25 +1446,36 @@ const TIME_RANGE = /\d{1,2}[:.]\d{2}\s*(?:AM|PM)?\s*[-–]\s*\d{1,2}[:.]\d{2}/i;
 // else the thing the request asked to put on the calendar — "put the dinner
 // on my calendar" names it Dinner.
 function eventName(intent, goal) {
-    const dictated = (((intent && intent.write) || []).map(value => String(value).trim()))
-        .find(words => words && !AN_ADDRESS.test(words));
-    if (dictated) return dictated.slice(0, 60);
-
+    // The request's own wording names the event before the model's reading
+    // of it does: a reading can hand back a whole sentence as the "title".
     const named_ = String(goal || '').match(
         /\b(?:put|add|book|schedule)\s+(?:the|a|an)?\s*([a-z][\w -]{1,40}?)\s+(?:on|onto|to|in)\s+my\s+calendar\b/i);
-    if (!named_) return null;
-    const words = named_[1].replace(/\s+(?:email|mail|message|invite)\b.*$/i, '').trim();
+    const words = named_
+        ? named_[1].replace(/\s+(?:email|mail|message|invite)\b.*$/i, '').trim() : '';
     // "add it to my calendar" names nothing — the pronoun's referent lives
     // in whatever wording the fallback consults next.
-    if (!words || /^(?:it|this|that|them|these|those|something|everything)$/i.test(words)) {
-        return null;
+    if (named_ && words
+        && !/^(?:it|this|that|them|these|those|something|everything)$/i.test(words)) {
+        return words.charAt(0).toUpperCase() + words.slice(1);
     }
-    return words.charAt(0).toUpperCase() + words.slice(1);
+    const dictated = (((intent && intent.write) || []).map(value => String(value).trim()))
+        .find(value => value && !AN_ADDRESS.test(value));
+    return dictated ? dictated.slice(0, 60) : null;
 }
 
 // An approved card books through the same route a spoken request takes: the
 // words the user approved become the goal, and the calendar is read back
 // before success is claimed.
+// What a finished request says when the reading offered no words for it:
+// the outcome in plain terms, never the ledger of mandates and fields.
+function plainDone(performed, filled) {
+    if (performed.has('send')) return 'The email is sent.';
+    if (performed.has('book')) return 'The event is on the calendar.';
+    if (performed.has('compose')) return 'The draft is written.';
+    if (performed.has('attach')) return 'The file is attached.';
+    return `Done: ${[...performed].join(', ')}${filled.length ? ` — ${filled.join(', ')} filled.` : '.'}`;
+}
+
 async function bookAsApproved(plainGoal, options = {}) {
     const target = options.calendarUrl
         || require('./mailProvider').current(configReader.readConfig()).calendar;
@@ -1484,6 +1561,10 @@ async function desktopOrExplain(url) {
         `${safeHost(url) || 'that site'} has to be opened in your own browser, and ${axBridge.why()}`);
 }
 
+function samePage(url) {
+    try { const u = new URL(url); return `${u.origin}${u.pathname.replace(/\/+$/, '')}`; } catch { return null; }
+}
+
 function safeHost(url) {
     try { return new URL(url).hostname; } catch { return null; }
 }
@@ -1528,7 +1609,23 @@ async function browse(goal, options = {}) {
     }
     if (options.readOnly) mandate.clear();
 
+    if (options.url) options = { ...options, url: calendarHome(options.url) };
     let home = options.url || null;
+
+    // A booking whose words name the event and its day opens the calendar's
+    // own editor on those words, rather than working the picker by hand.
+    let prefilled = null;
+    if (mandate.has('book') && home && !options.readOnly) {
+        const title = eventName(intent, goal) || eventName(intent, options.request)
+            || (allQuoted(goal)[0] || null);
+        const when = whenFrom(goal) || whenFrom(options.request || '');
+        const editor = eventEditUrl(home, title, when);
+        if (editor) {
+            prefilled = { title, url: editor, when };
+            home = editor;
+            options = { ...options, url: editor };
+        }
+    }
 
     const looked = new Set([safeHost(home)].filter(Boolean));
 
@@ -1597,6 +1694,15 @@ async function browse(goal, options = {}) {
     const filled = [];
     const written = [];
     const performed = new Set();
+    if (prefilled) {
+        const words = String(prefilled.title);
+        pending.splice(0, pending.length);
+        typed.push(words.toLowerCase());
+        filled.push('Title');
+        written.push({ field: 'Title', text: words });
+        performed.add('compose');
+        history.push(`opened the calendar editor on "${words}" for the day and time asked`);
+    }
 
     const corrected = new Set();
 
@@ -1704,6 +1810,26 @@ async function browse(goal, options = {}) {
             .map(el => el.name || '').join(' '))}`).toLowerCase().replace(/\s+/g, ' ');
         if (shown.includes(wanted)) return true;
 
+        // The editor closes onto whatever view the calendar was showing; the
+        // day the event was put on is where it must be visible.
+        if (prefilled && prefilled.when && prefilled.when.date) {
+            const day = prefilled.when.date;
+            const y = day.getFullYear(), m = day.getMonth() + 1, d = day.getDate();
+            const dayUrl = /calendar\.google\.com/.test(prefilled.url)
+                ? prefilled.url.replace(/\/r\/eventedit.*$/, `/r/day/${y}/${m}/${d}`)
+                : prefilled.url.replace(/\/deeplink\/compose.*$/, `/view/day/${y}/${m}/${d}`);
+            await surface.navigate(dayUrl).catch(() => null);
+            await surface.settle().catch(() => null);
+            const again = await surface.observe();
+            contextLabel = labels.join(contextLabel, again.label);
+            const there = (`${again.text || ''} ${((again.elements || [])
+                .map(el => el.name || '').join(' '))}`).toLowerCase().replace(/\s+/g, ' ');
+            if (there.includes(wanted)) {
+                observation = again;
+                return true;
+            }
+        }
+
         performed.delete('book');
         history.push(`Save was pressed, but the calendar does not show "${title}" — `
             + 'the event has not landed, and this is not done until it is visible');
@@ -1730,6 +1856,23 @@ async function browse(goal, options = {}) {
             + 'has not gone, it is sitting as a draft. Press its Send control; do not '
             + 'claim this is done while an editor is still open.');
         return false;
+    };
+
+    // A draft is written when the site has kept it, not when the words are
+    // in the box. The mail sites save a draft the moment its compose is
+    // closed, and Escape closes one the way a person does; a surface that
+    // cannot press it is given time for the site's own periodic save.
+    const draftLanded = async () => {
+        if (!mandate.has('compose') || mandate.has('send') || performed.has('send')) return true;
+        await new Promise(beat => setTimeout(beat, 3000));
+        if (typeof surface.dismiss === 'function') {
+            await surface.dismiss().catch(() => null);
+            await new Promise(beat => setTimeout(beat, 2000));
+            console.log('[WebAgent] draft: the compose was closed so the site keeps it');
+            return true;
+        }
+        await new Promise(beat => setTimeout(beat, 8000));
+        return true;
     };
 
     // Every download the browser produced passes the policy gate here: what
@@ -1900,6 +2043,19 @@ async function browse(goal, options = {}) {
         }
 
         observation = await surface.observe();
+        // A site that has stalled shows its own loading notice in place of
+        // the page; that is not a page to conclude from, so it is asked for
+        // once more before anything is read.
+        if (options.url && STALLED_PAGE.test(String(observation.text || ''))) {
+            console.log('[WebAgent] the page shows a loading notice; loading it again');
+            await new Promise(beat => setTimeout(beat, 3000));
+            await surface.navigate(options.url);
+            await surface.settle().catch(() => null);
+            observation = await surface.observe();
+        }
+        // The page the request landed on is where it began; a return to it
+        // later cannot be the opening of something new.
+        const landing = samePage(observation.url);
         contextLabel = labels.join(contextLabel, observation.label);
         states.set(perception.fingerprint(observation), -1);
 
@@ -2320,7 +2476,7 @@ async function browse(goal, options = {}) {
                 const words = pending[0];
 
                 if (!editorOpen(observation)) {
-                    const opener = editorOpener(observation, replying(goal));
+                    const opener = editorOpener(observation, replying(goal), forwarding(goal));
                     if (!opener) break;
                     const pressed = await act(surface, { action: 'click', ref: opener.ref },
                         observation, { goal, userLabel: inputLabel, contextLabel, mandate, home }, options);
@@ -2341,7 +2497,7 @@ async function browse(goal, options = {}) {
                 const put = await act(surface, { action: 'fill', ref: box.ref, text: words },
                     observation,
                     { goal: `${goal} ${intent.query || ''}`, userLabel: inputLabel, contextLabel,
-                      mandate, home },
+                      mandate, home, addressed: addressedIt },
                     options);
                 if (!put.ok) break;
 
@@ -2390,7 +2546,7 @@ async function browse(goal, options = {}) {
             // and time fields; each is typed in the shape it already shows,
             // and the panel is left before Save so the editor is back in view.
             const placeEvent = async () => {
-                const wanted = whenFrom(goal);
+                const wanted = prefilled ? null : whenFrom(goal);
                 if (!wanted) return;
 
                 const findable = pattern => ((observation && observation.elements) || [])
@@ -2494,10 +2650,9 @@ async function browse(goal, options = {}) {
         await carryOut();
         await admitDownloads();
 
-        if (complete() && await bookingLanded() && await sendLanded()) {
+        if (complete() && await bookingLanded() && await sendLanded() && await draftLanded()) {
             status = 'success';
-            answer = intent.completes
-                || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
+            answer = intent.completes || plainDone(performed, filled);
             actions.push({ action: 'done', reason: 'the request is carried out', answer });
             record({
                 capability: 'web.done', status: 'success', label: contextLabel,
@@ -2515,10 +2670,9 @@ async function browse(goal, options = {}) {
 
             await carryOut();
             await admitDownloads();
-            if (complete() && await bookingLanded() && await sendLanded()) {
+            if (complete() && await bookingLanded() && await sendLanded() && await draftLanded()) {
                 status = 'success';
-                answer = intent.completes
-                    || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
+                answer = intent.completes || plainDone(performed, filled);
                 actions.push({ action: 'done', reason: 'the request is carried out', answer });
                 break;
             }
@@ -2569,7 +2723,7 @@ async function browse(goal, options = {}) {
 
             const finished = complete()
                 && (decision.action === 'give_up' || decision.action === 'done'
-                    ? await bookingLanded() && await sendLanded() : true);
+                    ? await bookingLanded() && await sendLanded() && await draftLanded() : true);
 
             const { undone, short } = outstanding();
 
@@ -2696,6 +2850,7 @@ async function browse(goal, options = {}) {
             }
 
             if (decision.action === 'done') {
+                await draftLanded();
                 status = 'success';
                 answer = decision.answer || null;
                 record({
@@ -2896,10 +3051,9 @@ async function browse(goal, options = {}) {
             const actedMs = Date.now() - stepStartedAt;
 
             if (outcome.ok && outcome.mandated && complete()
-                && await bookingLanded() && await sendLanded()) {
+                && await bookingLanded() && await sendLanded() && await draftLanded()) {
                 status = 'success';
-                answer = `Done: ${[...performed].join(', ')}`
-                    + (filled.length ? ` — ${filled.join(', ')} filled.` : '.');
+                answer = intent.completes || plainDone(performed, filled);
                 record({
                     capability: `web.${decision.action}`, status: 'success',
                     label: contextLabel, summary: `${outcome.detail} — the request is carried out`,
@@ -2966,7 +3120,8 @@ async function browse(goal, options = {}) {
             }
 
             if (outcome.ok && !mandate.size && creating(observation)
-                && !creating(outcome.before || null)) {
+                && !creating(outcome.before || null)
+                && samePage(observation.url) !== landing) {
                 await surface.back().catch(() => null);
                 await surface.settle().catch(() => null);
                 observation = await surface.observe();
@@ -3050,10 +3205,9 @@ async function browse(goal, options = {}) {
 
             // The loop must never exit on a completion nobody verified: claim
             // it if it stands up, or withdraw the unlanded part and carry on.
-            if (complete() && await bookingLanded() && await sendLanded()) {
+            if (complete() && await bookingLanded() && await sendLanded() && await draftLanded()) {
                 status = 'success';
-                answer = intent.completes
-                    || `Done: ${[...performed].join(', ')} — ${filled.join(', ')} filled.`;
+                answer = intent.completes || plainDone(performed, filled);
                 actions.push({ action: 'done', reason: 'the request is carried out', answer });
                 break;
             }
@@ -3109,6 +3263,10 @@ async function browse(goal, options = {}) {
     if (tracing && planId !== null) {
         traceStore.finishPlan(planId, { status, runMs, error: failure });
     }
+    console.log(`[WebAgent] ${status} after ${actions.length} action(s) in ${runMs}ms: `
+        + actions.map(a => `${a.action}${a.ref ? ` ${a.ref}` : ''}${a.ok === false ? ' (failed)' : ''}`
+            + (a.detail ? ` ${String(a.detail).slice(0, 80)}` : '')).join('; ').slice(0, 900)
+        + (answer ? ` | answer: ${String(answer).replace(/\s+/g, ' ').slice(0, 200)}` : ''));
 
     return {
         status,
@@ -3158,6 +3316,9 @@ function recordAction(tracing, planId, ordinal, record, tier = PERCEPTION_TIER) 
 }
 
 module.exports = {
+    eventEditUrl,
+    bookAsApproved,
+    calendarHome,
     browse,
     parseAction,
     buildMessages,

@@ -118,6 +118,13 @@ function score(row) {
             if (!row.claimed) return { verdict: 'fail', evidence: `no answer (${row.status})` };
             return { verdict: has(row, truth) ? 'pass' : 'fail', evidence: `truth ${truth.join(' | ').slice(0, 80)}` };
         }
+        case 'booked': {
+            const cal = mail && mail.calendar ? mail.calendar[check.day] : null;
+            if (!cal) return { verdict: 'pending', evidence: `calendar ${check.day} unread` };
+            const hit = cal.find(e => new RegExp(check.regex, 'i').test(e));
+            if (row.claimed) return { verdict: hit ? 'pass' : 'fail', evidence: hit ? `on the calendar ${check.day}: ${hit.slice(0, 80)}` : `nothing matching on ${check.day}` };
+            return { verdict: hit ? 'fail-misreported' : 'fail', evidence: hit ? `booked but reported failure: ${hit.slice(0, 60)}` : `no answer (${row.status})` };
+        }
         default: return { verdict: 'pending', evidence: `no scorer for ${check.type}` };
     }
 }

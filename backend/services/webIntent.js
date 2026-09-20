@@ -35,6 +35,9 @@ query   What you would type into the site's own search box to find the thing the
         Replying, forwarding and answering all need a query, because they act on
         a message that already exists and it has to be found first. Only a
         message to a fresh address, written from nothing, has no query.
+        from: and to: take a person or an address, never a topic. A topic
+        ("the flat viewing", "my order") is searched as plain words, or as
+        subject:"..." when the request names the message's subject.
 
 write   The exact text to be typed, in the order it should be typed, as a list.
         Two cases, and they are different:
@@ -55,6 +58,9 @@ write   The exact text to be typed, in the order it should be typed, as a list.
               write: ["let Sam know I'm running twenty minutes late"]   WRONG
         If the request asks for several named values — an address, a subject, a
         body — list them in that order, one entry each.
+        A FORWARD sends a message that already exists, as it is. Then the list
+        holds the address it goes to and nothing else: no body, no subject,
+        and never the word "forward".
         Empty list if nothing is to be typed. A question is never typed.
 
 file    The user's OWN file, when the request says one should go WITH the
@@ -102,6 +108,9 @@ EXAMPLES
 
 "reply to my friend Philip saying \\"Hello, yes Pakistan would be fab!\\""
 {"query":"from:philip","write":["Hello, yes Pakistan would be fab!"],"act":"send","completes":"the reply has been sent"}
+
+"forward the invoice email to sam@example.com"
+{"query":"invoice","write":["sam@example.com"],"act":"send","completes":"the message has been forwarded"}
 
 "find out what time and where I have to go on August 15th"
 {"query":"August 15","write":[],"act":"read","completes":"the time and place are known"}
@@ -156,6 +165,10 @@ async function read(goal, options = {}) {
     // Words the user dictated are typed whether or not the model listed them:
     // a message composed with nothing in it is not the message asked for.
     if (!write.length && (act === 'compose' || act === 'send')) write = dictated(words);
+    // A forward carries the found message; only an address is typed for it.
+    if (FORWARDING.test(words) && !dictated(words).length) {
+        write = write.filter(entry => /@/.test(entry));
+    }
 
     const file = text(parsed.file);
     const mandate = webPolicy.mandateFromIntent(act, options.label);
@@ -173,6 +186,8 @@ async function read(goal, options = {}) {
         source: 'model'
     };
 }
+
+const FORWARDING = /\bforward(?:ing)?\b[^.]{0,80}\b(?:e-?mail|message|mail|thread|it|this|that)\b/i;
 
 function copied(goal, write) {
     if (!write.length) return false;

@@ -222,6 +222,7 @@ conversationStore.notifyAppend(({ ws: origin, id, created, message }) => {
     }, origin);
 });
 aiPipeline.setBroadcast(broadcast);
+aiPipeline.setContext(chatContext);
 
 // A connection that greets with {"type":"seal"} switches to the sealed
 // dialect: every later frame in both directions is ciphertext under the
@@ -327,10 +328,14 @@ wss.on('connection', (ws) => {
                 authenticated = true;
                 clearTimeout(authTimer);
                 clients.add(ws);
+                // The phone keeps the address it paired at; a Mac that has
+                // moved networks tells it the current one, so the next open
+                // finds it on the LAN without a hole punch.
                 ws.send(JSON.stringify({
                     type: 'connected',
                     message: 'Welcome to Jarvis Backend Daemon',
-                    openclaw: openclawBridge.isConnected()
+                    openclaw: openclawBridge.isConnected(),
+                    lan: { host: lanAddress(), port: Number(PORT) }
                 }));
             } else {
                 ws.close(4401, 'unauthenticated');
@@ -446,6 +451,15 @@ wss.on('connection', (ws) => {
                 return;
             }
 
+            // The phone app pairs by scanning what the terminal tool used to
+            // print: this Mac's address, the socket token and the pairing
+            // secret. Only an authenticated shell can ask, and the answer
+            // never leaves the machine except through the user's own camera.
+            if (parsed.type === 'direct_pairing') {
+                ws.send(JSON.stringify({ type: 'direct_pairing_result', ...directPairing() }));
+                return;
+            }
+
             if (parsed.type === 'channel_clear') {
                 channelAdapter.stop();
                 channelAdapter.unpair();
@@ -522,22 +536,7 @@ wss.on('connection', (ws) => {
                 const attached = filePlane.resolveAttachments(parsed.attachments);
                 const intentText = parsed.text;
                 const privateChat = ws.privateChat === true;
-                const history = privateChat ? (ws.privateHistory || []).slice(-6)
-                    : ws.conversationId
-                    ? conversationStore.messages(ws.conversationId).slice(-6)
-                        .filter(m => m.role === 'user' || m.role === 'assistant')
-                        .map(m => ({ role: m.role, text: String(m.text || '').slice(0, 240) }))
-                    : [];
-                // Files that crossed this conversation recently, so "that
-                // PDF" still means something three messages later.
-                const recentFiles = privateChat ? (ws.privateFiles || []).slice(-5)
-                    : ws.conversationId
-                    ? conversationStore.messages(ws.conversationId).slice(-12)
-                        .flatMap(m => (m.artifacts && Array.isArray(m.artifacts.files))
-                            ? m.artifacts.files : [])
-                        .filter(f => f && f.path)
-                        .slice(-5)
-                    : [];
+                const { history, recentFiles } = chatContext(ws);
                 const job = intentQueue.submit(({ signal }) =>
                     withActivity(ws, () =>
                         openclawBridge.executeIntent(intentText, {
@@ -1093,6 +1092,58 @@ wss.on('connection', (ws) => {
         console.error(error);
     });
 });
+
+function lanAddress() {
+    const interfaces = require('os').networkInterfaces();
+    const preferred = ['en0', 'en1'];
+    const names = [...preferred.filter(n => interfaces[n]), ...Object.keys(interfaces)];
+    for (const name of names) {
+        for (const entry of interfaces[name] || []) {
+            if (entry.family === 'IPv4' && !entry.internal) return entry.address;
+        }
+    }
+    return null;
+}
+
+function directPairing() {
+    const host = lanAddress();
+    if (!host) return { error: 'This Mac has no network address yet. Join a Wi-Fi network and try again.' };
+    let secret;
+    try {
+        secret = require('./services/pairingSecret').issue(process.env.JARVIS_PAIRING_SECRET_PATH);
+    } catch (err) {
+        return { error: `The pairing secret could not be read: ${err.message}` };
+    }
+    const turn = (config.remote && Array.isArray(config.remote.turn))
+        ? config.remote.turn.filter(u => typeof u === 'string') : [];
+    const payload = { host, port: Number(PORT), token: SOCKET_TOKEN, secret };
+    if (turn.length) payload.turn = turn.join(',');
+    return { host, port: Number(PORT), lan_bind: Boolean(config.remote && config.remote.lan_bind),
+        payload: JSON.stringify(payload) };
+}
+
+// What a request carries in from its chat, whichever way it arrived: the
+// last few turns, and the files that crossed the conversation recently, so
+// "that PDF" still means something three messages later. A spoken request
+// gets the same room as a typed one.
+function chatContext(ws) {
+    const privateChat = ws.privateChat === true;
+    const history = privateChat ? (ws.privateHistory || []).slice(-6)
+        : ws.conversationId
+        ? conversationStore.messages(ws.conversationId).slice(-6)
+            .filter(m => m.role === 'user' || m.role === 'assistant')
+            .map(m => ({ role: m.role, text: String(m.text || '').slice(0, 240) }))
+        : [];
+    const recentFiles = privateChat ? (ws.privateFiles || []).slice(-5)
+        : ws.conversationId
+        ? conversationStore.messages(ws.conversationId).slice(-12)
+            .flatMap(m => (m.artifacts && Array.isArray(m.artifacts.files))
+                ? m.artifacts.files : [])
+            .filter(f => f && f.path)
+            .slice(-5)
+        : [];
+    return { history, recentFiles };
+}
 
 // The pairing code is minted only while the channel runs unpaired, so the
 // settings pane can show it without ever inventing one for a dead channel.

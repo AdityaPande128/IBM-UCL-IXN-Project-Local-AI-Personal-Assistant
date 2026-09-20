@@ -421,6 +421,13 @@ test('chunkTextDynamically: empty input produces no chunks', () => {
 });
 
 
+test('readAloud: decimals and pounds are spoken as words', () => {
+    assert.equal(aiPipeline.readAloud('RAM usage: 0.87 GB of 24.00 GB'), 'RAM usage: 0 point 87 GB of 24 point 00 GB');
+    assert.equal(aiPipeline.readAloud('Food came to £1,241.65 in total.'), 'Food came to 1,241 pounds 65 pence in total.');
+    assert.equal(aiPipeline.readAloud('Rent is £1450.'), 'Rent is 1450 pounds.');
+    assert.equal(aiPipeline.readAloud('Done. Three files.'), 'Done. Three files.');
+});
+
 test('speakableSummary: leaves a short reply untouched', () => {
     assert.equal(aiPipeline.speakableSummary('Wi-Fi turned off.'), 'Wi-Fi turned off.');
 });

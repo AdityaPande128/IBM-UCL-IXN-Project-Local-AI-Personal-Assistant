@@ -186,13 +186,30 @@ fn resolve_program(name: &str) -> PathBuf {
     if name.contains('/') {
         return PathBuf::from(name);
     }
-    for dir in augmented_path().split(':') {
-        let candidate = PathBuf::from(dir).join(name);
-        if candidate.is_file() {
-            return candidate;
+    let candidates: Vec<PathBuf> = augmented_path()
+        .split(':')
+        .map(|dir| PathBuf::from(dir).join(name))
+        .filter(|candidate| candidate.is_file())
+        .collect();
+    // More than one Python can sit on the PATH, and the first is not always
+    // the one the inference server's packages were installed into; the
+    // first interpreter that can import them is the one that runs it.
+    if name.starts_with("python") {
+        for candidate in &candidates {
+            let ok = Command::new(candidate)
+                .args(["-c", "import fastapi, mlx"])
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false);
+            if ok {
+                return candidate.clone();
+            }
         }
     }
-    PathBuf::from(name)
+    candidates
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 fn port_open(port: u16) -> bool {

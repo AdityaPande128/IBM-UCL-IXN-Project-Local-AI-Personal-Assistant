@@ -1,6 +1,8 @@
 #!/bin/zsh
 # One pass of the evaluation suite through the running app. Usage:
 #   tools/eval-pass.sh <mailbox> <arm> <pass-name> [mail-only]
+# EVAL_SUITE names another suite file and EVAL_BLOCKS its block order; rows
+# marked manual, or without a check, are observed by hand and not driven.
 # The mailbox names an entry of docs/evaluation/mailboxes.json, which gives
 # its provider and the counterpart address; the daemon's mail provider is set
 # to match and the app restarted. Runs are
@@ -88,8 +90,9 @@ run_task() {
   if [ "$have" -ge "$want" ]; then say "skip $task ($have rows)"; return 0; fi
   ensure_app || return
   say "run $task"
-  EVAL_PASS=$PASS node tools/eval-run.js --task "$task" --system "$SYSTEM" --arm "$ARM" --mailbox "$MAILBOX" --contact "$CONTACT" --tag "$PASS" --no-prompt 2>&1 | /usr/bin/grep -E "^\[eval\]" | cut -c1-220 | tail -n 5
+  EVAL_PASS=$PASS node tools/eval-run.js --task "$task" --suite "$SUITE" --system "$SYSTEM" --arm "$ARM" --mailbox "$MAILBOX" --contact "$CONTACT" --tag "$PASS" --no-prompt 2>&1 | /usr/bin/grep -E "^\[eval\]" | cut -c1-220 | tail -n 5
   node tools/eval-reset.js task >/dev/null 2>&1
+  osascript -e 'set volume output muted true' >/dev/null 2>&1
 }
 STATE=$E/pass-$PASS.state
 if [ -f "$STATE" ]; then say "resuming"; else date -u +%FT%T.000Z > "$STATE"; say "pass begins"; fi
@@ -102,6 +105,14 @@ stop_app
 node "$MAILTOOL" reseed "$PROVIDER" 2>&1 | /usr/bin/grep -E "sent from|RESEEDED|SIGNED_OUT|ERR" | tail -n 6
 if [ "$(tr -d '[:space:]' < $M/eval-arm.state 2>/dev/null)" != "$ARM" ] || [ ! -f "$E/pass-$PASS.armed" ]; then
   cp -R "$M/skills-shipped" skills.next && rm -rf skills && mv skills.next skills && say "catalogue restored: $(ls skills | wc -l | tr -d ' ') skills"
+  # A pass may regenerate a skill and pin the new copy; the shipped copy put
+  # back here is the verified one, so its pin is brought back with it.
+  node -e '
+    const p=require("./services/skillPins"), fs=require("fs"), path=require("path");
+    const pins=JSON.parse(fs.readFileSync(p.DEFAULT_PATH,"utf8")); let n=0;
+    for (const name of Object.keys(pins)) { const dir=path.join("skills",name); if (!fs.existsSync(dir)) continue;
+      const h=p.hashDirectory(dir); if (pins[name].hash!==h) { pins[name].hash=h; n++; } }
+    if (n) fs.writeFileSync(p.DEFAULT_PATH, JSON.stringify(pins,null,2)+"\n"); console.log(n);' | { read n; [ "$n" != "0" ] && say "pins re-aligned with the shipped catalogue: $n"; }
   node tools/eval-reset.js arm >/dev/null 2>&1 && say "state reset (traces, recipes)"
   node tools/eval-arm.js "$ARM" >/dev/null && restart_app || exit 1
   touch "$E/pass-$PASS.armed"
@@ -114,9 +125,14 @@ if [ "$SYSTEM" = openclaw ]; then
   case $ARM in P) set_openclaw_model mlx-community/Qwen3-4B-Instruct-2507-4bit ;; *) set_openclaw_model mlx-community/gemma-4-E4B-it-qat-4bit ;; esac
   baseline_ready || exit 1
 fi
-REPEATS=$(node -e "process.stdout.write(require('$E/suite.json').repeat.join(' '))")
-TASKS=$(node -e "const s=require('$E/suite.json');process.stdout.write(s.tasks.filter(t=>'$MAILONLY'?t.mail:true).map(t=>t.id).join(' '))")
-order() { for b in D M C S K G; do for t in ${=TASKS}; do [ "${t[1,1]}" = "$b" ] && echo $t; done; done; }
+SUITE=${EVAL_SUITE:-$E/suite.json}
+BLOCKS=${EVAL_BLOCKS:-D M C S K G}
+REPEATS=$(node -e "process.stdout.write((require('$SUITE').repeat||[]).join(' '))")
+TASKS=$(node -e "const s=require('$SUITE');process.stdout.write(s.tasks.filter(t=>!t.manual&&t.check&&('$MAILONLY'?t.mail:true)).map(t=>t.id).join(' '))")
+# EVAL_TASKS names a subset of task ids for a sanity pass; the repeat block
+# is skipped for such a pass.
+[ -n "${EVAL_TASKS:-}" ] && { TASKS=$(for t in ${=TASKS}; do case " $EVAL_TASKS " in *" $t "*) echo -n "$t ";; esac; done); REPEATS=""; }
+order() { for b in ${=BLOCKS}; do for t in ${=TASKS}; do [ "${t[1,1]}" = "$b" ] && echo $t; done; done; }
 for task in $(order); do
   [ "${task[1,1]}" = G ] && [ -z "${WEB_READ:-}" ] && { node "$WEBTRUTH" >/dev/null 2>&1 && say "web facts read"; WEB_READ=1; }
   run_task "$task" 1

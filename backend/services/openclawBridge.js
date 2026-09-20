@@ -14,6 +14,7 @@ const activityBus = require('./activityBus');
 const profile = require('./profile');
 const llmClient = require('./llmClient');
 const securityStore = require('../security/store');
+const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
@@ -277,6 +278,19 @@ function attachmentPassages(attached) {
 const DISCLAIMS_THE_WEB =
     /\b(?:unable to|cannot|can't|do(?:es)?\s*n[o']t have|lack)\b[^.]{0,60}\b(?:internet|real[- ]?time|live|browse|browsing|web|current (?:information|data)|system information|your (?:computer|mac|machine|device|files))\b/i;
 
+// The file a request asks for, when it names one: "write ... to ~/x/out.csv",
+// "save it as /y/list.txt". Only a full or home-relative path counts.
+function namedOutputFile(text) {
+    const plain = String(text);
+    const starts = [...plain.matchAll(/\b(?:to|as|into|in)\s+(?=~|\/)/g)];
+    if (!starts.length) return null;
+    const from = starts[starts.length - 1].index + starts[starts.length - 1][0].length;
+    const found = /^((?:~|\/).*?\.[A-Za-z0-9]{1,5})(?=[.,;:!?]?\s*(?:$|and\b|then\b|so\b))/.exec(plain.slice(from));
+    if (!found) return null;
+    const last = found[1].trim();
+    return last.startsWith('~') ? path.join(os.homedir(), last.slice(1)) : last;
+}
+
 async function executeSkill(decision, originalText, options = {}) {
     const { target_skill, parameters } = decision;
 
@@ -293,6 +307,8 @@ async function executeSkill(decision, originalText, options = {}) {
         console.log(`[Bridge] ${skill.name} does not speak of what "${originalText.slice(0, 60)}" asks to change; not running it.`);
         return composeThenGenerate(originalText, options);
     }
+    const promised = namedOutputFile(originalText);
+    const promisedBefore = promised ? fs.existsSync(promised) : false;
     const result = await skillCare.run(skill, parameters,
         { request: originalText, signal: options.signal });
 
@@ -300,6 +316,14 @@ async function executeSkill(decision, originalText, options = {}) {
         console.log(`[Bridge] ${skill.name} does not fit this request (${result.reason}); offering to build.`);
         return maybeProposeGeneration(originalText,
             [`${skill.name} could not do that: ${result.reason}`], options);
+    }
+    // A request that names the file it wants is done when that file exists.
+    // A skill that ran without producing it did something else, however
+    // close its name looked, and the request still needs its own program.
+    if (result.status === 'success' && promised && !promisedBefore && !fs.existsSync(promised)) {
+        console.log(`[Bridge] ${skill.name} ran but ${path.basename(promised)} was not written; offering to build.`);
+        return maybeProposeGeneration(originalText,
+            [`${skill.name} ran but did not write ${path.basename(promised)}, which the request asks for`], options);
     }
 
     return {
@@ -421,6 +445,13 @@ async function composeThenGenerate(intentText, options = {}) {
             const offered = wellKnownFolder(intentText);
             if (offered) return proposeFolderAccess(intentText, offered, gate[1], options);
         }
+        // A composition whose producing step came back empty has not done
+        // the request; the installed skills did not fit it. That is the
+        // capability gap the factory exists for, not a finding to report.
+        if (execution.status === 'empty') {
+            console.log('[Bridge] The composition produced nothing; generating a skill instead.');
+            return maybeProposeGeneration(intentText, [], options);
+        }
         return {
             status: execution.status === 'success' ? 'success' : execution.status,
             response: execution.text,
@@ -484,7 +515,9 @@ async function composeThenGenerate(intentText, options = {}) {
 }
 
 const DELIVERY_NOISE = new Set(['send', 'share', 'give', 'deliver', 'forward', 'attach', 'me', 'my', 'the',
-    'to', 'phone', 'file', 'files', 'please', 'both', 'all', 'two', 'and', 'of', 'over', 'this', 'that', 'a', 'an', 'onto', 'device', 'mobile']);
+    'to', 'phone', 'file', 'files', 'please', 'both', 'all', 'two', 'and', 'of', 'over', 'this', 'that', 'a', 'an', 'onto', 'device', 'mobile',
+    'latest', 'newest', 'most', 'recent', 'last', 'report', 'document', 'pdf', 'copy', 'version', 'jarvis', 'hey']);
+const WANTS_NEWEST = /\b(latest|newest|most recent|last)\b/i;
 const NEEDS_THE_BROWSER =
     /\b(e-?mails?|my (?:mailbox|inbox)|gmail|outlook|my calendar|attachments? from|website|web ?page|browser|online)\b/i;
 const NOTE_ASK = /^(?:please\s+)?(?:note that|note:|remember that|remember,? we|remember,? i|remember:|for the record|keep in mind|just so you know|fyi)\b/i;
@@ -629,7 +662,9 @@ function deliverByName(intentText) {
     }
     if (!hits.length) return ask();
     const plural = /\b(both|all|every|two|these|those|each)\b/i.test(intentText) || /\b\w+s\b/.test(words.join(' ')) && hits.length === 2;
-    const chosen = plural ? hits.slice(0, 3) : (hits.length === 1 ? hits : []);
+    const newest = WANTS_NEWEST.test(intentText) && hits.length > 1
+        ? [hits.slice().sort((a, b) => Number(b.mtime || 0) - Number(a.mtime || 0))[0]] : null;
+    const chosen = plural ? hits.slice(0, 3) : (hits.length === 1 ? hits : (newest || []));
     if (!chosen.length) {
         const names = hits.slice(0, 5).map(f => f.name).join(', ');
         return { status: 'needs_clarification', action: 'clarify',
@@ -640,8 +675,13 @@ function deliverByName(intentText) {
     return { status: 'success', action: 'delivered', response: `Attached ${files.map(f => f.name).join(', ')}.`, artifacts: { files } };
 }
 
+// "Give me the invoice" hands over a file that exists; "give me a word
+// count, saved to ..." asks for one to be produced. A request that names a
+// path or a result to be made is work, not a delivery.
+const ASKS_FOR_A_RESULT = /\b(?:saved?|write|written|count|convert|create|make|generate|list)\b/i;
 function maybeProposeGeneration(intentText, gaps, options = {}) {
-    if (DELIVERY_ASK.test(intentText.trim()) && !NAMES_A_RECIPIENT.test(intentText)) {
+    if (DELIVERY_ASK.test(intentText.trim()) && !NAMES_A_RECIPIENT.test(intentText)
+        && withoutPaths(intentText) === String(intentText) && !ASKS_FOR_A_RESULT.test(intentText)) {
         return deliverByName(intentText);
     }
     if (NEEDS_THE_BROWSER.test(withoutPaths(intentText))) {
@@ -727,7 +767,7 @@ async function generateThenExecute(intentText, gaps = [], options = {}) {
 
     return {
         status: execution.status === 'success' ? 'success' : execution.status,
-        response: `I didn't have a skill for that, so I built one (${result.skill}) and verified it against ${result.testsPassed} test case(s).\n\n${execution.response}`,
+        response: `I didn't have a skill for that, so I built one (${result.skill}) and verified it against ${result.testsPassed} test ${result.testsPassed === 1 ? 'case' : 'cases'}.\n\n${execution.response}`,
         action: 'generated_and_executed',
         skill: result.skill,
         ...(execution.artifacts ? { artifacts: execution.artifacts } : {}),
@@ -745,8 +785,50 @@ function executeIntent(intentText, options = {}) {
     return require('./incognito').privately(() => executeIntentRecorded(intentText, options));
 }
 
+// "Send that to me" with a file already in the room: the file goes over
+// as it is, decided from the words as spoken. No model rewrites the ask
+// first, so the same words give the same answer every time.
+function deliverInHand(plainAsk, recent, startedAt) {
+    const pronounOnly = /\b(that|it|this)\b/i.test(plainAsk)
+        && plainAsk.trim().split(/\s+/).length <= 5;
+    if (!(DELIVERY_ASK.test(plainAsk) && !NAMES_A_RECIPIENT.test(plainAsk) && recent.length
+        && (REFERENCES_FILES.test(plainAsk) || pronounOnly))) return null;
+    const generic = new Set(['report', 'pdf', 'file', 'document', 'the', 'latest', 'newest', 'recent']);
+    const askTokens = plainAsk.toLowerCase().split(/[^a-z0-9]+/)
+        .filter(t => t.length >= 3 && !generic.has(t));
+    const named = recent.filter(f => askTokens.some(t =>
+        String(f.name || '').toLowerCase().includes(t)));
+    const pronouny = /\b(that|it|this)\b/i.test(plainAsk);
+    const targets = named.length ? named.slice(-2)
+        : (pronouny ? [recent[recent.length - 1]] : []);
+    const fsNode = require('fs');
+    const deliverable = targets.filter(f => {
+        try {
+            return f && f.path
+                && securityStore.isWithinGrantedRoot(f.path, 'documents')
+                && fsNode.statSync(f.path).isFile();
+        } catch { return false; }
+    });
+    if (!deliverable.length) return null;
+    console.log('[Bridge] Delivering the file in hand directly.');
+    const files = deliverable.map(f =>
+        ({ name: f.name || path.basename(f.path), path: f.path }));
+    return {
+        status: 'success',
+        response: `Attached ${files.map(f => f.name).join(', ')}.`,
+        action: 'delivered',
+        artifacts: { files },
+        durationMs: Date.now() - startedAt
+    };
+}
+
+const WAKE_PREFIX = /^\s*[“"']?\s*(?:hey|hi|ok|okay|yo)[,\s]+jarvis[,.!:\s]*/i;
+
 async function executeIntentRecorded(intentText, options = {}) {
     const startedAt = Date.now();
+    // A phone's voice note keeps the summons in its words; the gates below
+    // match on the request itself.
+    intentText = String(intentText || '').replace(WAKE_PREFIX, '');
     console.log(`[Bridge] Processing intent (${intentText.length} chars)`);
 
     if (options.signal && options.signal.aborted) {
@@ -759,6 +841,9 @@ async function executeIntentRecorded(intentText, options = {}) {
         return { ...delegated, decision: { action: 'openclaw' }, durationMs: Date.now() - startedAt };
     }
 
+    const inRoom = Array.isArray(options.recentFiles) ? options.recentFiles : [];
+    const early = deliverInHand(intentText, inRoom, startedAt);
+    if (early) return early;
     let asked = await resolveFollowUp(intentText, options.history);
     if (Array.isArray(options.history) && options.history.length
         && asked === intentText && DEPENDENT_FRAGMENT.test(intentText.trim())) {
@@ -802,37 +887,8 @@ async function executeIntentRecorded(intentText, options = {}) {
     const inHand = attached.length ? attached : (wantsFiles ? recent : []);
     const pronounOnly = /\b(that|it|this)\b/i.test(plainAsk)
         && plainAsk.trim().split(/\s+/).length <= 5;
-    if (DELIVERY_ASK.test(plainAsk) && !NAMES_A_RECIPIENT.test(plainAsk) && recent.length
-        && (REFERENCES_FILES.test(plainAsk) || pronounOnly)) {
-        const generic = new Set(['report', 'pdf', 'file', 'document', 'the']);
-        const askTokens = plainAsk.toLowerCase().split(/[^a-z0-9]+/)
-            .filter(t => t.length >= 3 && !generic.has(t));
-        const named = recent.filter(f => askTokens.some(t =>
-            String(f.name || '').toLowerCase().includes(t)));
-        const pronouny = /\b(that|it|this)\b/i.test(plainAsk);
-        const targets = named.length ? named.slice(-2)
-            : (pronouny ? [recent[recent.length - 1]] : []);
-        const fsNode = require('fs');
-        const deliverable = targets.filter(f => {
-            try {
-                return f && f.path
-                    && securityStore.isWithinGrantedRoot(f.path, 'documents')
-                    && fsNode.statSync(f.path).isFile();
-            } catch { return false; }
-        });
-        if (deliverable.length) {
-            console.log('[Bridge] Delivering the file in hand directly.');
-            const files = deliverable.map(f =>
-                ({ name: f.name || path.basename(f.path), path: f.path }));
-            return {
-                status: 'success',
-                response: `Attached ${files.map(f => f.name).join(', ')}.`,
-                action: 'delivered',
-                artifacts: { files },
-                durationMs: Date.now() - startedAt
-            };
-        }
-    }
+    const handed = deliverInHand(plainAsk, recent, startedAt);
+    if (handed) return handed;
     if (inHand.length && CONTENT_QUESTION.test(plainAsk)
         && !MUTATES_FILE.test(plainAsk)) {
         const pinned = attachmentPassages(inHand);
@@ -963,6 +1019,7 @@ async function executeIntentRecorded(intentText, options = {}) {
         && ((CONTENT_QUESTION.test(plainAsk) && MAIL_QUESTION.test(plainAsk))
             || MAIL_CHECK.test(plainAsk) || ORDER_STATUS.test(plainAsk))
         && !MAIL_MUTATION.test(plainAsk)
+        && !(CALENDAR_WRITE_SHAPE.test(plainAsk) && /\bcalendar\b/i.test(plainAsk))
         && !conversationStore.RECALL_SHAPE.test(plainAsk);
     const calendarWeek = !inHand.length && CALENDAR_WEEK.test(plainAsk)
         && !MAIL_MUTATION.test(plainAsk) && !CALENDAR_WRITE_SHAPE.test(plainAsk);
@@ -981,7 +1038,13 @@ async function executeIntentRecorded(intentText, options = {}) {
         const browsed = await webAgent.browse(plainAsk,
             { url, request: plainAsk, readOnly: true, ...(options.signal ? { signal: options.signal } : {}) });
         const unanswered = /\b(?:found nothing|does not (?:display|show|contain)|no (?:e-?mail|message|event)s?\b[^.]{0,30}\b(?:content|found|visible|shown))\b/i;
-        if (browsed.status === 'success' && browsed.answer && !unanswered.test(browsed.answer)) {
+        // A no-results notice is only the answer when it is all there is; an
+        // answer that also reports what was found stands.
+        const noticeOnly = answer => {
+            const at = String(answer).search(unanswered);
+            return at >= 0 && (at < 20 || String(answer).length < 160);
+        };
+        if (browsed.status === 'success' && browsed.answer && !noticeOnly(browsed.answer)) {
             return {
                 status: 'success',
                 response: browsed.answer,
@@ -989,6 +1052,7 @@ async function executeIntentRecorded(intentText, options = {}) {
                 durationMs: Date.now() - startedAt
             };
         }
+        console.log(`[Bridge] site read gave no usable answer (${browsed.status}${browsed.reason ? `: ${browsed.reason}` : ''}): ${String(browsed.answer || '').slice(0, 200)}`);
         return {
             status: 'error',
             response: `I could not read that from ${calendarWeek ? 'the calendar' : 'your mail'}`
@@ -1023,6 +1087,62 @@ async function executeIntentRecorded(intentText, options = {}) {
         && !/\b(delete|remove|cancel|clear)\b/i.test(calendarAsk)) {
         console.log('[Bridge] Calendar write; sending the browse lane.');
         const webAgent = require('./webAgent');
+        // The details of a booking that points at an email live in that
+        // email: it is read first, and what it says comes back as a card.
+        // Nothing read off the page is booked without the user's word.
+        if (/\b(e-?mail\w*|inbox|mailbox|message\w*)\b/i.test(calendarAsk)
+            && !/[\w.+-]+@[\w.-]+\.\w{2,}/.test(calendarAsk)) {
+            const mailProvider = require('./mailProvider');
+            const account = mailProvider.forRequest(calendarAsk,
+                require('../utils/configReader').readConfig());
+            const terms = mailSearchTerms(calendarAsk.replace(
+                /\b(?:and|then)\s+(?:book|add|put|schedule)\b[^.]*$/i, ''));
+            const read = await webAgent.browse(
+                `find the email about ${terms || 'this'} and tell me exactly when and where it says the appointment is`,
+                { url: (terms && mailProvider.searchUrl(account.url, terms)) || account.url,
+                  request: calendarAsk, readOnly: true,
+                  ...(options.signal ? { signal: options.signal } : {}) });
+            const said = String((read && read.answer) || '').replace(/\s+/g, ' ').trim();
+            const when = read && read.status === 'success' ? webAgent.whenFrom(said) : null;
+            if (!when || !when.date) {
+                console.log(`[Bridge] booking from mail: no date read (${read && read.status})`);
+                return {
+                    status: 'error',
+                    response: said
+                        ? `I read the email but could not find a date in it to book: "${said.slice(0, 200)}"`
+                        : 'I could not find that email to book from.',
+                    action: 'web',
+                    durationMs: Date.now() - startedAt
+                };
+            }
+            const title = String(terms || 'Appointment').replace(/^subject:/i, '').replace(/"/g, '')
+                .replace(/\b(reminder|confirmation|notice)\b/gi, '').replace(/\s+/g, ' ').trim();
+            const named = title.charAt(0).toUpperCase() + title.slice(1);
+            const day = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][when.date.getDay()];
+            const dated = `${when.date.getDate()} ${['January', 'February', 'March', 'April', 'May', 'June', 'July',
+                'August', 'September', 'October', 'November', 'December'][when.date.getMonth()]}`;
+            let clock = '';
+            if (when.time) {
+                const hours = when.time.hours % 12 || 12;
+                clock = ` at ${hours}:${String(when.time.minutes).padStart(2, '0')} ${when.time.hours < 12 ? 'am' : 'pm'}`;
+            }
+            const plainGoal = `add "${named}" to my calendar on ${day} ${dated}${clock}`;
+            const offer = proposals.create('book_from_mail', {
+                request: calendarAsk,
+                found: said.slice(0, 200),
+                will: `book "${named}" for ${day} ${dated}${clock}, as the email says`
+            }, (context = {}) => webAgent.bookAsApproved(plainGoal,
+                { calendarUrl: account.calendar, ...(context.signal ? { signal: context.signal } : {}) }));
+            activityBus.publish('bridge', 'proposal', { kind: 'book_from_mail', id: offer.id });
+            return {
+                status: 'needs_approval',
+                action: 'proposed_booking',
+                proposal: offer,
+                response: `The email says: "${said.slice(0, 200)}". I can book "${named}" for `
+                    + `${day} ${dated}${clock}. Approve and I will put it on the calendar.`,
+                durationMs: Date.now() - startedAt
+            };
+        }
         const plan = calendarTemplate(calendarAsk);
         console.log(`[Bridge] calendar ask: "${calendarAsk}" -> `
             + (plan ? plan.url : 'no template'));
@@ -1032,7 +1152,9 @@ async function executeIntentRecorded(intentText, options = {}) {
                     + `${plan.when}. The form is already filled in; save it.`
                 : asked,
             {
-                url: plan ? plan.url : 'https://calendar.google.com/calendar/u/0/r',
+                url: plan ? plan.url : require('./mailProvider').forRequest(calendarAsk,
+                    require('../utils/configReader').readConfig()).calendar,
+                request: calendarAsk,
                 ...(options.signal ? { signal: options.signal } : {})
             });
         if (plan) {

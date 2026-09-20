@@ -5,10 +5,11 @@ import type {
   OnboardingApplyPayload,
   OnboardingApplyResult,
   OnboardingData,
+  DirectPairing,
 } from "../hooks/useWebSocket";
 import { applyTheme, storedTheme, type Theme } from "../theme";
 import { VOICE_CHOICES } from "../voices";
-import { BotSteps } from "./BotSteps";
+import { PhoneLink, type PhoneChoice } from "./PhoneLink";
 
 type Step =
   | "theme"
@@ -188,6 +189,8 @@ interface OnboardingProps {
   downloads: DownloadsData | null;
   applyResult: OnboardingApplyResult | null;
   channel: import("../hooks/useWebSocket").ChannelStatus | null;
+  directPairing: DirectPairing | null;
+  onRequestDirectPairing: () => void;
   onRequestChannel: () => void;
   onSetChannelToken: (token: string) => void;
   onApply: (payload: OnboardingApplyPayload) => void;
@@ -202,6 +205,8 @@ export function Onboarding({
   downloads,
   applyResult,
   channel,
+  directPairing,
+  onRequestDirectPairing,
   onRequestChannel,
   onSetChannelToken,
   onApply,
@@ -332,20 +337,20 @@ export function Onboarding({
     setStep("hello");
   }, [resumed, step, connected, allDone, onComplete]);
 
-  const [tokenDraft, setTokenDraft] = useState("");
 
   // Poll only while waiting for the phone to pair; a blind poll would
   // overwrite a rejected token's error before anyone could read it.
+  const [phoneChoice, setPhoneChoice] = useState<PhoneChoice>(null);
   useEffect(() => {
     if (step !== "phone") return;
     onRequestChannel();
   }, [step, onRequestChannel]);
 
   useEffect(() => {
-    if (step !== "phone" || !channel?.has_token || channel.paired) return;
+    if (step !== "phone" || phoneChoice !== "telegram" || !channel?.has_token || channel.paired) return;
     const poll = setInterval(onRequestChannel, 4000);
     return () => clearInterval(poll);
-  }, [step, channel?.has_token, channel?.paired, onRequestChannel]);
+  }, [step, phoneChoice, channel?.has_token, channel?.paired, onRequestChannel]);
 
   const pickTheme = (chosen: Theme) => {
     setTheme(chosen);
@@ -707,67 +712,30 @@ export function Onboarding({
       )}
 
       {step === "phone" && (
-        <div className="ob-card">
-          <h1 className="ob-title">Reach Jarvis from your phone</h1>
+        <div className="ob-card ob-card--wide">
+          <h1 className="ob-title">Connect your phone</h1>
           <p className="ob-lead">
-            Optional: message Jarvis over Telegram through a bot that belongs
-            only to you. Two minutes sets it up — and you can always do this
-            later in Settings.
+            Optional: reach Jarvis from your phone. Pick the app you want to use,
+            or skip this and set it up later in Settings.
           </p>
-          {channel?.error && (
-            <div className="ob-verdict ob-verdict--bad">{channel.error}</div>
-          )}
-          {!channel?.has_token && <BotSteps />}
-          {!channel?.has_token ? (
-            <input
-              className="ob-input"
-              type="password"
-              placeholder="Bot token from @BotFather"
-              value={tokenDraft}
-              onChange={(e) => setTokenDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing && tokenDraft.trim()) {
-                  onSetChannelToken(tokenDraft.trim());
-                  setTokenDraft("");
-                }
-              }}
-            />
-          ) : channel.paired ? (
-            <div className="ob-verdict ob-verdict--ok">
-              Paired — your phone reaches Jarvis.
-            </div>
-          ) : channel.running && channel.pairing_code ? (
-            <>
-              <p className="ob-hint">
-                Send this code to your bot from the phone that should be
-                allowed to talk to Jarvis:
-              </p>
-              <div className="channel-code">{channel.pairing_code}</div>
-            </>
-          ) : (
-            <p className="ob-hint">The token is saved; starting the channel…</p>
-          )}
+          <PhoneLink
+            channel={channel}
+            directPairing={directPairing}
+            choice={phoneChoice}
+            onChoose={setPhoneChoice}
+            onRequestDirectPairing={onRequestDirectPairing}
+            onRequestChannel={onRequestChannel}
+            onSetChannelToken={onSetChannelToken}
+          />
           <div className="ob-nav">
             <button className="ob-back" onClick={() => setStep(voiceOn ? "voice" : "permissions")}>
               Back
             </button>
-            {!channel?.has_token && (
-              <button
-                className="ob-next"
-                disabled={!tokenDraft.trim()}
-                onClick={() => {
-                  onSetChannelToken(tokenDraft.trim());
-                  setTokenDraft("");
-                }}
-              >
-                Connect
-              </button>
-            )}
             <button
-              className={channel?.paired ? "ob-next" : "ob-skip"}
+              className={channel?.paired || phoneChoice === "android" || phoneChoice === "ios" ? "ob-next" : "ob-skip"}
               onClick={() => setStep("models")}
             >
-              {channel?.has_token ? "Continue" : "Skip for now"}
+              {channel?.paired || phoneChoice ? "Continue" : "Skip for now"}
             </button>
           </div>
         </div>

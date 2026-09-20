@@ -222,6 +222,14 @@ export interface ChannelStatus {
   error?: string;
 }
 
+export interface DirectPairing {
+  host: string | null;
+  port: number | null;
+  lan_bind: boolean;
+  payload: string | null;
+  error?: string;
+}
+
 export interface ConversationSummary {
   id: number;
   title: string;
@@ -232,6 +240,8 @@ export interface ConversationSummary {
 interface UseWebSocketReturn {
   connected: boolean;
   channel: ChannelStatus | null;
+  directPairing: DirectPairing | null;
+  requestDirectPairing: () => void;
   requestChannel: () => void;
   setChannelToken: (token: string) => void;
   clearChannel: () => void;
@@ -338,6 +348,7 @@ export function useWebSocket(): UseWebSocketReturn {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [channel, setChannel] = useState<ChannelStatus | null>(null);
+  const [directPairing, setDirectPairing] = useState<DirectPairing | null>(null);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
   const activeConversationRef = useRef<number | null>(null);
   useEffect(() => {
@@ -510,6 +521,14 @@ export function useWebSocket(): UseWebSocketReturn {
           if (msg.event === "proposal_approved" || msg.event === "proposal_declined") {
             setProposal((prev) => (prev && prev.id === msg.id ? null : prev));
           }
+          return;
+        }
+        if (msg.type === "direct_pairing_result") {
+          setDirectPairing({
+            host: msg.host ?? null, port: msg.port ?? null,
+            lan_bind: Boolean(msg.lan_bind), payload: msg.payload ?? null,
+            ...(msg.error ? { error: msg.error } : {}),
+          });
           return;
         }
         if (msg.type === "channel_status_result") {
@@ -769,6 +788,12 @@ export function useWebSocket(): UseWebSocketReturn {
     []
   );
 
+  const requestDirectPairing = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "direct_pairing" }));
+    }
+  }, []);
+
   const requestChannel = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "channel_status" }));
@@ -966,6 +991,8 @@ export function useWebSocket(): UseWebSocketReturn {
   return {
     connected,
     channel,
+    directPairing,
+    requestDirectPairing,
     requestChannel,
     setChannelToken,
     clearChannel,

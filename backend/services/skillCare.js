@@ -29,7 +29,7 @@ function blockedPath(stderr, parameters, skillDir = null) {
     return supplied || null;
 }
 
-const INPUT_SHAPED = /no such file|filenotfounderror|does not exist|usage:|unrecognized arguments|the following arguments are required|is a directory|not a directory|no ['"]?\w+['"]? column|column[^\n]{0,40}(not found|missing|does not exist)|keyerror|permission denied/i;
+const INPUT_SHAPED = /no such file|filenotfounderror|does not exist|unable to find|not found|could not find|can't find|cannot find|usage:|unrecognized arguments|the following arguments are required|is a directory|not a directory|no ['"]?\w+['"]? column|column[^\n]{0,40}(not found|missing|does not exist)|keyerror|permission denied/i;
 
 function plainReason(stderr, response) {
     const lines = String(stderr || response || '').split('\n').map(l => l.trim())

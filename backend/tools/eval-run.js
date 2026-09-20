@@ -74,11 +74,11 @@ function immediateCheck(task, row, dir) {
     } else if (check.type === 'answer' && check.expectShell) {
         row.truth = shell(check.expectShell).out.split('\n').map(s => s.trim()).filter(Boolean);
     } else if (check.type === 'openclaw-skills') {
-        // The skills the K tasks built are offered to OpenClaw the way the
+        // The skills this pass built are offered to OpenClaw the way the
         // abilities view does it, one export each, and then looked for in
         // OpenClaw's own listing.
         const rows = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8').trim().split('\n').map(l => JSON.parse(l)) : [];
-        const built = [...new Set(rows.filter(r => /^K/.test(r.task) && r.system === 'jarvis' && r.pass === row.pass).flatMap(r => r.skills_added || []))];
+        const built = [...new Set(rows.filter(r => r.system === 'jarvis' && r.pass === row.pass).flatMap(r => r.skills_added || []))];
         row.skills_built = built;
         row.check = { verdict: 'pending', evidence: 'export not attempted' };
         return { exportAndList: built };

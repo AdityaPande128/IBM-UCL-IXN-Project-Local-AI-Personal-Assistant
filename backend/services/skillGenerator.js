@@ -71,13 +71,17 @@ Write the script ONLY inside that fenced block. Never place source code inside t
 JSON — quotes and backslashes in code do not survive JSON string escaping.
 
 Rules for the script:
+0. The skill is kept and reused for other requests like this one, so every value this request happens to supply (a header text, a word to look for, a date format, a size) is a declared parameter read from the command line, never a literal in the script or the reply. Only the operation is fixed.
 1. Python 3 only, standard library only. No third-party packages.
+1a. The machine is a Mac. System figures come from macOS commands run with subprocess (sysctl -n hw.memsize, vm_stat, df -k, ls); there is no /proc, no free, and top cannot be run by a script.
+1b. Memory on a Mac, exactly this way: total = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]).decode().strip()); out = subprocess.check_output(["vm_stat"]).decode(); page = int(re.search(r"page size of (\\d+) bytes", out).group(1)); then for each of "Pages active", "Pages wired down" and "Pages occupied by compressor" take int(re.search(r"^" + name + r":\\s+(\\d+)", out, re.M).group(1)); used = (active + wired + compressor) * page. Never index vm_stat lines by position (the first line is the header) and never int() a raw field (every count ends with a full stop). Import re.
 2. Read parameters with argparse. Each flag MUST be the declared parameter name verbatim, including underscores — a parameter named "output_csv" is read as add_argument("--output_csv"), NOT "--output-csv". Do not convert underscores to hyphens.
 3. NEVER import socket, urllib, requests, http.client, ftplib, smtplib, or ctypes. The skill must not access the network.
 4. Print a short human-readable summary of what was done to stdout. Exit non-zero on failure.
 5. Expand a leading ~ in any path argument with os.path.expanduser.
 6. Do not delete or overwrite user data unless the request explicitly asks for it.
-7a. A parameter that names where output goes (an output file or folder) is optional, with a default the script derives beside the input (a fixed name in the same folder): a request that names only the input must still run.
+6a. Treat line-oriented input as lines whether or not the file ends with a newline: read the whole file and split it with text.splitlines() (a string method; never f.readlines()), and write lines out joined with "\n" and a final newline.
+7a. A parameter that names where output goes (an output file or folder) is optional, with a default the script derives beside the input (a fixed name in the same folder): a request that names only the input must still run. Resolve that default once, right after parsing, into a variable that is never None, and use only that variable afterwards, including in the summary and the JARVIS_RESULT line.
 7. If the skill's outcome is a file the user will open, the script's LAST stdout line must be the marker JARVIS_RESULT followed by one JSON object naming it, like: JARVIS_RESULT {"files": ["/absolute/path/to/output.csv"]} — one line, nothing after it. Skills that only report an answer print no marker.
 
 Rules for "tests":
@@ -85,6 +89,7 @@ Rules for "tests":
 9. Parameters in a test case must use paths relative to that directory, so the case is self-contained. Do not reference real user files.
 10. The assertions must actually demonstrate the skill worked, not merely that it ran.
 11. Compute each expected value by hand from the fixture content before writing it down — a test that asserts a wrong expectation rejects a correct script.
+12a. A file a test expects to exist must be the exact path the script writes, named the way the request names it (a copy "with .old added to its name" is "notes.txt.old", not "notes.old.txt"); a script and a test that disagree on a name reject a correct script.
 12. In "stdout_contains", assert the smallest distinctive substring (a number, a filename), never a full sentence — you will not phrase the sentence identically in the script.
 13. A fixture path ending in "/" is an empty folder. "files_missing" lists paths the script must have removed; use it for anything that deletes.
 
@@ -97,10 +102,23 @@ const REPAIR_TEMPLATE = `That attempt was rejected. Reason:
 
 %REASON%
 
-Respond again in the SAME two-part format: PART 1, the complete corrected JSON
+Change the code that produced that reason; the same script again is a wasted
+attempt. Respond again in the SAME two-part format: PART 1, the complete corrected JSON
 metadata object — every field, not only what changed — then PART 2, the complete
 corrected Python script in its fenced block. A reply missing either part is
 itself a rejected attempt, and there are only a few.`;
+
+// A rejected script is kept beside the logs so a failure that survives every
+// attempt can be read afterwards; the sandbox output alone rarely says why.
+function keepRejected(candidate, attempt, report) {
+    try {
+        const dir = path.join(require('os').homedir(), '.jarvis', 'logs', 'rejected-skills');
+        fsSync.mkdirSync(dir, { recursive: true });
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        fsSync.writeFileSync(path.join(dir, `${candidate.name}-${stamp}-attempt${attempt}.py`),
+            `# ${String(report).replace(/\n/g, '\n# ')}\n\n${candidate.script}`);
+    } catch {}
+}
 
 function describeVerificationFailure(verification) {
     const lines = [];
@@ -113,6 +131,12 @@ function describeVerificationFailure(verification) {
         if (r.argv) lines.push(`  ran: ${r.argv}`);
         if (r.stdout) lines.push(`  stdout: ${r.stdout}`);
         if (r.stderr) lines.push(`  stderr: ${r.stderr}`);
+        const named = /stdout did not contain "([^"\s]+\.[A-Za-z0-9]{1,5})"/.exec(String(r.reason || ''));
+        if (named && !/^-?[\d,.]+$/.test(named[1])) {
+            lines.push(`  The test expects the name "${named[1]}" on stdout and the script did not print it. `
+                + 'A test may only expect on stdout what the script prints: either print the name of '
+                + 'each file the script writes in its summary, or assert on the file with files_exist instead.');
+        }
         const expected = /stdout did not contain "(-?[\d,.]+)"/.exec(String(r.reason || ''));
         const printed = expected && String(r.stdout || '').match(/-?\d[\d,]*(?:\.\d+)?/g);
         if (expected && printed && printed.length && !printed.includes(expected[1])) {
@@ -519,6 +543,7 @@ async function generate(request, options = {}) {
             lastReason = verification.summary;
             console.warn(`[SkillGenerator] Attempt ${attempt}: verification failed — ${lastReason}`);
             activityBus.publish('generator', 'tests_failed', { attempt, reason: lastReason });
+            keepRejected(candidate, attempt, describeVerificationFailure(verification));
             if (attempt === MAX_ATTEMPTS) {
                 ledger.append({
                     request, outcome: 'rejected', stage,

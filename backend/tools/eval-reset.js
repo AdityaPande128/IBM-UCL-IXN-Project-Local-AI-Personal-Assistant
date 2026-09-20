@@ -48,6 +48,7 @@ if (mode === 'task') {
             fs.copyFileSync(from, path.join(snap, name));
             fs.rmSync(from);
         }
+        for (const side of ['-wal', '-shm']) fs.rmSync(from + side, { force: true });
     }
     const procedures = path.join(DATA, 'procedures');
     if (fs.existsSync(procedures)) {

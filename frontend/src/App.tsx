@@ -113,7 +113,9 @@ function App() {
     completeOnboarding,
     updateProfile,
     downloadAction,
-  } = useWebSocket();
+    directPairing,
+    requestDirectPairing,
+} = useWebSocket();
   const { recording, startRecording, stopRecording } = useAudioRecorder();
   const { listening, startListening, stopListening } = useWakeWord(sendBinary);
   const services = useServices();
@@ -352,6 +354,8 @@ function App() {
         <Onboarding
           connected={connected}
           channel={channel}
+          directPairing={directPairing}
+          onRequestDirectPairing={requestDirectPairing}
           onRequestChannel={requestChannel}
           onSetChannelToken={setChannelToken}
           data={onboarding}
@@ -617,6 +621,8 @@ function App() {
         <SettingsView
           connected={connected}
           channel={channel}
+          directPairing={directPairing}
+          onRequestDirectPairing={requestDirectPairing}
           onRequestChannel={requestChannel}
           onSetChannelToken={setChannelToken}
           onClearChannel={clearChannel}
